@@ -491,22 +491,27 @@ function renderPlatformCards() {
     splitPlatforms(it.platform).forEach(p => ensure(p).items.add(it.itemId));
   });
 
-  const cards = Object.values(totals).sort((a, b) => a.meta.label.localeCompare(b.meta.label));
+  // Different platforms report reach under different names — eBay only ever
+  // gives "views", Poshmark only ever gives "impressions". Treat whichever is
+  // present as this platform's reach number rather than showing a blank 0.
+  const cards = Object.values(totals).map(c => ({ ...c, reach: c.impressions || c.views, reachLabel: c.impressions ? 'Impressions' : 'Views' }))
+    .sort((a, b) => a.meta.label.localeCompare(b.meta.label));
   const container = document.getElementById('platformCards');
   if (!cards.length) { container.innerHTML = '<div class="empty-state">No platform activity yet.</div>'; return; }
 
-  const maxImpr = Math.max(1, ...cards.map(c => c.impressions));
+  const maxReach = Math.max(1, ...cards.map(c => c.reach));
   container.innerHTML = cards.map(c => {
-    const ctr = c.impressions ? ((c.clicks / c.impressions) * 100).toFixed(1) + '%' : '—';
+    const ctr = c.reach ? ((c.clicks / c.reach) * 100).toFixed(1) + '%' : '—';
     return `
       <div class="platform-card" style="--plat:${c.meta.color}">
         <h4>${escapeHtml(c.meta.label)}</h4>
         <div class="prow"><span>Active listings</span><b>${c.items.size}</b></div>
-        <div class="prow"><span>Impressions</span><b>${c.impressions}</b></div>
+        <div class="prow"><span>${c.reachLabel}</span><b>${c.reach}</b></div>
         <div class="prow"><span>Clicks</span><b>${c.clicks}</b></div>
+        ${c.watchers ? `<div class="prow"><span>Watchers/Likes</span><b>${c.watchers}</b></div>` : ''}
         <div class="prow"><span>Click rate</span><b>${ctr}</b></div>
-        <div class="platform-bar"><div class="platform-bar-fill" style="width:${((c.impressions / maxImpr) * 100).toFixed(0)}%"></div></div>
-        <div class="platform-bar-label">of ${maxImpr} impressions (top platform)</div>
+        <div class="platform-bar"><div class="platform-bar-fill" style="width:${((c.reach / maxReach) * 100).toFixed(0)}%"></div></div>
+        <div class="platform-bar-label">of ${maxReach} ${c.reachLabel.toLowerCase()} (top platform)</div>
       </div>
     `;
   }).join('');
