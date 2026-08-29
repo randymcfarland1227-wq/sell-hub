@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Resale Hub</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏷️</text></svg>">
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap top-inner">
+    <h1>Resale Hub</h1>
+    <span class="date" id="todayLabel"></span>
+  </div>
+  <div class="wrap tabs-scroll">
+    <nav class="tabs">
+      <button data-view="inventory" class="active">📦 Inventory</button>
+      <button data-view="stats">📊 Stats</button>
+      <button data-view="acquire">🛒 Acquire</button>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- ===================== INVENTORY ===================== -->
+  <section id="inventory" class="view active">
+
+    <div id="inventorySetupNote" class="setup-note" style="display:none">
+      Not connected to your Sheet yet, so nothing loads here. Deploy <code>Code.gs</code> on your "selling_inventory_updated" Sheet and paste the Web App URL into <code>js/config.js</code> — see <code>SETUP.md</code>.
+    </div>
+
+    <div class="mode-switch" id="modeSwitch">
+      <button data-mode="wheel" class="active">◎ Wheel</button>
+      <button data-mode="list">☰ List</button>
+    </div>
+
+    <!-- ---------- WHEEL MODE ---------- -->
+    <div id="wheelMode">
+      <div id="wheelView">
+        <div class="zoom-row">
+          <span>Zoom</span>
+          <button class="zoom-btn" id="zoomOut" aria-label="Zoom out">&minus;</button>
+          <span class="zoom-pct" id="zoomPct">100%</span>
+          <button class="zoom-btn" id="zoomIn" aria-label="Zoom in">&plus;</button>
+        </div>
+        <div class="wheel-scroll" id="wheelScroll">
+          <div class="wheel-wrap" id="wheelWrap">
+            <svg class="wheel-spokes" id="wheelSpokes" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
+            <div class="wheel-center">
+              <div class="wheel-center-count" id="wheelCount"></div>
+              <div class="wheel-center-label">active listings</div>
+            </div>
+            <div id="wheelNodes"></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="categoryView" style="display:none">
+        <button class="back-link" id="backToWheel">&larr; All categories</button>
+        <div class="cat-detail-head">
+          <span class="icon" id="catIcon"></span>
+          <div>
+            <h2 id="catLabel"></h2>
+            <p class="cat-blurb" id="catBlurb"></p>
+          </div>
+          <label class="chip-toggle" style="margin-left:auto"><input type="checkbox" id="showSoldCategory"> show sold</label>
+        </div>
+        <div class="card-grid" id="categoryCards"></div>
+      </div>
+    </div>
+
+    <!-- ---------- LIST MODE ---------- -->
+    <div id="listMode" style="display:none">
+      <div class="chip-row" id="chipRow">
+        <label class="chip-toggle"><input type="checkbox" id="showSoldList"> show sold</label>
+      </div>
+      <div id="catSections"></div>
+    </div>
+
+  </section>
+
+  <!-- ===================== STATS ===================== -->
+  <section id="stats" class="view">
+    <div class="section-head">
+      <h2 class="section-title">Stats</h2>
+      <p class="section-intro">Overall inventory totals plus performance per platform. eBay can sync automatically once you've wired up API credentials (see <code>SETUP.md</code>) — everything else, and eBay until then, is a quick manual log below.</p>
+    </div>
+
+    <div id="statsSetupNote" class="setup-note" style="display:none">
+      Not connected to your Sheet yet, so totals below are computed from nothing. Deploy <code>Code.gs</code> and paste the Web App URL into <code>js/config.js</code> — see <code>SETUP.md</code>.
+    </div>
+
+    <div class="stat-tiles" id="overallTiles"></div>
+
+    <h3 class="subhead">By platform</h3>
+    <div class="platform-cards" id="platformCards"></div>
+
+    <button class="btn add-toggle-btn" id="metricAddToggle">+ Log a stat update</button>
+
+    <div class="panel" id="metricAddPanel" style="display:none">
+      <h3>Log a stat update</h3>
+      <div class="field-row">
+        <div class="field">
+          <label>Item</label>
+          <select id="metricItemSelect"></select>
+        </div>
+        <div class="field">
+          <label>Platform</label>
+          <select id="metricPlatformSelect"></select>
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>Impressions <span class="optional">optional</span></label>
+          <input type="number" id="metricImpressions" min="0" placeholder="0">
+        </div>
+        <div class="field">
+          <label>Views <span class="optional">optional</span></label>
+          <input type="number" id="metricViews" min="0" placeholder="0">
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>Watchers/Likes <span class="optional">optional</span></label>
+          <input type="number" id="metricWatchers" min="0" placeholder="0">
+        </div>
+        <div class="field">
+          <label>Clicks <span class="optional">optional</span></label>
+          <input type="number" id="metricClicks" min="0" placeholder="0">
+        </div>
+      </div>
+      <button class="btn" id="addMetricBtn">Save stat update</button>
+      <div class="status-msg" id="metricStatus"></div>
+    </div>
+  </section>
+
+  <!-- ===================== ACQUIRE ===================== -->
+  <section id="acquire" class="view">
+    <div class="section-head">
+      <h2 class="section-title">Acquire</h2>
+      <p class="section-intro">Brands and items to watch for, target sizes/condition, and the best platform to resell each on.</p>
+    </div>
+
+    <div id="acquireSetupNote" class="setup-note" style="display:none">
+      Not connected to your Sheet yet, so this is local to this browser for now. Deploy <code>Code.gs</code> and paste the Web App URL into <code>js/config.js</code> — see <code>SETUP.md</code>.
+    </div>
+
+    <div id="acquireList" class="card-grid"></div>
+
+    <button class="btn add-toggle-btn" id="acquireAddToggle">+ Add to watchlist</button>
+
+    <div class="panel" id="acquireAddPanel" style="display:none">
+      <h3>Add to watchlist</h3>
+      <div class="field-row">
+        <div class="field">
+          <label>Brand</label>
+          <input type="text" id="acqBrand" placeholder="e.g. Ralph Lauren">
+        </div>
+        <div class="field">
+          <label>Item type</label>
+          <input type="text" id="acqItemType" placeholder="e.g. Denim jacket">
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>Target size <span class="optional">optional</span></label>
+          <input type="text" id="acqSize" placeholder="e.g. M / 34">
+        </div>
+        <div class="field">
+          <label>Condition floor <span class="optional">optional</span></label>
+          <input type="text" id="acqCondition" placeholder="e.g. Good or better">
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>Target price <span class="optional">optional</span></label>
+          <input type="text" id="acqTargetPrice" placeholder="e.g. under $15">
+        </div>
+        <div class="field">
+          <label>Best platform to resell</label>
+          <select id="acqBestPlatform"></select>
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>Priority</label>
+          <select id="acqPriority">
+            <option value="High">High</option>
+            <option value="Medium" selected>Medium</option>
+            <option value="Low">Low</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Notes <span class="optional">optional</span></label>
+          <input type="text" id="acqNotes" placeholder="Where to look, why it resells well...">
+        </div>
+      </div>
+      <button class="btn" id="addAcquireBtn">Add to watchlist</button>
+      <div class="status-msg" id="acquireStatus"></div>
+    </div>
+  </section>
+
+</main>
+
+<script src="js/config.js"></script>
+<script src="js/data.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
