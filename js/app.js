@@ -9,6 +9,7 @@ const state = {
   metrics: [],            // from Metrics tab (auto eBay + manual entries)
   acquire: [],            // from Acquire Watchlist tab
   photos: [],             // from Photos tab (cover photo per item x platform)
+  trends: [],             // from Market Trends tab (curated resale categories, daily auto-refresh)
   expandedItems: new Set(),
   editingAcquireId: null,
 };
@@ -590,6 +591,30 @@ async function loadAcquire() {
   renderAcquire();
 }
 
+async function loadTrendsData() {
+  if (!connected()) { state.trends = []; return; }
+  try { state.trends = (await apiGet('trends')) || []; }
+  catch { state.trends = []; }
+}
+
+function renderTrends() {
+  const container = document.getElementById('trendsCards');
+  if (!container) return;
+  const withData = state.trends.filter(t => t.avgSoldPrice);
+  if (!withData.length) {
+    container.innerHTML = '<div class="empty-state">No trend data yet — refreshes automatically once a day (see SETUP.md to turn it on).</div>';
+    return;
+  }
+  container.innerHTML = withData.map(t => `
+    <div class="trend-card">
+      <h4>${escapeHtml(t.searchTerm)}</h4>
+      <div class="prow"><span>Avg sold price</span><b>${fmtMoney(Number(t.avgSoldPrice))}</b></div>
+      <div class="prow"><span>Recent sales found</span><b>${t.recentSalesFound}</b></div>
+      <div class="trend-date">as of ${escapeHtml(t.lastChecked || '')}</div>
+    </div>
+  `).join('');
+}
+
 function acquireCardHTML(a) {
   const pri = PRIORITY_META[a.priority] || PRIORITY_META.Medium;
   const editing = String(state.editingAcquireId) === String(a.id);
@@ -628,6 +653,13 @@ function acquireCardHTML(a) {
         ${a.bestPlatform ? `<span><b>Best platform —</b> ${escapeHtml((PLATFORM_META[a.bestPlatform] || { label: a.bestPlatform }).label)}</span>` : ''}
       </div>
       ${a.notes ? `<p class="notes">${escapeHtml(a.notes)}</p>` : ''}
+      ${a.avgSoldPrice ? `
+        <div class="market-data">
+          <span><b>${fmtMoney(Number(a.avgSoldPrice))}</b> avg sold</span>
+          <span><b>${a.recentSalesFound}</b> recent sales found</span>
+          <span class="market-data-date">as of ${escapeHtml(a.lastChecked || '')}</span>
+        </div>
+      ` : '<div class="market-data market-data-pending">No market data yet — updates daily.</div>'}
       <button class="icon-btn ae-edit-btn" title="Edit" data-id="${a.id}">✎</button>
       <button class="icon-btn card-delete-btn ae-delete-btn" title="Delete" data-id="${a.id}">✕</button>
     </div>
@@ -745,6 +777,7 @@ setMode(localGet('sellHub.mode', 'wheel'));
 renderStats();
 populateMetricForm();
 loadAcquire();
+loadTrendsData().then(renderTrends);
 
 Promise.all([loadInventory(), loadDescriptionsData(), loadPostingQueueData(), loadMetricsData(), loadPhotosData()]).then(() => {
   renderWheel();

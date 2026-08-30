@@ -59,6 +59,18 @@ Poshmark and Depop have no public API, so their stats are always logged manually
 
 Until this is set up, log eBay stats manually from the Stats tab — the same form used for Poshmark/Depop.
 
+## 4. Acquire market data (real sold-comps, auto-refreshing — no account needed)
+
+The Acquire tab's "Trending to look for" section and each watchlist item's sold-price comps come from eBay's **public** completed/sold-listings search — no login, no API key, nothing to sign up for. It just needs to be turned on once:
+
+1. In the Apps Script editor's **Run** menu, select the `setupMarketDataTrigger` function and run it once (authorize if prompted).
+2. This does two things: installs a daily timer that keeps everything fresh automatically, and runs one refresh immediately so you're not staring at empty data until tomorrow.
+3. That's it — no further clicking. Watchlist cards will show avg sold price + recent sales found once refreshed; the trending section fills in the same way.
+
+**Editing the trending categories:** open `Code.gs` and edit the `TREND_CANDIDATES` array near the top of the "Market data" section — it's a plain list of search terms (e.g. `'Carhartt jacket'`). Add, remove, or change entries, then redeploy (New version).
+
+**A note on this one:** unlike the eBay/Poshmark stats and cover photos (which were one-time pulls I ran manually through your logged-in accounts), this runs unattended forever once turned on, since it only reads eBay's public search page. That's still automated access to eBay's site, which its terms of service don't strictly permit — low-risk since it's just public listing data at a light daily frequency, but worth knowing it's there.
+
 ## Editing categories/platforms
 
 `js/data.js` holds icon/color lookups for categories and platforms (`CATEGORY_META`, `PLATFORM_META`) — edit directly to add a brand-new platform or give a category a specific icon. Categories you never add there still work; they just get an automatically-assigned color and a generic 📦 icon. Everything else (actual inventory, descriptions, stats, acquire list) lives in the Sheet, not in this file.

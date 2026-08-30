@@ -17,8 +17,10 @@
  *   GET  ?action=metrics       -> [{date, listingId, itemId, platform, impressions, views,
  *                                   watchers, clicks, price, source}]
  *   GET  ?action=acquire       -> [{id, brand, itemType, size, condition, targetPrice,
- *                                   bestPlatform, priority, notes, dateAdded}]
+ *                                   bestPlatform, priority, notes, dateAdded, avgSoldPrice,
+ *                                   recentSalesFound, lastChecked}]
  *   GET  ?action=photos        -> [{itemId, platform, photoUrl}]
+ *   GET  ?action=trends        -> [{searchTerm, avgSoldPrice, recentSalesFound, lastChecked}]
  *   POST {action:'addMetricEntry', listingId, itemId, platform, impressions, views, watchers, clicks, price}
  *   POST {action:'addAcquireItem', brand, itemType, size, condition, targetPrice, bestPlatform, priority, notes} -> the new row
  *   POST {action:'updateAcquireItem', id, brand, itemType, size, condition, targetPrice, bestPlatform, priority, notes}
@@ -28,6 +30,10 @@
  *        Listing Hub's unnamed row-number column (the one right after "Source tab"). See
  *        markSold() below if your Listing Hub is laid out differently.
  *   POST {action:'setPhoto', itemId, platform, photoUrl} -> upserts one item's cover photo
+ *
+ * Market data (Acquire Watchlist comps + Market Trends tab) is NOT driven by a POST —
+ * it refreshes itself daily via a time trigger. Run setupMarketDataTrigger() once from
+ * this editor's Run menu to turn it on (see SETUP.md).
  */
 
 var LISTING_HUB_SHEET = 'Listing Hub';
@@ -45,6 +51,7 @@ function doGet(e) {
   if (action === 'metrics') return jsonOut(getMetrics());
   if (action === 'acquire') return jsonOut(getAcquire());
   if (action === 'photos') return jsonOut(getPhotos());
+  if (action === 'trends') return jsonOut(getTrends());
   return jsonOut({ error: 'unknown action' });
 }
 
@@ -313,7 +320,10 @@ function addMetricEntry(body) {
 // Acquire Watchlist — new tab, auto-created. Full CRUD from the site.
 // ---------------------------------------------------------------------
 
-var ACQUIRE_HEADERS = ['ID', 'Brand', 'Item Type', 'Size', 'Condition', 'Target Price', 'Best Platform', 'Priority', 'Notes', 'Date Added'];
+var ACQUIRE_HEADERS = [
+  'ID', 'Brand', 'Item Type', 'Size', 'Condition', 'Target Price', 'Best Platform', 'Priority', 'Notes', 'Date Added',
+  'Avg Sold Price', 'Recent Sales Found', 'Last Checked',
+];
 
 function getAcquireSheet() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -322,6 +332,10 @@ function getAcquireSheet() {
     sheet = ss.insertSheet(ACQUIRE_SHEET_NAME);
     sheet.appendRow(ACQUIRE_HEADERS);
     sheet.setFrozenRows(1);
+  } else if (sheet.getLastColumn() < ACQUIRE_HEADERS.length) {
+    // Upgrade older sheets created before market-data columns existed.
+    sheet.getRange(1, sheet.getLastColumn() + 1, 1, ACQUIRE_HEADERS.length - sheet.getLastColumn())
+      .setValues([ACQUIRE_HEADERS.slice(sheet.getLastColumn())]);
   }
   return sheet;
 }
@@ -343,6 +357,9 @@ function getAcquire() {
       priority: data[r][7],
       notes: data[r][8],
       dateAdded: formatDate(data[r][9]),
+      avgSoldPrice: data[r][10] || '',
+      recentSalesFound: data[r][11] || '',
+      lastChecked: formatDate(data[r][12]),
     });
   }
   return out;
@@ -531,4 +548,126 @@ function setPhoto(body) {
   }
   sheet.appendRow([body.itemId || '', body.platform || '', body.photoUrl || '']);
   return { ok: true, updated: false };
+}
+
+// ---------------------------------------------------------------------
+// Market data — real eBay sold-listing comps for Acquire Watchlist items,
+// plus a "Market Trends" tab of curated resale categories, both refreshed
+// on a daily trigger. Uses eBay's PUBLIC completed/sold-listings search
+// (no login, no API key) via UrlFetchApp, so this runs unattended without
+// needing anyone's personal eBay session — unlike the per-listing stats
+// pull, which was a one-time manual thing tied to a logged-in browser.
+//
+// One-time setup: run setupMarketDataTrigger() once from this editor's
+// Run menu (authorize when prompted). After that it updates itself daily
+// with no further action — see SETUP.md.
+// ---------------------------------------------------------------------
+
+var TRENDS_SHEET_NAME = 'Market Trends';
+var TRENDS_HEADERS = ['Search Term', 'Avg Sold Price', 'Recent Sales Found', 'Last Checked'];
+
+// Curated starting set of well-known thrift/resale categories. Edit this
+// list directly in the Apps Script editor to track different categories —
+// it's just a plain array, no sheet involved.
+var TREND_CANDIDATES = [
+  'Carhartt jacket', 'Nike hoodie', 'Levis 501 jeans', 'The North Face jacket',
+  'Patagonia fleece', 'Jordan sneakers', 'Dr Martens boots', 'Coach bag',
+  'Ralph Lauren polo', 'Lululemon leggings', 'Champion hoodie', 'Vans shoes',
+  'Nike Dunk', 'Timberland boots', 'Columbia jacket',
+];
+
+// Searches eBay's public sold/completed listings for `query` and returns
+// aggregate stats. No login required — this is the same search anyone can
+// run at ebay.com with the "Sold Items" filter checked.
+function searchSoldListings(query) {
+  var url = 'https://www.ebay.com/sch/i.html?_nkw=' + encodeURIComponent(query) + '&LH_Sold=1&LH_Complete=1&_ipg=60';
+  try {
+    var resp = UrlFetchApp.fetch(url, {
+      muteHttpExceptions: true,
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+    });
+    if (resp.getResponseCode() !== 200) return { avgPrice: 0, count: 0 };
+    var html = resp.getContentText();
+    var priceRe = /s-card__price">\$([\d,]+\.\d{2})/g;
+    var prices = [];
+    var m;
+    while ((m = priceRe.exec(html)) !== null) {
+      prices.push(parseFloat(m[1].replace(/,/g, '')));
+    }
+    if (!prices.length) return { avgPrice: 0, count: 0 };
+    var sum = prices.reduce(function (a, b) { return a + b; }, 0);
+    return { avgPrice: Math.round((sum / prices.length) * 100) / 100, count: prices.length };
+  } catch (err) {
+    return { avgPrice: 0, count: 0 };
+  }
+}
+
+function getTrendsSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(TRENDS_SHEET_NAME);
+  if (!sheet) {
+    sheet = ss.insertSheet(TRENDS_SHEET_NAME);
+    sheet.appendRow(TRENDS_HEADERS);
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+
+function getTrends() {
+  var sheet = getTrendsSheet();
+  var data = sheet.getDataRange().getValues();
+  var out = [];
+  for (var r = 1; r < data.length; r++) {
+    if (!data[r][0]) continue;
+    out.push({
+      searchTerm: data[r][0],
+      avgSoldPrice: data[r][1] || '',
+      recentSalesFound: data[r][2] || '',
+      lastChecked: formatDate(data[r][3]),
+    });
+  }
+  return out;
+}
+
+// Refreshes both the Acquire Watchlist's per-item comps and the Market
+// Trends tab. Called automatically by the daily trigger (setupMarketDataTrigger)
+// — can also be run manually from the Run menu to force an immediate update.
+function refreshMarketData() {
+  var today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+
+  // Watchlist items
+  var acqSheet = getAcquireSheet();
+  var acqData = acqSheet.getDataRange().getValues();
+  for (var r = 1; r < acqData.length; r++) {
+    if (!acqData[r][0]) continue;
+    var query = (acqData[r][1] + ' ' + acqData[r][2]).trim();
+    if (!query) continue;
+    var result = searchSoldListings(query);
+    acqSheet.getRange(r + 1, 11, 1, 3).setValues([[result.avgPrice || '', result.count || '', today]]);
+    Utilities.sleep(1500);
+  }
+
+  // Trending categories — rewrite the whole tab each run, ranked by recent sales found.
+  var trendResults = TREND_CANDIDATES.map(function (term) {
+    var result = searchSoldListings(term);
+    Utilities.sleep(1500);
+    return [term, result.avgPrice || '', result.count || '', today];
+  });
+  trendResults.sort(function (a, b) { return (b[2] || 0) - (a[2] || 0); });
+
+  var trendsSheet = getTrendsSheet();
+  trendsSheet.clear();
+  trendsSheet.appendRow(TRENDS_HEADERS);
+  trendsSheet.setFrozenRows(1);
+  if (trendResults.length) {
+    trendsSheet.getRange(2, 1, trendResults.length, TRENDS_HEADERS.length).setValues(trendResults);
+  }
+}
+
+function setupMarketDataTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'refreshMarketData') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('refreshMarketData').timeBased().everyDays(1).create();
+  refreshMarketData(); // run once immediately so there's data right away, not just after tomorrow's trigger
 }

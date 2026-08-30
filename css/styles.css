@@ -460,6 +460,34 @@ main { padding-top: 20px; }
 .acquire-card .card-delete-btn { position: absolute; bottom: 8px; right: 10px; opacity: 0.35; }
 .acquire-card .card-delete-btn:hover { opacity: 1; color: #c34848; }
 
+.market-data {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 0.76rem;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+  margin-bottom: 8px;
+}
+.market-data b { color: var(--text); }
+.market-data-date { color: var(--text-faint); margin-left: auto; }
+.market-data-pending { color: var(--text-faint); font-style: italic; }
+
+.trend-card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-left: 3px solid #5b6bd6;
+  border-radius: var(--radius-md);
+  padding: 14px 15px;
+  box-shadow: var(--shadow);
+}
+.trend-card h4 { font-size: 0.88rem; font-family: 'Inter', sans-serif; font-weight: 700; margin-bottom: 8px; }
+.trend-card .prow { display: flex; justify-content: space-between; font-size: 0.78rem; color: var(--text-muted); margin-bottom: 4px; }
+.trend-card .prow b { color: var(--text); }
+.trend-date { font-size: 0.68rem; color: var(--text-faint); margin-top: 4px; }
+
 /* ---------- Shared form / panel / button components ---------- */
 
 .icon-btn {
