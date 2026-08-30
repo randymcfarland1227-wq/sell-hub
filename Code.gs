@@ -18,6 +18,7 @@
  *                                   watchers, clicks, price, source}]
  *   GET  ?action=acquire       -> [{id, brand, itemType, size, condition, targetPrice,
  *                                   bestPlatform, priority, notes, dateAdded}]
+ *   GET  ?action=photos        -> [{itemId, platform, photoUrl}]
  *   POST {action:'addMetricEntry', listingId, itemId, platform, impressions, views, watchers, clicks, price}
  *   POST {action:'addAcquireItem', brand, itemType, size, condition, targetPrice, bestPlatform, priority, notes} -> the new row
  *   POST {action:'updateAcquireItem', id, brand, itemType, size, condition, targetPrice, bestPlatform, priority, notes}
@@ -26,6 +27,7 @@
  *        into the correct source tab (Clothing/Non Clothing Sell Inventory), located via
  *        Listing Hub's unnamed row-number column (the one right after "Source tab"). See
  *        markSold() below if your Listing Hub is laid out differently.
+ *   POST {action:'setPhoto', itemId, platform, photoUrl} -> upserts one item's cover photo
  */
 
 var LISTING_HUB_SHEET = 'Listing Hub';
@@ -33,6 +35,7 @@ var DESCRIPTIONS_SHEET = 'Listing Descriptions';
 var POSTING_QUEUE_SHEET = 'Platform Posting Queue';
 var METRICS_SHEET_NAME = 'Metrics';
 var ACQUIRE_SHEET_NAME = 'Acquire Watchlist';
+var PHOTOS_SHEET_NAME = 'Photos';
 
 function doGet(e) {
   var action = e.parameter.action;
@@ -41,6 +44,7 @@ function doGet(e) {
   if (action === 'postingQueue') return jsonOut(getPostingQueue());
   if (action === 'metrics') return jsonOut(getMetrics());
   if (action === 'acquire') return jsonOut(getAcquire());
+  if (action === 'photos') return jsonOut(getPhotos());
   return jsonOut({ error: 'unknown action' });
 }
 
@@ -53,6 +57,7 @@ function doPost(e) {
   if (action === 'updateAcquireItem') return jsonOut(updateAcquireItem(body));
   if (action === 'deleteAcquireItem') return jsonOut(deleteAcquireItem(body.id));
   if (action === 'markSold') return jsonOut(markSold(body));
+  if (action === 'setPhoto') return jsonOut(setPhoto(body));
 
   return jsonOut({ error: 'unknown action' });
 }
@@ -482,4 +487,48 @@ function syncEbayMetrics() {
       // Skip this listing on any API error; the next scheduled run will retry.
     }
   });
+}
+
+// ---------------------------------------------------------------------
+// Photos — new tab, auto-created. One cover-photo URL per (item x
+// platform), populated from each platform's own listing pages (public
+// CDN image URLs — no credentials involved). setPhoto() upserts so
+// re-running a photo pull doesn't create duplicate rows.
+// ---------------------------------------------------------------------
+
+var PHOTOS_HEADERS = ['Item ID', 'Platform', 'Photo URL'];
+
+function getPhotosSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(PHOTOS_SHEET_NAME);
+  if (!sheet) {
+    sheet = ss.insertSheet(PHOTOS_SHEET_NAME);
+    sheet.appendRow(PHOTOS_HEADERS);
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+
+function getPhotos() {
+  var sheet = getPhotosSheet();
+  var data = sheet.getDataRange().getValues();
+  var out = [];
+  for (var r = 1; r < data.length; r++) {
+    if (!data[r][0]) continue;
+    out.push({ itemId: String(data[r][0]), platform: data[r][1], photoUrl: data[r][2] });
+  }
+  return out;
+}
+
+function setPhoto(body) {
+  var sheet = getPhotosSheet();
+  var data = sheet.getDataRange().getValues();
+  for (var r = 1; r < data.length; r++) {
+    if (String(data[r][0]) === String(body.itemId) && String(data[r][1]) === String(body.platform)) {
+      sheet.getRange(r + 1, 3).setValue(body.photoUrl || '');
+      return { ok: true, updated: true };
+    }
+  }
+  sheet.appendRow([body.itemId || '', body.platform || '', body.photoUrl || '']);
+  return { ok: true, updated: false };
 }

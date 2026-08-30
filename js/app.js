@@ -8,6 +8,7 @@ const state = {
   postingQueue: [],       // from Platform Posting Queue
   metrics: [],            // from Metrics tab (auto eBay + manual entries)
   acquire: [],            // from Acquire Watchlist tab
+  photos: [],             // from Photos tab (cover photo per item x platform)
   expandedItems: new Set(),
   editingAcquireId: null,
 };
@@ -142,6 +143,15 @@ async function loadMetricsData() {
   try { state.metrics = (await apiGet('metrics')) || []; }
   catch { state.metrics = []; }
 }
+async function loadPhotosData() {
+  if (!connected()) { state.photos = []; return; }
+  try { state.photos = (await apiGet('photos')) || []; }
+  catch { state.photos = []; }
+}
+function photoForItem(itemId) {
+  const match = state.photos.find(p => p.itemId === itemId && p.photoUrl);
+  return match ? match.photoUrl : null;
+}
 
 // ---------------------------------------------------------------------
 // Tabs
@@ -265,8 +275,10 @@ function itemCardHTML(item, cat) {
   const expanded = state.expandedItems.has(item.itemId);
   const platforms = splitPlatforms(item.platform);
   const titleParts = [item.brand, item.item].filter(Boolean);
+  const photo = photoForItem(item.itemId);
   return `
     <div class="card${sold ? ' sold' : ''}" style="--cat:${cat.color}">
+      ${photo ? `<img class="card-photo" src="${escapeHtml(photo)}" alt="" loading="lazy">` : ''}
       <div class="card-top">
         <h3>${escapeHtml(titleParts.join(' — ') || item.itemId)}</h3>
         <span class="status-badge ${statusClass(item.sourceStatus)}">${escapeHtml(item.sourceStatus || '—')}</span>
@@ -734,7 +746,7 @@ renderStats();
 populateMetricForm();
 loadAcquire();
 
-Promise.all([loadInventory(), loadDescriptionsData(), loadPostingQueueData(), loadMetricsData()]).then(() => {
+Promise.all([loadInventory(), loadDescriptionsData(), loadPostingQueueData(), loadMetricsData(), loadPhotosData()]).then(() => {
   renderWheel();
   routeOverview();
   renderListChips();

@@ -308,6 +308,16 @@ main { padding-top: 20px; }
 }
 .card.sold { opacity: 0.55; }
 
+.card-photo {
+  width: calc(100% + 30px);
+  margin: -14px -15px 10px;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  display: block;
+  background: var(--border);
+}
+
 .card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 6px; }
 .card h3 { font-family: 'Inter', sans-serif; font-weight: 700; font-size: 0.95rem; }
 
