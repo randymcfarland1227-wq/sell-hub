@@ -776,6 +776,24 @@ function setTrendEbayData(body) {
   return { ok: true };
 }
 
+// One-time cleanup: removes leftover rows from before the Platform column
+// existed in Market Trends (they have a blank Platform and garbage in the
+// other columns from the old 4-column layout). Safe to run more than once —
+// it only ever removes rows with a blank Platform. Run this once from the
+// Run menu, then it's done for good; no need to keep it around after.
+function cleanupOldTrendRows() {
+  var sheet = getTrendsSheet();
+  var data = sheet.getDataRange().getValues();
+  var removed = 0;
+  for (var r = data.length - 1; r >= 1; r--) {
+    if (data[r][0] && !data[r][1]) {
+      sheet.deleteRow(r + 1);
+      removed++;
+    }
+  }
+  Logger.log('Removed %s stale row(s) from Market Trends.', removed);
+}
+
 function setupMarketDataTrigger() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
     if (t.getHandlerFunction() === 'refreshMarketData') ScriptApp.deleteTrigger(t);
