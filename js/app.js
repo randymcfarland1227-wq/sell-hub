@@ -600,17 +600,32 @@ async function loadTrendsData() {
 function renderTrends() {
   const container = document.getElementById('trendsCards');
   if (!container) return;
-  const withData = state.trends.filter(t => t.avgSoldPrice);
-  if (!withData.length) {
+
+  // Trends come as one row per (term x platform) — group into one card per term.
+  const byTerm = new Map();
+  state.trends.forEach(t => {
+    if (!t.avgSoldPrice) return;
+    const entry = byTerm.get(t.searchTerm) || { term: t.searchTerm, platforms: [] };
+    entry.platforms.push(t);
+    byTerm.set(t.searchTerm, entry);
+  });
+  const cards = [...byTerm.values()].sort((a, b) =>
+    b.platforms.reduce((s, p) => s + Number(p.recentSalesFound || 0), 0) -
+    a.platforms.reduce((s, p) => s + Number(p.recentSalesFound || 0), 0)
+  );
+
+  if (!cards.length) {
     container.innerHTML = '<div class="empty-state">No trend data yet — refreshes automatically once a day (see SETUP.md to turn it on).</div>';
     return;
   }
-  container.innerHTML = withData.map(t => `
+  container.innerHTML = cards.map(c => `
     <div class="trend-card">
-      <h4>${escapeHtml(t.searchTerm)}</h4>
-      <div class="prow"><span>Avg sold price</span><b>${fmtMoney(Number(t.avgSoldPrice))}</b></div>
-      <div class="prow"><span>Recent sales found</span><b>${t.recentSalesFound}</b></div>
-      <div class="trend-date">as of ${escapeHtml(t.lastChecked || '')}</div>
+      <h4>${escapeHtml(c.term)}</h4>
+      ${c.platforms.map(p => `
+        <div class="prow"><span>${escapeHtml(p.platform)} avg sold</span><b>${fmtMoney(Number(p.avgSoldPrice))}</b></div>
+        <div class="prow"><span>${escapeHtml(p.platform)} sales found</span><b>${p.recentSalesFound}</b></div>
+      `).join('')}
+      <div class="trend-date">as of ${escapeHtml(c.platforms[0].lastChecked || '')}</div>
     </div>
   `).join('');
 }
@@ -653,10 +668,10 @@ function acquireCardHTML(a) {
         ${a.bestPlatform ? `<span><b>Best platform —</b> ${escapeHtml((PLATFORM_META[a.bestPlatform] || { label: a.bestPlatform }).label)}</span>` : ''}
       </div>
       ${a.notes ? `<p class="notes">${escapeHtml(a.notes)}</p>` : ''}
-      ${a.avgSoldPrice ? `
+      ${a.ebayAvgPrice || a.poshmarkAvgPrice ? `
         <div class="market-data">
-          <span><b>${fmtMoney(Number(a.avgSoldPrice))}</b> avg sold</span>
-          <span><b>${a.recentSalesFound}</b> recent sales found</span>
+          ${a.ebayAvgPrice ? `<span><b>${fmtMoney(Number(a.ebayAvgPrice))}</b> eBay avg (${a.ebaySalesFound} found)</span>` : ''}
+          ${a.poshmarkAvgPrice ? `<span><b>${fmtMoney(Number(a.poshmarkAvgPrice))}</b> Poshmark avg (${a.poshmarkSalesFound} found)</span>` : ''}
           <span class="market-data-date">as of ${escapeHtml(a.lastChecked || '')}</span>
         </div>
       ` : '<div class="market-data market-data-pending">No market data yet — updates daily.</div>'}

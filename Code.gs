@@ -17,10 +17,10 @@
  *   GET  ?action=metrics       -> [{date, listingId, itemId, platform, impressions, views,
  *                                   watchers, clicks, price, source}]
  *   GET  ?action=acquire       -> [{id, brand, itemType, size, condition, targetPrice,
- *                                   bestPlatform, priority, notes, dateAdded, avgSoldPrice,
- *                                   recentSalesFound, lastChecked}]
+ *                                   bestPlatform, priority, notes, dateAdded, ebayAvgPrice,
+ *                                   ebaySalesFound, poshmarkAvgPrice, poshmarkSalesFound, lastChecked}]
  *   GET  ?action=photos        -> [{itemId, platform, photoUrl}]
- *   GET  ?action=trends        -> [{searchTerm, avgSoldPrice, recentSalesFound, lastChecked}]
+ *   GET  ?action=trends        -> [{searchTerm, platform, avgSoldPrice, recentSalesFound, lastChecked}]
  *   POST {action:'addMetricEntry', listingId, itemId, platform, impressions, views, watchers, clicks, price}
  *   POST {action:'addAcquireItem', brand, itemType, size, condition, targetPrice, bestPlatform, priority, notes} -> the new row
  *   POST {action:'updateAcquireItem', id, brand, itemType, size, condition, targetPrice, bestPlatform, priority, notes}
@@ -322,7 +322,7 @@ function addMetricEntry(body) {
 
 var ACQUIRE_HEADERS = [
   'ID', 'Brand', 'Item Type', 'Size', 'Condition', 'Target Price', 'Best Platform', 'Priority', 'Notes', 'Date Added',
-  'Avg Sold Price', 'Recent Sales Found', 'Last Checked',
+  'eBay Avg Price', 'eBay Sales Found', 'Poshmark Avg Price', 'Poshmark Sales Found', 'Last Checked',
 ];
 
 function getAcquireSheet() {
@@ -357,9 +357,11 @@ function getAcquire() {
       priority: data[r][7],
       notes: data[r][8],
       dateAdded: formatDate(data[r][9]),
-      avgSoldPrice: data[r][10] || '',
-      recentSalesFound: data[r][11] || '',
-      lastChecked: formatDate(data[r][12]),
+      ebayAvgPrice: data[r][10] || '',
+      ebaySalesFound: data[r][11] || '',
+      poshmarkAvgPrice: data[r][12] || '',
+      poshmarkSalesFound: data[r][13] || '',
+      lastChecked: formatDate(data[r][14]),
     });
   }
   return out;
@@ -564,7 +566,7 @@ function setPhoto(body) {
 // ---------------------------------------------------------------------
 
 var TRENDS_SHEET_NAME = 'Market Trends';
-var TRENDS_HEADERS = ['Search Term', 'Avg Sold Price', 'Recent Sales Found', 'Last Checked'];
+var TRENDS_HEADERS = ['Search Term', 'Platform', 'Avg Sold Price', 'Recent Sales Found', 'Last Checked'];
 
 // Curated starting set of well-known thrift/resale categories. Edit this
 // list directly in the Apps Script editor to track different categories —
@@ -576,10 +578,14 @@ var TREND_CANDIDATES = [
   'Nike Dunk', 'Timberland boots', 'Columbia jacket',
 ];
 
-// Searches eBay's public sold/completed listings for `query` and returns
-// aggregate stats. No login required — this is the same search anyone can
-// run at ebay.com with the "Sold Items" filter checked.
-function searchSoldListings(query, debug) {
+// Depop has no public "sold items" filter (checked directly — its search
+// results are always active listings, and there's no equivalent of eBay's
+// LH_Sold or Poshmark's availability=sold_out), so it's not included here.
+
+// Searches eBay's public sold/completed listings for `query`. No login
+// required — this is the same search anyone can run at ebay.com with the
+// "Sold Items" filter checked.
+function searchEbaySold(query, debug) {
   var url = 'https://www.ebay.com/sch/i.html?_nkw=' + encodeURIComponent(query) + '&LH_Sold=1&LH_Complete=1&_ipg=60';
   try {
     var resp = UrlFetchApp.fetch(url, {
@@ -589,7 +595,7 @@ function searchSoldListings(query, debug) {
     var code = resp.getResponseCode();
     var html = resp.getContentText();
     if (debug) {
-      Logger.log('query=%s status=%s length=%s hasPriceClass=%s hasCaptcha=%s title=%s',
+      Logger.log('[eBay] query=%s status=%s length=%s hasPriceClass=%s hasCaptcha=%s title=%s',
         query, code, html.length, html.indexOf('s-card__price') !== -1,
         /captcha|verify you.?re human|pardon our interruption/i.test(html),
         (html.match(/<title>([\s\S]*?)<\/title>/) || [])[1]);
@@ -605,15 +611,49 @@ function searchSoldListings(query, debug) {
     var sum = prices.reduce(function (a, b) { return a + b; }, 0);
     return { avgPrice: Math.round((sum / prices.length) * 100) / 100, count: prices.length };
   } catch (err) {
-    if (debug) Logger.log('query=%s EXCEPTION %s', query, err);
+    if (debug) Logger.log('[eBay] query=%s EXCEPTION %s', query, err);
+    return { avgPrice: 0, count: 0 };
+  }
+}
+
+// Searches Poshmark's public marketplace search filtered to sold items.
+// No login required — same search anyone can run at poshmark.com with the
+// "Sold Items" availability filter.
+function searchPoshmarkSold(query, debug) {
+  var url = 'https://poshmark.com/search?query=' + encodeURIComponent(query) + '&availability=sold_out';
+  try {
+    var resp = UrlFetchApp.fetch(url, {
+      muteHttpExceptions: true,
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+    });
+    var code = resp.getResponseCode();
+    var html = resp.getContentText();
+    if (debug) {
+      Logger.log('[Poshmark] query=%s status=%s length=%s hasPriceClass=%s title=%s',
+        query, code, html.length, html.indexOf('tile-grid-redesign__price-current') !== -1,
+        (html.match(/<title>([\s\S]*?)<\/title>/) || [])[1]);
+    }
+    if (code !== 200) return { avgPrice: 0, count: 0 };
+    var priceRe = /tile-grid-redesign__price-current">\s*\$([\d,]+(?:\.\d{2})?)/g;
+    var prices = [];
+    var m;
+    while ((m = priceRe.exec(html)) !== null) {
+      prices.push(parseFloat(m[1].replace(/,/g, '')));
+    }
+    if (!prices.length) return { avgPrice: 0, count: 0 };
+    var sum = prices.reduce(function (a, b) { return a + b; }, 0);
+    return { avgPrice: Math.round((sum / prices.length) * 100) / 100, count: prices.length };
+  } catch (err) {
+    if (debug) Logger.log('[Poshmark] query=%s EXCEPTION %s', query, err);
     return { avgPrice: 0, count: 0 };
   }
 }
 
 // Diagnostic helper — run this directly from the Run menu and check the
-// execution log to see exactly what eBay's server is sending back.
+// execution log to see exactly what each site is sending back.
 function debugSearchSoldListings() {
-  searchSoldListings('Carhartt jacket', true);
+  searchEbaySold('Carhartt jacket', true);
+  searchPoshmarkSold('Carhartt jacket', true);
 }
 
 function getTrendsSheet() {
@@ -635,46 +675,60 @@ function getTrends() {
     if (!data[r][0]) continue;
     out.push({
       searchTerm: data[r][0],
-      avgSoldPrice: data[r][1] || '',
-      recentSalesFound: data[r][2] || '',
-      lastChecked: formatDate(data[r][3]),
+      platform: data[r][1],
+      avgSoldPrice: data[r][2] || '',
+      recentSalesFound: data[r][3] || '',
+      lastChecked: formatDate(data[r][4]),
     });
   }
   return out;
 }
 
-// Refreshes both the Acquire Watchlist's per-item comps and the Market
-// Trends tab. Called automatically by the daily trigger (setupMarketDataTrigger)
-// — can also be run manually from the Run menu to force an immediate update.
+// Refreshes both the Acquire Watchlist's per-item comps (eBay + Poshmark
+// columns) and the Market Trends tab. Called automatically by the daily
+// trigger (setupMarketDataTrigger) — can also be run manually from the Run
+// menu to force an immediate update.
 function refreshMarketData() {
   var today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
 
-  // Watchlist items
+  // Watchlist items — columns 11-15: eBay Avg Price, eBay Sales Found,
+  // Poshmark Avg Price, Poshmark Sales Found, Last Checked.
   var acqSheet = getAcquireSheet();
   var acqData = acqSheet.getDataRange().getValues();
   for (var r = 1; r < acqData.length; r++) {
     if (!acqData[r][0]) continue;
     var query = (acqData[r][1] + ' ' + acqData[r][2]).trim();
     if (!query) continue;
-    var result = searchSoldListings(query);
-    acqSheet.getRange(r + 1, 11, 1, 3).setValues([[result.avgPrice || '', result.count || '', today]]);
+    var ebayResult = searchEbaySold(query);
     Utilities.sleep(1500);
+    var poshResult = searchPoshmarkSold(query);
+    Utilities.sleep(1500);
+    acqSheet.getRange(r + 1, 11, 1, 5).setValues([[
+      ebayResult.avgPrice || '', ebayResult.count || '',
+      poshResult.avgPrice || '', poshResult.count || '',
+      today,
+    ]]);
   }
 
-  // Trending categories — rewrite the whole tab each run, ranked by recent sales found.
-  var trendResults = TREND_CANDIDATES.map(function (term) {
-    var result = searchSoldListings(term);
+  // Trending categories — rewrite the whole tab each run, one row per
+  // (term x platform), ranked by recent sales found.
+  var trendRows = [];
+  TREND_CANDIDATES.forEach(function (term) {
+    var ebayResult = searchEbaySold(term);
     Utilities.sleep(1500);
-    return [term, result.avgPrice || '', result.count || '', today];
+    trendRows.push([term, 'eBay', ebayResult.avgPrice || '', ebayResult.count || '', today]);
+    var poshResult = searchPoshmarkSold(term);
+    Utilities.sleep(1500);
+    trendRows.push([term, 'Poshmark', poshResult.avgPrice || '', poshResult.count || '', today]);
   });
-  trendResults.sort(function (a, b) { return (b[2] || 0) - (a[2] || 0); });
+  trendRows.sort(function (a, b) { return (b[3] || 0) - (a[3] || 0); });
 
   var trendsSheet = getTrendsSheet();
   trendsSheet.clear();
   trendsSheet.appendRow(TRENDS_HEADERS);
   trendsSheet.setFrozenRows(1);
-  if (trendResults.length) {
-    trendsSheet.getRange(2, 1, trendResults.length, TRENDS_HEADERS.length).setValues(trendResults);
+  if (trendRows.length) {
+    trendsSheet.getRange(2, 1, trendRows.length, TRENDS_HEADERS.length).setValues(trendRows);
   }
 }
 
