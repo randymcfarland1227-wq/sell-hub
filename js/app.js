@@ -624,6 +624,7 @@ function renderTrends() {
       ${c.platforms.map(p => `
         <div class="prow"><span>${escapeHtml(p.platform)} avg sold</span><b>${fmtMoney(Number(p.avgSoldPrice))}</b></div>
         <div class="prow"><span>${escapeHtml(p.platform)} sales found</span><b>${p.recentSalesFound}</b></div>
+        ${p.sellThrough ? `<div class="prow"><span>${escapeHtml(p.platform)} sell-through</span><b>${p.sellThrough}%</b></div>` : ''}
       `).join('')}
       <div class="trend-date">as of ${escapeHtml(c.platforms[0].lastChecked || '')}</div>
     </div>
@@ -670,11 +671,11 @@ function acquireCardHTML(a) {
       ${a.notes ? `<p class="notes">${escapeHtml(a.notes)}</p>` : ''}
       ${a.ebayAvgPrice || a.poshmarkAvgPrice ? `
         <div class="market-data">
-          ${a.ebayAvgPrice ? `<span><b>${fmtMoney(Number(a.ebayAvgPrice))}</b> eBay avg (${a.ebaySalesFound} found)</span>` : ''}
+          ${a.ebayAvgPrice ? `<span><b>${fmtMoney(Number(a.ebayAvgPrice))}</b> eBay avg (${a.ebaySalesFound} sold${a.ebaySellThrough ? `, ${a.ebaySellThrough}% sell-through` : ''})</span>` : ''}
           ${a.poshmarkAvgPrice ? `<span><b>${fmtMoney(Number(a.poshmarkAvgPrice))}</b> Poshmark avg (${a.poshmarkSalesFound} found)</span>` : ''}
           <span class="market-data-date">as of ${escapeHtml(a.lastChecked || '')}</span>
         </div>
-      ` : '<div class="market-data market-data-pending">No market data yet — updates daily.</div>'}
+      ` : '<div class="market-data market-data-pending">No market data yet — Poshmark updates daily; eBay needs a manual refresh (ask Claude, or run it yourself via Terapeak in Seller Hub).</div>'}
       <button class="icon-btn ae-edit-btn" title="Edit" data-id="${a.id}">✎</button>
       <button class="icon-btn card-delete-btn ae-delete-btn" title="Delete" data-id="${a.id}">✕</button>
     </div>

@@ -18,9 +18,10 @@
  *                                   watchers, clicks, price, source}]
  *   GET  ?action=acquire       -> [{id, brand, itemType, size, condition, targetPrice,
  *                                   bestPlatform, priority, notes, dateAdded, ebayAvgPrice,
- *                                   ebaySalesFound, poshmarkAvgPrice, poshmarkSalesFound, lastChecked}]
+ *                                   ebaySalesFound, poshmarkAvgPrice, poshmarkSalesFound, lastChecked,
+ *                                   ebaySellThrough}]
  *   GET  ?action=photos        -> [{itemId, platform, photoUrl}]
- *   GET  ?action=trends        -> [{searchTerm, platform, avgSoldPrice, recentSalesFound, lastChecked}]
+ *   GET  ?action=trends        -> [{searchTerm, platform, avgSoldPrice, recentSalesFound, sellThrough, lastChecked}]
  *   POST {action:'addMetricEntry', listingId, itemId, platform, impressions, views, watchers, clicks, price}
  *   POST {action:'addAcquireItem', brand, itemType, size, condition, targetPrice, bestPlatform, priority, notes} -> the new row
  *   POST {action:'updateAcquireItem', id, brand, itemType, size, condition, targetPrice, bestPlatform, priority, notes}
@@ -30,10 +31,15 @@
  *        Listing Hub's unnamed row-number column (the one right after "Source tab"). See
  *        markSold() below if your Listing Hub is laid out differently.
  *   POST {action:'setPhoto', itemId, platform, photoUrl} -> upserts one item's cover photo
+ *   POST {action:'setAcquireEbayData', id, avgPrice, salesFound, sellThrough} -> manual eBay/Terapeak pull for one watchlist item
+ *   POST {action:'setTrendEbayData', searchTerm, avgPrice, salesFound, sellThrough} -> manual eBay/Terapeak pull for one trend row
  *
- * Market data (Acquire Watchlist comps + Market Trends tab) is NOT driven by a POST —
- * it refreshes itself daily via a time trigger. Run setupMarketDataTrigger() once from
- * this editor's Run menu to turn it on (see SETUP.md).
+ * Poshmark's side of market data (Acquire Watchlist comps + Market Trends tab)
+ * refreshes itself daily via a time trigger — run setupMarketDataTrigger() once
+ * from this editor's Run menu to turn it on. eBay's side is NOT automatic (eBay
+ * blocks server-side requests) — it's pushed in manually via the two POST
+ * actions above, using a live logged-in browser session. See the "Market data"
+ * section below for the full explanation.
  */
 
 var LISTING_HUB_SHEET = 'Listing Hub';
@@ -65,6 +71,8 @@ function doPost(e) {
   if (action === 'deleteAcquireItem') return jsonOut(deleteAcquireItem(body.id));
   if (action === 'markSold') return jsonOut(markSold(body));
   if (action === 'setPhoto') return jsonOut(setPhoto(body));
+  if (action === 'setAcquireEbayData') return jsonOut(setAcquireEbayData(body));
+  if (action === 'setTrendEbayData') return jsonOut(setTrendEbayData(body));
 
   return jsonOut({ error: 'unknown action' });
 }
@@ -323,6 +331,7 @@ function addMetricEntry(body) {
 var ACQUIRE_HEADERS = [
   'ID', 'Brand', 'Item Type', 'Size', 'Condition', 'Target Price', 'Best Platform', 'Priority', 'Notes', 'Date Added',
   'eBay Avg Price', 'eBay Sales Found', 'Poshmark Avg Price', 'Poshmark Sales Found', 'Last Checked',
+  'eBay Sell-Through %',
 ];
 
 function getAcquireSheet() {
@@ -362,6 +371,7 @@ function getAcquire() {
       poshmarkAvgPrice: data[r][12] || '',
       poshmarkSalesFound: data[r][13] || '',
       lastChecked: formatDate(data[r][14]),
+      ebaySellThrough: data[r][15] || '',
     });
   }
   return out;
@@ -553,20 +563,34 @@ function setPhoto(body) {
 }
 
 // ---------------------------------------------------------------------
-// Market data — real eBay sold-listing comps for Acquire Watchlist items,
-// plus a "Market Trends" tab of curated resale categories, both refreshed
-// on a daily trigger. Uses eBay's PUBLIC completed/sold-listings search
-// (no login, no API key) via UrlFetchApp, so this runs unattended without
-// needing anyone's personal eBay session — unlike the per-listing stats
-// pull, which was a one-time manual thing tied to a logged-in browser.
+// Market data — comps for Acquire Watchlist items, plus a "Market Trends"
+// tab of curated resale categories. Two different data paths feed this,
+// on purpose:
 //
-// One-time setup: run setupMarketDataTrigger() once from this editor's
-// Run menu (authorize when prompted). After that it updates itself daily
-// with no further action — see SETUP.md.
+// POSHMARK — its public sold-listings search (availability=sold_out) has
+// no login wall, so UrlFetchApp can hit it directly from a server-side
+// trigger. This runs automatically on a daily timer (setupMarketDataTrigger).
+//
+// EBAY — eBay actively blocks server-side/bot requests to its public
+// search (confirmed: 403 on the sold-listings search, and even the plain
+// search page redirects non-browser requests to sign-in). eBay's own
+// Seller Hub "Research" tool (Terapeak, free — no Store subscription
+// needed) has the real data, including actual sell-through rate, but it's
+// only reachable while logged into a real eBay session — Apps Script has
+// no way to authenticate as you. So eBay numbers come from a manual pull
+// run through a live browser session (same one-time-pull pattern as the
+// per-listing stats and cover photos elsewhere in this project), written
+// in via the setAcquireEbayData / setTrendEbayData POST actions below.
+// Nothing here auto-refreshes eBay's numbers — ask for a fresh pull
+// whenever you want current ones.
+//
+// One-time setup for the automatic Poshmark side: run
+// setupMarketDataTrigger() once from this editor's Run menu (authorize
+// when prompted). After that it updates itself daily — see SETUP.md.
 // ---------------------------------------------------------------------
 
 var TRENDS_SHEET_NAME = 'Market Trends';
-var TRENDS_HEADERS = ['Search Term', 'Platform', 'Avg Sold Price', 'Recent Sales Found', 'Last Checked'];
+var TRENDS_HEADERS = ['Search Term', 'Platform', 'Avg Sold Price', 'Recent Sales Found', 'Sell-Through %', 'Last Checked'];
 
 // Curated starting set of well-known thrift/resale categories. Edit this
 // list directly in the Apps Script editor to track different categories —
@@ -678,58 +702,78 @@ function getTrends() {
       platform: data[r][1],
       avgSoldPrice: data[r][2] || '',
       recentSalesFound: data[r][3] || '',
-      lastChecked: formatDate(data[r][4]),
+      sellThrough: data[r][4] || '',
+      lastChecked: formatDate(data[r][5]),
     });
   }
   return out;
 }
 
-// Refreshes both the Acquire Watchlist's per-item comps (eBay + Poshmark
-// columns) and the Market Trends tab. Called automatically by the daily
-// trigger (setupMarketDataTrigger) — can also be run manually from the Run
-// menu to force an immediate update.
+// Upserts one (searchTerm x platform) row in Market Trends — used by both
+// the automatic Poshmark refresh and the manual eBay/Terapeak pull, so
+// neither one wipes out the other's data when it runs.
+function upsertTrendRow(searchTerm, platform, avgPrice, salesFound, sellThrough) {
+  var sheet = getTrendsSheet();
+  var data = sheet.getDataRange().getValues();
+  var today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  for (var r = 1; r < data.length; r++) {
+    if (String(data[r][0]) === String(searchTerm) && String(data[r][1]) === String(platform)) {
+      sheet.getRange(r + 1, 3, 1, 4).setValues([[avgPrice || '', salesFound || '', sellThrough || '', today]]);
+      return;
+    }
+  }
+  sheet.appendRow([searchTerm, platform, avgPrice || '', salesFound || '', sellThrough || '', today]);
+}
+
+// Refreshes the Poshmark side of both the Acquire Watchlist comps and the
+// Market Trends tab. Called automatically by the daily trigger
+// (setupMarketDataTrigger) — can also be run manually to force an update.
+// Does NOT touch eBay columns/rows — those come from a separate manual
+// Terapeak pull (see setAcquireEbayData / setTrendEbayData) since eBay
+// blocks this kind of automated request (see the header comment above).
 function refreshMarketData() {
   var today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
 
-  // Watchlist items — columns 11-15: eBay Avg Price, eBay Sales Found,
-  // Poshmark Avg Price, Poshmark Sales Found, Last Checked.
   var acqSheet = getAcquireSheet();
   var acqData = acqSheet.getDataRange().getValues();
   for (var r = 1; r < acqData.length; r++) {
     if (!acqData[r][0]) continue;
     var query = (acqData[r][1] + ' ' + acqData[r][2]).trim();
     if (!query) continue;
-    var ebayResult = searchEbaySold(query);
-    Utilities.sleep(1500);
     var poshResult = searchPoshmarkSold(query);
+    acqSheet.getRange(r + 1, 13, 1, 2).setValues([[poshResult.avgPrice || '', poshResult.count || '']]);
+    acqSheet.getRange(r + 1, 15).setValue(today);
     Utilities.sleep(1500);
-    acqSheet.getRange(r + 1, 11, 1, 5).setValues([[
-      ebayResult.avgPrice || '', ebayResult.count || '',
-      poshResult.avgPrice || '', poshResult.count || '',
-      today,
-    ]]);
   }
 
-  // Trending categories — rewrite the whole tab each run, one row per
-  // (term x platform), ranked by recent sales found.
-  var trendRows = [];
   TREND_CANDIDATES.forEach(function (term) {
-    var ebayResult = searchEbaySold(term);
-    Utilities.sleep(1500);
-    trendRows.push([term, 'eBay', ebayResult.avgPrice || '', ebayResult.count || '', today]);
     var poshResult = searchPoshmarkSold(term);
+    upsertTrendRow(term, 'Poshmark', poshResult.avgPrice, poshResult.count, '');
     Utilities.sleep(1500);
-    trendRows.push([term, 'Poshmark', poshResult.avgPrice || '', poshResult.count || '', today]);
   });
-  trendRows.sort(function (a, b) { return (b[3] || 0) - (a[3] || 0); });
+}
 
-  var trendsSheet = getTrendsSheet();
-  trendsSheet.clear();
-  trendsSheet.appendRow(TRENDS_HEADERS);
-  trendsSheet.setFrozenRows(1);
-  if (trendRows.length) {
-    trendsSheet.getRange(2, 1, trendRows.length, TRENDS_HEADERS.length).setValues(trendRows);
+// Manual write paths for eBay/Terapeak data, pulled through a live browser
+// session and pushed in via POST (see the header comment above for why
+// this can't be automated the way Poshmark's refresh is).
+function setAcquireEbayData(body) {
+  var sheet = getAcquireSheet();
+  var data = sheet.getDataRange().getValues();
+  var today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  for (var r = 1; r < data.length; r++) {
+    if (String(data[r][0]) === String(body.id)) {
+      sheet.getRange(r + 1, 11, 1, 2).setValues([[body.avgPrice || '', body.salesFound || '']]);
+      sheet.getRange(r + 1, 15).setValue(today);
+      sheet.getRange(r + 1, 16).setValue(body.sellThrough || '');
+      return { ok: true };
+    }
   }
+  return { ok: false, error: 'Acquire item not found: ' + body.id };
+}
+
+function setTrendEbayData(body) {
+  upsertTrendRow(body.searchTerm, 'eBay', body.avgPrice, body.salesFound, body.sellThrough);
+  return { ok: true };
 }
 
 function setupMarketDataTrigger() {
