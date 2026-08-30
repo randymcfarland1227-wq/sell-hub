@@ -652,18 +652,20 @@ function searchPoshmarkSold(query, debug) {
     });
     var code = resp.getResponseCode();
     var html = resp.getContentText();
-    if (debug) {
-      Logger.log('[Poshmark] query=%s status=%s length=%s hasPriceClass=%s title=%s',
-        query, code, html.length, html.indexOf('tile-grid-redesign__price-current') !== -1,
-        (html.match(/<title>([\s\S]*?)<\/title>/) || [])[1]);
-    }
-    if (code !== 200) return { avgPrice: 0, count: 0 };
     var priceRe = /tile-grid-redesign__price-current">\s*\$([\d,]+(?:\.\d{2})?)/g;
     var prices = [];
     var m;
     while ((m = priceRe.exec(html)) !== null) {
       prices.push(parseFloat(m[1].replace(/,/g, '')));
     }
+    if (debug) {
+      var markerIdx = html.indexOf('tile-grid-redesign__price-current');
+      Logger.log('[Poshmark] query=%s status=%s length=%s regexMatches=%s markerContext=%s title=%s',
+        query, code, html.length, prices.length,
+        markerIdx !== -1 ? html.slice(Math.max(0, markerIdx - 80), markerIdx + 80) : 'no marker found',
+        (html.match(/<title>([\s\S]*?)<\/title>/) || [])[1]);
+    }
+    if (code !== 200) return { avgPrice: 0, count: 0 };
     if (!prices.length) return { avgPrice: 0, count: 0 };
     var sum = prices.reduce(function (a, b) { return a + b; }, 0);
     return { avgPrice: Math.round((sum / prices.length) * 100) / 100, count: prices.length };
