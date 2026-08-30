@@ -579,15 +579,22 @@ var TREND_CANDIDATES = [
 // Searches eBay's public sold/completed listings for `query` and returns
 // aggregate stats. No login required — this is the same search anyone can
 // run at ebay.com with the "Sold Items" filter checked.
-function searchSoldListings(query) {
+function searchSoldListings(query, debug) {
   var url = 'https://www.ebay.com/sch/i.html?_nkw=' + encodeURIComponent(query) + '&LH_Sold=1&LH_Complete=1&_ipg=60';
   try {
     var resp = UrlFetchApp.fetch(url, {
       muteHttpExceptions: true,
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
     });
-    if (resp.getResponseCode() !== 200) return { avgPrice: 0, count: 0 };
+    var code = resp.getResponseCode();
     var html = resp.getContentText();
+    if (debug) {
+      Logger.log('query=%s status=%s length=%s hasPriceClass=%s hasCaptcha=%s title=%s',
+        query, code, html.length, html.indexOf('s-card__price') !== -1,
+        /captcha|verify you.?re human|pardon our interruption/i.test(html),
+        (html.match(/<title>([\s\S]*?)<\/title>/) || [])[1]);
+    }
+    if (code !== 200) return { avgPrice: 0, count: 0 };
     var priceRe = /s-card__price">\$([\d,]+\.\d{2})/g;
     var prices = [];
     var m;
@@ -598,8 +605,15 @@ function searchSoldListings(query) {
     var sum = prices.reduce(function (a, b) { return a + b; }, 0);
     return { avgPrice: Math.round((sum / prices.length) * 100) / 100, count: prices.length };
   } catch (err) {
+    if (debug) Logger.log('query=%s EXCEPTION %s', query, err);
     return { avgPrice: 0, count: 0 };
   }
+}
+
+// Diagnostic helper — run this directly from the Run menu and check the
+// execution log to see exactly what eBay's server is sending back.
+function debugSearchSoldListings() {
+  searchSoldListings('Carhartt jacket', true);
 }
 
 function getTrendsSheet() {
