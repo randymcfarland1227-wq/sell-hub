@@ -74,6 +74,23 @@ function platformOptionsHTML(selected) {
   return Object.keys(PLATFORM_META).map(id => `<option value="${id}"${id === selected ? ' selected' : ''}>${PLATFORM_META[id].label}</option>`).join('');
 }
 
+// Impressions/views/watchers/clicks from eBay and Poshmark are rolling-window
+// snapshots (e.g. "last 30/60 days"), not ever-growing counters — they can go
+// down as well as up between checks. So the right way to read a history of
+// logged entries is "use the most recent snapshot," never "sum every entry
+// ever logged" (summing would double-count the same rolling window repeatedly
+// every time stats get refreshed).
+function latestMetricsByItemPlatform() {
+  const latest = new Map();
+  state.metrics.forEach(m => {
+    if (!m.itemId) return;
+    const key = m.itemId + '|' + platformMeta(m.platform).id;
+    const existing = latest.get(key);
+    if (!existing || (m.date || '') >= (existing.date || '')) latest.set(key, m);
+  });
+  return latest;
+}
+
 function isSold(item) { return String(item.sourceStatus || '').toLowerCase() === 'sold'; }
 function isRealItem(it) { return !!(it.item || it.brand) && String(it.sourceStatus || '').toLowerCase() !== 'blank'; }
 function statusClass(status) {
@@ -299,20 +316,21 @@ function itemCardHTML(item, cat) {
 
 function itemDetailHTML(item) {
   const descs = state.descriptions.filter(d => d.itemId === item.itemId);
-  const itemMetrics = state.metrics.filter(m => m.itemId === item.itemId);
+  const latestByPlatform = latestMetricsByItemPlatform();
   const platforms = splitPlatforms(item.platform);
 
   const blocks = platforms.map(p => {
     const m = platformMeta(p);
     const desc = descs.find(d => platformId(d.platform) === m.id);
-    const totals = itemMetrics.filter(x => platformId(x.platform) === m.id).reduce((acc, x) => {
-      acc.impressions += Number(x.impressions) || 0;
-      acc.views += Number(x.views) || 0;
-      acc.watchers += Number(x.watchers) || 0;
-      acc.clicks += Number(x.clicks) || 0;
-      return acc;
-    }, { impressions: 0, views: 0, watchers: 0, clicks: 0 });
-    const ctr = totals.impressions ? ((totals.clicks / totals.impressions) * 100).toFixed(1) + '%' : '—';
+    const snap = latestByPlatform.get(item.itemId + '|' + m.id);
+    const totals = {
+      impressions: Number(snap && snap.impressions) || 0,
+      views: Number(snap && snap.views) || 0,
+      watchers: Number(snap && snap.watchers) || 0,
+      clicks: Number(snap && snap.clicks) || 0,
+    };
+    const reach = totals.impressions || totals.views;
+    const ctr = reach ? ((totals.clicks / reach) * 100).toFixed(1) + '%' : '—';
     return `
       <div class="listing-block">
         <div class="lb-head"><span class="platform-tag" style="background:${m.color}">${escapeHtml(m.label)}</span></div>
@@ -323,6 +341,7 @@ function itemDetailHTML(item) {
           <span><b>${totals.watchers}</b> watchers</span>
           <span><b>${totals.clicks}</b> clicks</span>
           <span><b>${ctr}</b> click rate</span>
+          ${snap ? `<span class="lb-asof">as of ${escapeHtml(snap.date || '')}</span>` : ''}
         </div>
       </div>
     `;
@@ -491,7 +510,7 @@ function renderPlatformCards() {
     return totals[meta.id] || (totals[meta.id] = { meta, impressions: 0, views: 0, watchers: 0, clicks: 0, items: new Set() });
   };
 
-  state.metrics.forEach(m => {
+  latestMetricsByItemPlatform().forEach(m => {
     const t = ensure(m.platform);
     t.impressions += Number(m.impressions) || 0;
     t.views += Number(m.views) || 0;
