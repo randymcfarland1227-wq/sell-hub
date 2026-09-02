@@ -809,9 +809,13 @@ function setTrendEbayData(body) {
 function cleanupOldTrendRows() {
   var sheet = getTrendsSheet();
   var data = sheet.getDataRange().getValues();
+  var current = {};
+  TREND_CANDIDATES.forEach(function (t) { current[t] = true; });
   var removed = 0;
   for (var r = data.length - 1; r >= 1; r--) {
-    if (data[r][0] && !data[r][1]) {
+    var isBlankPlatform = data[r][0] && !data[r][1];
+    var isStaleTerm = data[r][0] && !current[data[r][0]];
+    if (isBlankPlatform || isStaleTerm) {
       sheet.deleteRow(r + 1);
       removed++;
     }
