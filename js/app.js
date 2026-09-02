@@ -3,6 +3,7 @@ const state = {
   listShowSold: false,    // list mode
   listActiveCats: new Set(),
   zoom: 1,
+  listSort: 'name',
   inventory: [],          // from Listing Hub (read-only, sourced from the Sheet)
   descriptions: [],       // from Listing Descriptions
   postingQueue: [],       // from Platform Posting Queue
@@ -288,10 +289,34 @@ function showCategory(catId) {
   renderCategoryCards(cat);
 }
 
+// Item-level list price plus per-platform views/clicks — the numbers a
+// seller actually checks day to day — shown directly on the card instead
+// of behind a click, per platform since views/clicks are platform-specific.
+function platformStatsHTML(item) {
+  const platforms = splitPlatforms(item.platform);
+  if (!platforms.length) return '';
+  const latestByPlatform = latestMetricsByItemPlatform();
+  const price = item.listPrice ? fmtMoney(parseMoney(item.listPrice)) : '—';
+  const rows = platforms.map(p => {
+    const m = platformMeta(p);
+    const snap = latestByPlatform.get(item.itemId + '|' + m.id);
+    const views = Number(snap && (snap.views || snap.impressions)) || 0;
+    const clicks = Number(snap && snap.clicks) || 0;
+    return `
+      <div class="ps-row">
+        <span class="ps-plat" style="background:${m.color}">${escapeHtml(m.label)}</span>
+        <span class="ps-metric"><b>${price}</b><i>price</i></span>
+        <span class="ps-metric"><b>${views}</b><i>views</i></span>
+        <span class="ps-metric"><b>${clicks}</b><i>clicks</i></span>
+      </div>
+    `;
+  }).join('');
+  return `<div class="platform-stats">${rows}</div>`;
+}
+
 function itemCardHTML(item, cat) {
   const sold = isSold(item);
   const expanded = state.expandedItems.has(item.itemId);
-  const platforms = splitPlatforms(item.platform);
   const titleParts = [item.brand, item.item].filter(Boolean);
   const photo = photoForItem(item.itemId);
   return `
@@ -307,8 +332,8 @@ function itemCardHTML(item, cat) {
         <span><b>List price —</b> ${escapeHtml(item.listPrice || '—')}${item.floorPrice ? ` (floor ${escapeHtml(item.floorPrice)})` : ''}</span>
         ${sold ? `<span><b>Sold —</b> ${escapeHtml(item.soldPrice || '—')}</span>` : ''}
       </div>
-      ${platforms.length ? `<div class="platform-tags">${platforms.map(p => { const m = platformMeta(p); return `<span class="platform-tag" style="background:${m.color}">${escapeHtml(m.label)}</span>`; }).join('')}</div>` : ''}
-      <button class="card-expand-toggle" data-id="${item.itemId}">${expanded ? '− Hide details' : '+ Details & stats'}</button>
+      ${platformStatsHTML(item)}
+      <button class="card-expand-toggle" data-id="${item.itemId}">${expanded ? '− Hide' : '+ Description & mark sold'}</button>
       ${expanded ? itemDetailHTML(item) : ''}
     </div>
   `;
@@ -316,33 +341,15 @@ function itemCardHTML(item, cat) {
 
 function itemDetailHTML(item) {
   const descs = state.descriptions.filter(d => d.itemId === item.itemId);
-  const latestByPlatform = latestMetricsByItemPlatform();
   const platforms = splitPlatforms(item.platform);
 
   const blocks = platforms.map(p => {
     const m = platformMeta(p);
     const desc = descs.find(d => platformId(d.platform) === m.id);
-    const snap = latestByPlatform.get(item.itemId + '|' + m.id);
-    const totals = {
-      impressions: Number(snap && snap.impressions) || 0,
-      views: Number(snap && snap.views) || 0,
-      watchers: Number(snap && snap.watchers) || 0,
-      clicks: Number(snap && snap.clicks) || 0,
-    };
-    const reach = totals.impressions || totals.views;
-    const ctr = reach ? ((totals.clicks / reach) * 100).toFixed(1) + '%' : '—';
     return `
       <div class="listing-block">
         <div class="lb-head"><span class="platform-tag" style="background:${m.color}">${escapeHtml(m.label)}</span></div>
         ${desc ? `<div class="lb-title">${escapeHtml(desc.suggestedTitle || '')}</div><p class="lb-desc">${escapeHtml(desc.description || '')}</p>` : '<p class="lb-desc">No saved title/description for this platform yet.</p>'}
-        <div class="lb-metrics">
-          <span><b>${totals.impressions}</b> impressions</span>
-          <span><b>${totals.views}</b> views</span>
-          <span><b>${totals.watchers}</b> watchers</span>
-          <span><b>${totals.clicks}</b> clicks</span>
-          <span><b>${ctr}</b> click rate</span>
-          ${snap ? `<span class="lb-asof">as of ${escapeHtml(snap.date || '')}</span>` : ''}
-        </div>
       </div>
     `;
   }).join('') || '<p class="status-msg" style="margin:0">No platform listings recorded for this item yet.</p>';
@@ -448,15 +455,43 @@ document.getElementById('showSoldList').addEventListener('change', e => {
   state.listShowSold = e.target.checked;
   renderList();
 });
+document.getElementById('listSortSelect').addEventListener('change', e => {
+  state.listSort = e.target.value;
+  renderList();
+});
+
+// Aggregates views/clicks across all of an item's platforms — used for
+// sorting the list view; wheel/category views stay alphabetical since
+// they're a browse-by-category tool, not a ranked list.
+function itemSortStats(item, latestByPlatform) {
+  const platforms = splitPlatforms(item.platform);
+  let views = 0, clicks = 0;
+  platforms.forEach(p => {
+    const m = platformMeta(p);
+    const snap = latestByPlatform.get(item.itemId + '|' + m.id);
+    views += Number(snap && (snap.views || snap.impressions)) || 0;
+    clicks += Number(snap && snap.clicks) || 0;
+  });
+  return { views, clicks, ctr: views ? clicks / views : 0, price: parseMoney(item.listPrice) };
+}
 
 function renderList() {
   const container = document.getElementById('catSections');
   container.innerHTML = '';
+  const latestByPlatform = latestMetricsByItemPlatform();
 
   activeCategories().filter(c => state.listActiveCats.has(c.id)).forEach(cat => {
     let items = state.inventory.filter(it => categoryMeta(it.category).id === cat.id);
     if (!state.listShowSold) items = items.filter(it => !isSold(it));
-    items = items.slice().sort((a, b) => (a.item || a.brand || '').localeCompare(b.item || b.brand || ''));
+    const withStats = items.map(it => ({ it, stats: itemSortStats(it, latestByPlatform) }));
+    withStats.sort((a, b) => {
+      if (state.listSort === 'views') return b.stats.views - a.stats.views;
+      if (state.listSort === 'clicks') return b.stats.clicks - a.stats.clicks;
+      if (state.listSort === 'ctr') return b.stats.ctr - a.stats.ctr;
+      if (state.listSort === 'price') return b.stats.price - a.stats.price;
+      return (a.it.item || a.it.brand || '').localeCompare(b.it.item || b.it.brand || '');
+    });
+    items = withStats.map(x => x.it);
 
     const section = document.createElement('div');
     section.className = 'cat-section';
@@ -624,8 +659,9 @@ function renderTrends() {
   const byTerm = new Map();
   state.trends.forEach(t => {
     if (!t.avgSoldPrice) return;
-    const entry = byTerm.get(t.searchTerm) || { term: t.searchTerm, platforms: [] };
+    const entry = byTerm.get(t.searchTerm) || { term: t.searchTerm, platforms: [], imageUrl: '' };
     entry.platforms.push(t);
+    if (t.imageUrl && !entry.imageUrl) entry.imageUrl = t.imageUrl;
     byTerm.set(t.searchTerm, entry);
   });
   const cards = [...byTerm.values()].sort((a, b) =>
@@ -639,6 +675,7 @@ function renderTrends() {
   }
   container.innerHTML = cards.map(c => `
     <div class="trend-card">
+      ${c.imageUrl ? `<img class="trend-photo" src="${escapeHtml(c.imageUrl)}" alt="" loading="lazy">` : ''}
       <h4>${escapeHtml(c.term)}</h4>
       ${c.platforms.map(p => `
         <div class="prow"><span>${escapeHtml(p.platform)} avg sold</span><b>${fmtMoney(Number(p.avgSoldPrice))}</b></div>
@@ -683,6 +720,7 @@ function acquireCardHTML(a) {
   }
   return `
     <div class="acquire-card" style="--pri:${pri.color}">
+      ${a.imageUrl ? `<img class="acquire-photo" src="${escapeHtml(a.imageUrl)}" alt="" loading="lazy">` : ''}
       <h3>${escapeHtml(a.brand)} — ${escapeHtml(a.itemType)}<span class="priority-tag">${escapeHtml(a.priority || 'Medium')}</span></h3>
       <div class="meta">
         ${a.size ? `<span><b>Size —</b> ${escapeHtml(a.size)}</span>` : ''}

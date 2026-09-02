@@ -75,6 +75,15 @@
     <!-- ---------- LIST MODE ---------- -->
     <div id="listMode" style="display:none">
       <div class="chip-row" id="chipRow">
+        <label class="sort-control">Sort
+          <select id="listSortSelect">
+            <option value="name">Name</option>
+            <option value="views">Most views</option>
+            <option value="clicks">Most clicks</option>
+            <option value="ctr">Highest click rate</option>
+            <option value="price">Highest price</option>
+          </select>
+        </label>
         <label class="chip-toggle"><input type="checkbox" id="showSoldList"> show sold</label>
       </div>
       <div id="catSections"></div>

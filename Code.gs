@@ -73,6 +73,8 @@ function doPost(e) {
   if (action === 'setPhoto') return jsonOut(setPhoto(body));
   if (action === 'setAcquireEbayData') return jsonOut(setAcquireEbayData(body));
   if (action === 'setTrendEbayData') return jsonOut(setTrendEbayData(body));
+  if (action === 'runMaintenance') return jsonOut(runMaintenance(body.task));
+  if (action === 'debugPoshmark') return jsonOut(debugPoshmark(body.query));
 
   return jsonOut({ error: 'unknown action' });
 }
@@ -331,7 +333,7 @@ function addMetricEntry(body) {
 var ACQUIRE_HEADERS = [
   'ID', 'Brand', 'Item Type', 'Size', 'Color', 'Condition', 'Target Price', 'Best Platform', 'Priority', 'Notes', 'Date Added',
   'eBay Avg Price', 'eBay Sales Found', 'Poshmark Avg Price', 'Poshmark Sales Found', 'Last Checked',
-  'eBay Sell-Through %',
+  'eBay Sell-Through %', 'Image URL',
 ];
 
 function getAcquireSheet() {
@@ -341,10 +343,10 @@ function getAcquireSheet() {
     sheet = ss.insertSheet(ACQUIRE_SHEET_NAME);
     sheet.appendRow(ACQUIRE_HEADERS);
     sheet.setFrozenRows(1);
-  } else if (sheet.getLastRow() <= 1) {
-    // No data rows yet, so it's safe to keep the header row fully in sync
-    // with the current column layout (including inserting new columns in
-    // the middle, like Color) without any risk of misaligning real data.
+  } else if (sheet.getLastColumn() < ACQUIRE_HEADERS.length) {
+    // Appends any newly-added header columns (e.g. Image URL) without
+    // touching existing rows/columns — safe as long as new columns are
+    // always added at the end, never inserted in the middle.
     sheet.getRange(1, 1, 1, ACQUIRE_HEADERS.length).setValues([ACQUIRE_HEADERS]);
   }
   return sheet;
@@ -374,9 +376,23 @@ function getAcquire() {
       poshmarkSalesFound: data[r][14] || '',
       lastChecked: formatDate(data[r][15]),
       ebaySellThrough: data[r][16] || '',
+      imageUrl: data[r][17] || '',
     });
   }
   return out;
+}
+
+// Looks up a Poshmark comp + a real reference photo for this row right away
+// (instead of waiting for tomorrow's automatic refresh) and writes both in,
+// so a newly added/edited watchlist card isn't blank until the next day.
+function refreshAcquireRow(sheet, row, brand, itemType, size, color) {
+  var query = [brand, itemType, size, color].filter(String).join(' ').trim();
+  if (!query) return;
+  var poshResult = searchPoshmarkSold(query);
+  var today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  sheet.getRange(row, 14, 1, 2).setValues([[poshResult.avgPrice || '', poshResult.count || '']]);
+  sheet.getRange(row, 16).setValue(today);
+  if (poshResult.imageUrl) sheet.getRange(row, 18).setValue(poshResult.imageUrl);
 }
 
 function addAcquireItem(body) {
@@ -387,6 +403,7 @@ function addAcquireItem(body) {
     id, body.brand || '', body.itemType || '', body.size || '', body.color || '', body.condition || '',
     body.targetPrice || '', body.bestPlatform || '', body.priority || 'Medium', body.notes || '', dateAdded,
   ]);
+  refreshAcquireRow(sheet, sheet.getLastRow(), body.brand, body.itemType, body.size, body.color);
   return { id: id, dateAdded: dateAdded };
 }
 
@@ -399,6 +416,7 @@ function updateAcquireItem(body) {
         body.brand || '', body.itemType || '', body.size || '', body.color || '', body.condition || '',
         body.targetPrice || '', body.bestPlatform || '', body.priority || 'Medium', body.notes || '',
       ]]);
+      refreshAcquireRow(sheet, r + 1, body.brand, body.itemType, body.size, body.color);
       return { ok: true };
     }
   }
@@ -592,7 +610,7 @@ function setPhoto(body) {
 // ---------------------------------------------------------------------
 
 var TRENDS_SHEET_NAME = 'Market Trends';
-var TRENDS_HEADERS = ['Search Term', 'Platform', 'Avg Sold Price', 'Recent Sales Found', 'Sell-Through %', 'Last Checked'];
+var TRENDS_HEADERS = ['Search Term', 'Platform', 'Avg Sold Price', 'Recent Sales Found', 'Sell-Through %', 'Last Checked', 'Image URL'];
 
 // Curated starting set of well-known thrift/resale categories. Edit this
 // list directly in the Apps Script editor to track different categories —
@@ -673,26 +691,45 @@ function searchPoshmarkSold(query, debug) {
     });
     var code = resp.getResponseCode();
     var html = resp.getContentText();
-    var priceRe = /tile-grid-redesign__price-current">\s*\$([\d,]+(?:\.\d{2})?)/g;
     var prices = [];
-    var m;
-    while ((m = priceRe.exec(html)) !== null) {
-      prices.push(parseFloat(m[1].replace(/,/g, '')));
+    var imageUrl = '';
+    var parseError = null;
+    if (code === 200) {
+      var jsonStr = extractInitialStateJson(html);
+      if (jsonStr) {
+        try {
+          var state = JSON.parse(jsonStr);
+          var items = state && state['$_search'] && state['$_search'].gridData && state['$_search'].gridData.data;
+          if (items && items.length) {
+            items.forEach(function (it) {
+              if (it && it.inventory && it.inventory.status === 'sold_out' && typeof it.price === 'number' && it.price > 0) {
+                prices.push(it.price);
+                if (!imageUrl && it.picture_url) imageUrl = it.picture_url;
+              }
+            });
+          }
+        } catch (e) {
+          parseError = String(e);
+        }
+      }
     }
+    var debugInfo = null;
     if (debug) {
-      var markerIdx = html.indexOf('tile-grid-redesign__price-current');
-      Logger.log('[Poshmark] query=%s status=%s length=%s regexMatches=%s markerContext=%s title=%s',
-        query, code, html.length, prices.length,
-        markerIdx !== -1 ? html.slice(Math.max(0, markerIdx - 80), markerIdx + 80) : 'no marker found',
-        (html.match(/<title>([\s\S]*?)<\/title>/) || [])[1]);
+      debugInfo = {
+        query: query, status: code, length: html.length, soldItemsFound: prices.length,
+        parseError: parseError,
+        title: (html.match(/<title>([\s\S]*?)<\/title>/) || [])[1] || ''
+      };
+      Logger.log('[Poshmark] query=%s status=%s length=%s soldItemsFound=%s parseError=%s title=%s',
+        query, code, html.length, prices.length, parseError, debugInfo.title);
     }
-    if (code !== 200) return { avgPrice: 0, count: 0 };
-    if (!prices.length) return { avgPrice: 0, count: 0 };
+    if (code !== 200) return { avgPrice: 0, count: 0, imageUrl: '', debug: debugInfo };
+    if (!prices.length) return { avgPrice: 0, count: 0, imageUrl: '', debug: debugInfo };
     var sum = prices.reduce(function (a, b) { return a + b; }, 0);
-    return { avgPrice: Math.round((sum / prices.length) * 100) / 100, count: prices.length };
+    return { avgPrice: Math.round((sum / prices.length) * 100) / 100, count: prices.length, imageUrl: imageUrl, debug: debugInfo };
   } catch (err) {
     if (debug) Logger.log('[Poshmark] query=%s EXCEPTION %s', query, err);
-    return { avgPrice: 0, count: 0 };
+    return { avgPrice: 0, count: 0, imageUrl: '', debug: debug ? { exception: String(err) } : null };
   }
 }
 
@@ -710,6 +747,11 @@ function getTrendsSheet() {
     sheet = ss.insertSheet(TRENDS_SHEET_NAME);
     sheet.appendRow(TRENDS_HEADERS);
     sheet.setFrozenRows(1);
+  } else if (sheet.getLastColumn() < TRENDS_HEADERS.length) {
+    // Appends any newly-added header columns (e.g. Image URL) without
+    // touching existing rows/columns — safe as long as new columns are
+    // always added at the end, never inserted in the middle.
+    sheet.getRange(1, 1, 1, TRENDS_HEADERS.length).setValues([TRENDS_HEADERS]);
   }
   return sheet;
 }
@@ -727,6 +769,7 @@ function getTrends() {
       recentSalesFound: data[r][3] || '',
       sellThrough: data[r][4] || '',
       lastChecked: formatDate(data[r][5]),
+      imageUrl: data[r][6] || '',
     });
   }
   return out;
@@ -735,17 +778,18 @@ function getTrends() {
 // Upserts one (searchTerm x platform) row in Market Trends — used by both
 // the automatic Poshmark refresh and the manual eBay/Terapeak pull, so
 // neither one wipes out the other's data when it runs.
-function upsertTrendRow(searchTerm, platform, avgPrice, salesFound, sellThrough) {
+function upsertTrendRow(searchTerm, platform, avgPrice, salesFound, sellThrough, imageUrl) {
   var sheet = getTrendsSheet();
   var data = sheet.getDataRange().getValues();
   var today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
   for (var r = 1; r < data.length; r++) {
     if (String(data[r][0]) === String(searchTerm) && String(data[r][1]) === String(platform)) {
       sheet.getRange(r + 1, 3, 1, 4).setValues([[avgPrice || '', salesFound || '', sellThrough || '', today]]);
+      if (imageUrl) sheet.getRange(r + 1, 7).setValue(imageUrl);
       return;
     }
   }
-  sheet.appendRow([searchTerm, platform, avgPrice || '', salesFound || '', sellThrough || '', today]);
+  sheet.appendRow([searchTerm, platform, avgPrice || '', salesFound || '', sellThrough || '', today, imageUrl || '']);
 }
 
 // Refreshes the Poshmark side of both the Acquire Watchlist comps and the
@@ -755,25 +799,19 @@ function upsertTrendRow(searchTerm, platform, avgPrice, salesFound, sellThrough)
 // Terapeak pull (see setAcquireEbayData / setTrendEbayData) since eBay
 // blocks this kind of automated request (see the header comment above).
 function refreshMarketData() {
-  var today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
-
   var acqSheet = getAcquireSheet();
   var acqData = acqSheet.getDataRange().getValues();
   for (var r = 1; r < acqData.length; r++) {
     if (!acqData[r][0]) continue;
     // Brand + Item Type + Size + Color, so the comp matches what you'd
     // actually be looking for at the thrift, not just the broad category.
-    var query = [acqData[r][1], acqData[r][2], acqData[r][3], acqData[r][4]].filter(String).join(' ').trim();
-    if (!query) continue;
-    var poshResult = searchPoshmarkSold(query);
-    acqSheet.getRange(r + 1, 14, 1, 2).setValues([[poshResult.avgPrice || '', poshResult.count || '']]);
-    acqSheet.getRange(r + 1, 16).setValue(today);
+    refreshAcquireRow(acqSheet, r + 1, acqData[r][1], acqData[r][2], acqData[r][3], acqData[r][4]);
     Utilities.sleep(1500);
   }
 
   TREND_CANDIDATES.forEach(function (term) {
     var poshResult = searchPoshmarkSold(term);
-    upsertTrendRow(term, 'Poshmark', poshResult.avgPrice, poshResult.count, '');
+    upsertTrendRow(term, 'Poshmark', poshResult.avgPrice, poshResult.count, '', poshResult.imageUrl);
     Utilities.sleep(1500);
   });
 }
@@ -821,6 +859,52 @@ function cleanupOldTrendRows() {
     }
   }
   Logger.log('Removed %s stale row(s) from Market Trends.', removed);
+  return { removed: removed };
+}
+
+// Lets maintenance functions be triggered over HTTP (from clasp/curl) instead
+// of needing the Apps Script editor's Run menu. Whitelisted by name on purpose.
+function runMaintenance(task) {
+  var allowed = {
+    cleanupOldTrendRows: cleanupOldTrendRows,
+    refreshMarketData: refreshMarketData,
+    setupMarketDataTrigger: setupMarketDataTrigger
+  };
+  var fn = allowed[task];
+  if (!fn) return { error: 'unknown task: ' + task };
+  var result = fn();
+  return { ok: true, task: task, result: result || null };
+}
+
+function debugPoshmark(query) {
+  return searchPoshmarkSold(query || 'Timberland pants', true);
+}
+
+// Extracts the exact JSON substring for window.__INITIAL_STATE__={...} by
+// walking brace depth (safer than regex for a multi-MB minified blob).
+function extractInitialStateJson(html) {
+  var marker = 'window.__INITIAL_STATE__=';
+  var start = html.indexOf(marker);
+  if (start === -1) return null;
+  var i = start + marker.length;
+  if (html.charAt(i) !== '{') return null;
+  var depth = 0, inStr = false, strCh = '', esc = false;
+  for (var j = i; j < html.length; j++) {
+    var c = html.charAt(j);
+    if (inStr) {
+      if (esc) { esc = false; }
+      else if (c === '\\') { esc = true; }
+      else if (c === strCh) { inStr = false; }
+      continue;
+    }
+    if (c === '"' || c === "'") { inStr = true; strCh = c; continue; }
+    if (c === '{') depth++;
+    else if (c === '}') {
+      depth--;
+      if (depth === 0) return html.slice(i, j + 1);
+    }
+  }
+  return null;
 }
 
 function setupMarketDataTrigger() {
