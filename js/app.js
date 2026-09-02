@@ -774,12 +774,13 @@ async function saveAcquireEdit(id, card) {
   if (!body.brand || !body.itemType) { status.textContent = 'Fill in brand and item type.'; return; }
   status.textContent = 'Saving...';
 
+  let saved = null;
   if (connected()) {
-    try { await apiPost('updateAcquireItem', body); }
+    try { saved = await apiPost('updateAcquireItem', body); }
     catch { status.textContent = 'Could not save to your Sheet.'; return; }
   }
   const item = state.acquire.find(a => String(a.id) === String(id));
-  if (item) Object.assign(item, body);
+  if (item) Object.assign(item, body, saved || {});
   if (!connected()) localSet('sellHub.acquire.local', state.acquire);
 
   state.editingAcquireId = null;
@@ -809,7 +810,7 @@ async function addAcquireItem() {
     try {
       const saved = await apiPost('addAcquireItem', body);
       if (!saved || !saved.id) { status.textContent = 'Sheet did not confirm the save — is Code.gs redeployed?'; return; }
-      state.acquire.push({ ...body, id: saved.id, dateAdded: saved.dateAdded });
+      state.acquire.push({ ...body, ...saved });
     } catch { status.textContent = 'Could not save to your Sheet.'; return; }
   } else {
     state.acquire.push(localEntry);

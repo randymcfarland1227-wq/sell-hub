@@ -387,12 +387,16 @@ function getAcquire() {
 // so a newly added/edited watchlist card isn't blank until the next day.
 function refreshAcquireRow(sheet, row, brand, itemType, size, color) {
   var query = [brand, itemType, size, color].filter(String).join(' ').trim();
-  if (!query) return;
+  if (!query) return null;
   var poshResult = searchPoshmarkSold(query);
   var today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
   sheet.getRange(row, 14, 1, 2).setValues([[poshResult.avgPrice || '', poshResult.count || '']]);
   sheet.getRange(row, 16).setValue(today);
   if (poshResult.imageUrl) sheet.getRange(row, 18).setValue(poshResult.imageUrl);
+  return {
+    poshmarkAvgPrice: poshResult.avgPrice || '', poshmarkSalesFound: poshResult.count || '',
+    lastChecked: today, imageUrl: poshResult.imageUrl || '',
+  };
 }
 
 function addAcquireItem(body) {
@@ -403,8 +407,10 @@ function addAcquireItem(body) {
     id, body.brand || '', body.itemType || '', body.size || '', body.color || '', body.condition || '',
     body.targetPrice || '', body.bestPlatform || '', body.priority || 'Medium', body.notes || '', dateAdded,
   ]);
-  refreshAcquireRow(sheet, sheet.getLastRow(), body.brand, body.itemType, body.size, body.color);
-  return { id: id, dateAdded: dateAdded };
+  var refreshed = refreshAcquireRow(sheet, sheet.getLastRow(), body.brand, body.itemType, body.size, body.color);
+  var out = { id: id, dateAdded: dateAdded };
+  if (refreshed) for (var k in refreshed) out[k] = refreshed[k];
+  return out;
 }
 
 function updateAcquireItem(body) {
@@ -416,8 +422,10 @@ function updateAcquireItem(body) {
         body.brand || '', body.itemType || '', body.size || '', body.color || '', body.condition || '',
         body.targetPrice || '', body.bestPlatform || '', body.priority || 'Medium', body.notes || '',
       ]]);
-      refreshAcquireRow(sheet, r + 1, body.brand, body.itemType, body.size, body.color);
-      return { ok: true };
+      var refreshed = refreshAcquireRow(sheet, r + 1, body.brand, body.itemType, body.size, body.color);
+      var out = { ok: true };
+      if (refreshed) for (var k in refreshed) out[k] = refreshed[k];
+      return out;
     }
   }
   return { ok: false };
