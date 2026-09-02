@@ -660,10 +660,13 @@ function acquireCardHTML(a) {
         <div class="field"><label>Item type</label><input type="text" class="ae-itemType" value="${escapeHtml(a.itemType)}"></div>
         <div class="field-row">
           <div class="field"><label>Size</label><input type="text" class="ae-size" value="${escapeHtml(a.size)}"></div>
-          <div class="field"><label>Condition</label><input type="text" class="ae-condition" value="${escapeHtml(a.condition)}"></div>
+          <div class="field"><label>Color</label><input type="text" class="ae-color" value="${escapeHtml(a.color)}"></div>
         </div>
         <div class="field-row">
+          <div class="field"><label>Condition</label><input type="text" class="ae-condition" value="${escapeHtml(a.condition)}"></div>
           <div class="field"><label>Target price</label><input type="text" class="ae-targetPrice" value="${escapeHtml(a.targetPrice)}"></div>
+        </div>
+        <div class="field-row">
           <div class="field"><label>Best platform</label><select class="ae-bestPlatform">${platformOptionsHTML(a.bestPlatform)}</select></div>
         </div>
         <div class="field-row">
@@ -683,6 +686,7 @@ function acquireCardHTML(a) {
       <h3>${escapeHtml(a.brand)} — ${escapeHtml(a.itemType)}<span class="priority-tag">${escapeHtml(a.priority || 'Medium')}</span></h3>
       <div class="meta">
         ${a.size ? `<span><b>Size —</b> ${escapeHtml(a.size)}</span>` : ''}
+        ${a.color ? `<span><b>Color —</b> ${escapeHtml(a.color)}</span>` : ''}
         ${a.condition ? `<span><b>Condition —</b> ${escapeHtml(a.condition)}</span>` : ''}
         ${a.targetPrice ? `<span><b>Target price —</b> ${escapeHtml(a.targetPrice)}</span>` : ''}
         ${a.bestPlatform ? `<span><b>Best platform —</b> ${escapeHtml((PLATFORM_META[a.bestPlatform] || { label: a.bestPlatform }).label)}</span>` : ''}
@@ -722,6 +726,7 @@ async function saveAcquireEdit(id, card) {
     brand: card.querySelector('.ae-brand').value.trim(),
     itemType: card.querySelector('.ae-itemType').value.trim(),
     size: card.querySelector('.ae-size').value.trim(),
+    color: card.querySelector('.ae-color').value.trim(),
     condition: card.querySelector('.ae-condition').value.trim(),
     targetPrice: card.querySelector('.ae-targetPrice').value.trim(),
     bestPlatform: card.querySelector('.ae-bestPlatform').value,
@@ -749,6 +754,7 @@ async function addAcquireItem() {
     brand: document.getElementById('acqBrand').value.trim(),
     itemType: document.getElementById('acqItemType').value.trim(),
     size: document.getElementById('acqSize').value.trim(),
+    color: document.getElementById('acqColor').value.trim(),
     condition: document.getElementById('acqCondition').value.trim(),
     targetPrice: document.getElementById('acqTargetPrice').value.trim(),
     bestPlatform: document.getElementById('acqBestPlatform').value,
@@ -772,7 +778,7 @@ async function addAcquireItem() {
     localSet('sellHub.acquire.local', state.acquire);
   }
 
-  ['acqBrand', 'acqItemType', 'acqSize', 'acqCondition', 'acqTargetPrice', 'acqNotes'].forEach(id => document.getElementById(id).value = '');
+  ['acqBrand', 'acqItemType', 'acqSize', 'acqColor', 'acqCondition', 'acqTargetPrice', 'acqNotes'].forEach(id => document.getElementById(id).value = '');
   status.textContent = 'Added.';
   setTimeout(() => status.textContent = '', 1500);
   renderAcquire();

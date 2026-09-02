@@ -16,15 +16,15 @@
  *   GET  ?action=postingQueue  -> [{listingId, itemId, platform, postingOrder}]
  *   GET  ?action=metrics       -> [{date, listingId, itemId, platform, impressions, views,
  *                                   watchers, clicks, price, source}]
- *   GET  ?action=acquire       -> [{id, brand, itemType, size, condition, targetPrice,
+ *   GET  ?action=acquire       -> [{id, brand, itemType, size, color, condition, targetPrice,
  *                                   bestPlatform, priority, notes, dateAdded, ebayAvgPrice,
  *                                   ebaySalesFound, poshmarkAvgPrice, poshmarkSalesFound, lastChecked,
  *                                   ebaySellThrough}]
  *   GET  ?action=photos        -> [{itemId, platform, photoUrl}]
  *   GET  ?action=trends        -> [{searchTerm, platform, avgSoldPrice, recentSalesFound, sellThrough, lastChecked}]
  *   POST {action:'addMetricEntry', listingId, itemId, platform, impressions, views, watchers, clicks, price}
- *   POST {action:'addAcquireItem', brand, itemType, size, condition, targetPrice, bestPlatform, priority, notes} -> the new row
- *   POST {action:'updateAcquireItem', id, brand, itemType, size, condition, targetPrice, bestPlatform, priority, notes}
+ *   POST {action:'addAcquireItem', brand, itemType, size, color, condition, targetPrice, bestPlatform, priority, notes} -> the new row
+ *   POST {action:'updateAcquireItem', id, brand, itemType, size, color, condition, targetPrice, bestPlatform, priority, notes}
  *   POST {action:'deleteAcquireItem', id}
  *   POST {action:'markSold', itemId, sourceTab, soldPrice, buyer} -> writes Status=Sold back
  *        into the correct source tab (Clothing/Non Clothing Sell Inventory), located via
@@ -329,7 +329,7 @@ function addMetricEntry(body) {
 // ---------------------------------------------------------------------
 
 var ACQUIRE_HEADERS = [
-  'ID', 'Brand', 'Item Type', 'Size', 'Condition', 'Target Price', 'Best Platform', 'Priority', 'Notes', 'Date Added',
+  'ID', 'Brand', 'Item Type', 'Size', 'Color', 'Condition', 'Target Price', 'Best Platform', 'Priority', 'Notes', 'Date Added',
   'eBay Avg Price', 'eBay Sales Found', 'Poshmark Avg Price', 'Poshmark Sales Found', 'Last Checked',
   'eBay Sell-Through %',
 ];
@@ -341,10 +341,11 @@ function getAcquireSheet() {
     sheet = ss.insertSheet(ACQUIRE_SHEET_NAME);
     sheet.appendRow(ACQUIRE_HEADERS);
     sheet.setFrozenRows(1);
-  } else if (sheet.getLastColumn() < ACQUIRE_HEADERS.length) {
-    // Upgrade older sheets created before market-data columns existed.
-    sheet.getRange(1, sheet.getLastColumn() + 1, 1, ACQUIRE_HEADERS.length - sheet.getLastColumn())
-      .setValues([ACQUIRE_HEADERS.slice(sheet.getLastColumn())]);
+  } else if (sheet.getLastRow() <= 1) {
+    // No data rows yet, so it's safe to keep the header row fully in sync
+    // with the current column layout (including inserting new columns in
+    // the middle, like Color) without any risk of misaligning real data.
+    sheet.getRange(1, 1, 1, ACQUIRE_HEADERS.length).setValues([ACQUIRE_HEADERS]);
   }
   return sheet;
 }
@@ -360,18 +361,19 @@ function getAcquire() {
       brand: data[r][1],
       itemType: data[r][2],
       size: data[r][3],
-      condition: data[r][4],
-      targetPrice: data[r][5],
-      bestPlatform: data[r][6],
-      priority: data[r][7],
-      notes: data[r][8],
-      dateAdded: formatDate(data[r][9]),
-      ebayAvgPrice: data[r][10] || '',
-      ebaySalesFound: data[r][11] || '',
-      poshmarkAvgPrice: data[r][12] || '',
-      poshmarkSalesFound: data[r][13] || '',
-      lastChecked: formatDate(data[r][14]),
-      ebaySellThrough: data[r][15] || '',
+      color: data[r][4],
+      condition: data[r][5],
+      targetPrice: data[r][6],
+      bestPlatform: data[r][7],
+      priority: data[r][8],
+      notes: data[r][9],
+      dateAdded: formatDate(data[r][10]),
+      ebayAvgPrice: data[r][11] || '',
+      ebaySalesFound: data[r][12] || '',
+      poshmarkAvgPrice: data[r][13] || '',
+      poshmarkSalesFound: data[r][14] || '',
+      lastChecked: formatDate(data[r][15]),
+      ebaySellThrough: data[r][16] || '',
     });
   }
   return out;
@@ -382,7 +384,7 @@ function addAcquireItem(body) {
   var id = 'acq-' + new Date().getTime();
   var dateAdded = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
   sheet.appendRow([
-    id, body.brand || '', body.itemType || '', body.size || '', body.condition || '',
+    id, body.brand || '', body.itemType || '', body.size || '', body.color || '', body.condition || '',
     body.targetPrice || '', body.bestPlatform || '', body.priority || 'Medium', body.notes || '', dateAdded,
   ]);
   return { id: id, dateAdded: dateAdded };
@@ -393,8 +395,8 @@ function updateAcquireItem(body) {
   var data = sheet.getDataRange().getValues();
   for (var r = 1; r < data.length; r++) {
     if (String(data[r][0]) === String(body.id)) {
-      sheet.getRange(r + 1, 2, 1, 8).setValues([[
-        body.brand || '', body.itemType || '', body.size || '', body.condition || '',
+      sheet.getRange(r + 1, 2, 1, 9).setValues([[
+        body.brand || '', body.itemType || '', body.size || '', body.color || '', body.condition || '',
         body.targetPrice || '', body.bestPlatform || '', body.priority || 'Medium', body.notes || '',
       ]]);
       return { ok: true };
@@ -595,11 +597,30 @@ var TRENDS_HEADERS = ['Search Term', 'Platform', 'Avg Sold Price', 'Recent Sales
 // Curated starting set of well-known thrift/resale categories. Edit this
 // list directly in the Apps Script editor to track different categories —
 // it's just a plain array, no sheet involved.
+// Built from what's actually in this seller's inventory (Timberland, Ralph
+// Lauren, Calvin Klein, Banana Republic, etc. — mostly mid-range menswear,
+// plus a couple of shoe/electronics categories), not a generic "trending
+// brands" list — Jordan, Coach, and Lululemon-style picks don't mean
+// anything if you don't deal in that category. Each brand appears twice:
+// once as a general category search, and once qualified with the exact
+// size this seller's own item is, so you can compare "any size" demand
+// against the specific size you'd actually be checking for at the thrift.
+// Edit this list directly to match your own categories/sizes as they change.
 var TREND_CANDIDATES = [
-  'Carhartt jacket', 'Nike hoodie', 'Levis 501 jeans', 'The North Face jacket',
-  'Patagonia fleece', 'Jordan sneakers', 'Dr Martens boots', 'Coach bag',
-  'Ralph Lauren polo', 'Lululemon leggings', 'Champion hoodie', 'Vans shoes',
-  'Nike Dunk', 'Timberland boots', 'Columbia jacket',
+  'Timberland pants', 'Timberland pants 34',
+  'American Eagle jeans', 'American Eagle jeans 32',
+  'Calvin Klein pants', 'Calvin Klein pants 32',
+  'Ralph Lauren polo', 'Ralph Lauren polo 34',
+  'Banana Republic polo', 'Banana Republic polo XL',
+  'Lee pants', 'Lee pants 34',
+  'Nordstrom shorts', 'Nordstrom shorts 34',
+  'Stanley hoodie', 'Stanley hoodie Large',
+  'Under Armour jacket', 'Under Armour jacket XL',
+  'Savage X Fenty shirt',
+  'Victoria Secret swimsuit',
+  'Misguided swimsuit',
+  'Ugg boots', 'Ugg boots size 7',
+  'Vans shoes', 'Vans shoes size 13',
 ];
 
 // Depop has no public "sold items" filter (checked directly — its search
@@ -740,11 +761,13 @@ function refreshMarketData() {
   var acqData = acqSheet.getDataRange().getValues();
   for (var r = 1; r < acqData.length; r++) {
     if (!acqData[r][0]) continue;
-    var query = (acqData[r][1] + ' ' + acqData[r][2]).trim();
+    // Brand + Item Type + Size + Color, so the comp matches what you'd
+    // actually be looking for at the thrift, not just the broad category.
+    var query = [acqData[r][1], acqData[r][2], acqData[r][3], acqData[r][4]].filter(String).join(' ').trim();
     if (!query) continue;
     var poshResult = searchPoshmarkSold(query);
-    acqSheet.getRange(r + 1, 13, 1, 2).setValues([[poshResult.avgPrice || '', poshResult.count || '']]);
-    acqSheet.getRange(r + 1, 15).setValue(today);
+    acqSheet.getRange(r + 1, 14, 1, 2).setValues([[poshResult.avgPrice || '', poshResult.count || '']]);
+    acqSheet.getRange(r + 1, 16).setValue(today);
     Utilities.sleep(1500);
   }
 
@@ -764,9 +787,9 @@ function setAcquireEbayData(body) {
   var today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
   for (var r = 1; r < data.length; r++) {
     if (String(data[r][0]) === String(body.id)) {
-      sheet.getRange(r + 1, 11, 1, 2).setValues([[body.avgPrice || '', body.salesFound || '']]);
-      sheet.getRange(r + 1, 15).setValue(today);
-      sheet.getRange(r + 1, 16).setValue(body.sellThrough || '');
+      sheet.getRange(r + 1, 12, 1, 2).setValues([[body.avgPrice || '', body.salesFound || '']]);
+      sheet.getRange(r + 1, 16).setValue(today);
+      sheet.getRange(r + 1, 17).setValue(body.sellThrough || '');
       return { ok: true };
     }
   }
