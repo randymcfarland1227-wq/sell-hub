@@ -71,7 +71,7 @@ The Acquire tab's "Trending to look for" section and each watchlist item's sold-
 
 **eBay** — its public search actively blocks automated requests (returns a 403 error page to anything that isn't a real browser), so this can't run on a timer. The real data lives in eBay's free Seller Hub **Research** tool (Terapeak — More → Research in Seller Hub, no Store subscription needed) and includes the actual sell-through rate, which is better data than the scrape ever would have given. Since it needs your live login, it's a manual pull: ask Claude to refresh it whenever you want current eBay numbers, the same way the per-listing stats and cover photos worked.
 
-**Editing the trending categories:** open `Code.gs` and edit the `TREND_CANDIDATES` array near the top of the "Market data" section — it's a plain list of search terms (e.g. `'Carhartt jacket'`). Add, remove, or change entries, then redeploy (New version). This list drives both the Poshmark auto-refresh and whatever eBay pull is run manually.
+**Editing the trending categories:** open `Code.gs` and edit the `TREND_CANDIDATES` array near the top of the "Market data" section — it's a plain list of general sourcing categories (e.g. `'Carhartt jacket'`), meant to answer "what's worth grabbing at the thrift store," not to mirror what's already in the Sheet. Add, remove, or change entries, then redeploy (New version). This list drives both the Poshmark auto-refresh and whatever eBay pull is run manually.
 
 ## Editing categories/platforms
 

@@ -620,33 +620,31 @@ function setPhoto(body) {
 var TRENDS_SHEET_NAME = 'Market Trends';
 var TRENDS_HEADERS = ['Search Term', 'Platform', 'Avg Sold Price', 'Recent Sales Found', 'Sell-Through %', 'Last Checked', 'Image URL'];
 
-// Curated starting set of well-known thrift/resale categories. Edit this
-// list directly in the Apps Script editor to track different categories —
-// it's just a plain array, no sheet involved.
-// Built from what's actually in this seller's inventory (Timberland, Ralph
-// Lauren, Calvin Klein, Banana Republic, etc. — mostly mid-range menswear,
-// plus a couple of shoe/electronics categories), not a generic "trending
-// brands" list — Jordan, Coach, and Lululemon-style picks don't mean
-// anything if you don't deal in that category. Each brand appears twice:
-// once as a general category search, and once qualified with the exact
-// size this seller's own item is, so you can compare "any size" demand
-// against the specific size you'd actually be checking for at the thrift.
-// Edit this list directly to match your own categories/sizes as they change.
+// General thrift/yard-sale sourcing targets — brands and categories with a
+// well-established track record of reselling well, so this is a "what
+// should I keep an eye out for while I'm digging through racks/bins"
+// list, not a mirror of what's already in the Sheet. (An earlier version
+// of this list *was* built from this seller's own inventory — Timberland,
+// Ralph Lauren, Calvin Klein, etc. — which meant Acquire only ever showed
+// trends for stuff already owned, defeating its purpose as a sourcing
+// tool. A few of those categories are kept below since they're also
+// broadly well-known resale picks, not because they're already owned.)
+// Edit this list directly to add/remove categories as trends shift.
 var TREND_CANDIDATES = [
-  'Timberland pants', 'Timberland pants 34',
-  'American Eagle jeans', 'American Eagle jeans 32',
-  'Calvin Klein pants', 'Calvin Klein pants 32',
-  'Ralph Lauren polo', 'Ralph Lauren polo 34',
-  'Banana Republic polo', 'Banana Republic polo XL',
-  'Lee pants', 'Lee pants 34',
-  'Nordstrom shorts', 'Nordstrom shorts 34',
-  'Stanley hoodie', 'Stanley hoodie Large',
-  'Under Armour jacket', 'Under Armour jacket XL',
-  'Savage X Fenty shirt',
-  'Victoria Secret swimsuit',
-  'Misguided swimsuit',
-  'Ugg boots', 'Ugg boots size 7',
-  'Vans shoes', 'Vans shoes size 13',
+  'Carhartt jacket', 'Carhartt overalls',
+  'Patagonia fleece', 'Patagonia jacket',
+  'The North Face jacket', 'The North Face fleece vest',
+  "Levi's 501 jeans", "Levi's denim jacket",
+  'Wrangler jeans', 'Dickies pants',
+  'Nike Jordan sneakers', 'Nike windbreaker',
+  'Adidas track jacket', 'New Balance sneakers',
+  'Vans Old Skool', 'Doc Martens boots',
+  'Lululemon leggings', 'Champion hoodie',
+  'Columbia fleece jacket',
+  'Coach bag', 'Ray-Ban sunglasses', 'Burberry scarf',
+  'Vintage band t-shirt', 'Vintage flannel shirt',
+  'Stanley tumbler', 'Yeti tumbler',
+  'Ralph Lauren polo', 'Timberland boots', 'Calvin Klein jeans', 'Ugg boots', 'Vans shoes',
 ];
 
 // Depop has no public "sold items" filter (checked directly — its search
