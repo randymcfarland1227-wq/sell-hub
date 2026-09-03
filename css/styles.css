@@ -478,6 +478,8 @@ main { padding-top: 20px; }
 .pricing-card.pa-attention { --cat: #c9932e; }
 .pricing-card.pa-opportunity { --cat: #5b6bd6; }
 .pricing-card.pa-ok { --cat: #2f9e6e; }
+.pricing-card.pa-handled { --cat: #2fa3b8; }
+.pricing-card.pa-dismissed { --cat: var(--text-faint); }
 .pricing-card.pa-no-data { --cat: var(--text-faint); }
 
 .pa-badge {
@@ -503,6 +505,21 @@ main { padding-top: 20px; }
   margin-bottom: 6px;
 }
 .pa-reason { font-size: 0.8rem; color: var(--text-muted); line-height: 1.4; margin: 0; }
+
+.pa-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
+.pa-actions .btn { padding: 6px 12px; font-size: 0.76rem; }
+.pa-custom-price { display: inline-flex; align-items: center; gap: 4px; }
+.pa-custom-input {
+  width: 76px;
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+}
+.pa-ignore-btn { font-size: 0.76rem; border: 1px solid var(--border); border-radius: 999px; padding: 6px 10px; }
 
 /* ---------- Acquire card ---------- */
 

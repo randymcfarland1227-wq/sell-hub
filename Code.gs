@@ -22,6 +22,7 @@
  *                                   ebaySellThrough}]
  *   GET  ?action=photos        -> [{itemId, platform, photoUrl}]
  *   GET  ?action=trends        -> [{searchTerm, platform, avgSoldPrice, recentSalesFound, sellThrough, lastChecked}]
+ *   GET  ?action=itemActions   -> [{date, itemId, action, detail}] — log of price drops/offers sent/ignored recommendations
  *   POST {action:'addMetricEntry', listingId, itemId, platform, impressions, views, watchers, clicks, price}
  *   POST {action:'addAcquireItem', brand, itemType, size, color, condition, targetPrice, bestPlatform, priority, notes} -> the new row
  *   POST {action:'updateAcquireItem', id, brand, itemType, size, color, condition, targetPrice, bestPlatform, priority, notes}
@@ -33,6 +34,11 @@
  *   POST {action:'setPhoto', itemId, platform, photoUrl} -> upserts one item's cover photo
  *   POST {action:'setAcquireEbayData', id, avgPrice, salesFound, sellThrough} -> manual eBay/Terapeak pull for one watchlist item
  *   POST {action:'setTrendEbayData', searchTerm, avgPrice, salesFound, sellThrough} -> manual eBay/Terapeak pull for one trend row
+ *   POST {action:'dropListingPrice', itemId, sourceTab, newPrice} -> writes the new List price
+ *        back into the source tab (same row-lookup as markSold) and logs it to Item Actions
+ *   POST {action:'logItemAction', itemId, itemAction, detail} -> logs 'Offer Sent' or 'Ignored'
+ *        against an item, with no price change (used by the Stats tab's pricing actions)
+ *   POST {action:'clearItemActions', itemId} -> removes all logged actions for one item
  *
  * Poshmark's side of market data (Acquire Watchlist comps + Market Trends tab)
  * refreshes itself daily via a time trigger — run setupMarketDataTrigger() once
@@ -48,6 +54,7 @@ var POSTING_QUEUE_SHEET = 'Platform Posting Queue';
 var METRICS_SHEET_NAME = 'Metrics';
 var ACQUIRE_SHEET_NAME = 'Acquire Watchlist';
 var PHOTOS_SHEET_NAME = 'Photos';
+var ITEM_ACTIONS_SHEET_NAME = 'Item Actions';
 
 function doGet(e) {
   var action = e.parameter.action;
@@ -58,6 +65,7 @@ function doGet(e) {
   if (action === 'acquire') return jsonOut(getAcquire());
   if (action === 'photos') return jsonOut(getPhotos());
   if (action === 'trends') return jsonOut(getTrends());
+  if (action === 'itemActions') return jsonOut(getItemActions());
   return jsonOut({ error: 'unknown action' });
 }
 
@@ -75,6 +83,9 @@ function doPost(e) {
   if (action === 'setTrendEbayData') return jsonOut(setTrendEbayData(body));
   if (action === 'runMaintenance') return jsonOut(runMaintenance(body.task));
   if (action === 'debugPoshmark') return jsonOut(debugPoshmark(body.query));
+  if (action === 'dropListingPrice') return jsonOut(dropListingPrice(body));
+  if (action === 'logItemAction') return jsonOut(logItemAction(body.itemId, body.itemAction, body.detail));
+  if (action === 'clearItemActions') return jsonOut(clearItemActions(body.itemId));
 
   return jsonOut({ error: 'unknown action' });
 }
@@ -451,15 +462,15 @@ function deleteAcquireItem(id) {
 // immediately after "Source tab" — rather than by name.
 // ---------------------------------------------------------------------
 
-function markSold(body) {
-  var itemId = body.itemId;
-  var sourceTabName = body.sourceTab;
-  if (!itemId || !sourceTabName) return { ok: false, error: 'Missing itemId or sourceTab.' };
-
+// Shared by markSold/dropListingPrice: Listing Hub's row-number column
+// (positional, no header text of its own — sits right after "Source tab")
+// points back at the real row in whichever source tab this item lives in.
+// Returns { sourceSheet, row } on success or { error } on failure.
+function findSourceRow(itemId, sourceTabName) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var hubSheet = ss.getSheetByName(LISTING_HUB_SHEET);
   var sourceSheet = ss.getSheetByName(sourceTabName);
-  if (!hubSheet || !sourceSheet) return { ok: false, error: 'Could not find the Listing Hub or "' + sourceTabName + '" tab.' };
+  if (!hubSheet || !sourceSheet) return { error: 'Could not find the Listing Hub or "' + sourceTabName + '" tab.' };
 
   var t = readTable(hubSheet, ['Item ID']);
   var sourceTabCol = colIndex(t.colMap, 'Source tab');
@@ -473,16 +484,25 @@ function markSold(body) {
   }
   if (!sourceRowNum) {
     return {
-      ok: false,
       error: 'Could not locate the source row for ' + itemId + ' — expected a row-number column immediately ' +
-        'after "Source tab" in Listing Hub. Update markSold() (Code.gs) if your columns are laid out differently, then redeploy.',
+        'after "Source tab" in Listing Hub. Update findSourceRow() (Code.gs) if your columns are laid out differently, then redeploy.',
     };
   }
+  return { sourceSheet: sourceSheet, row: Number(sourceRowNum) };
+}
+
+function markSold(body) {
+  var itemId = body.itemId;
+  var sourceTabName = body.sourceTab;
+  if (!itemId || !sourceTabName) return { ok: false, error: 'Missing itemId or sourceTab.' };
+
+  var located = findSourceRow(itemId, sourceTabName);
+  if (located.error) return { ok: false, error: located.error };
+  var sourceSheet = located.sourceSheet, row = located.row;
 
   var srcHeader = findHeaderRow(sourceSheet, ['Status']);
   if (!srcHeader) return { ok: false, error: 'Could not find a "Status" column header in ' + sourceTabName + '.' };
 
-  var row = Number(sourceRowNum);
   var statusCol = colIndex(srcHeader.colMap, 'Status');
   var soldPriceCol = colIndex(srcHeader.colMap, 'Sold price');
   var buyerCol = colIndex(srcHeader.colMap, 'Buyer');
@@ -492,6 +512,77 @@ function markSold(body) {
   if (buyerCol !== -1 && body.buyer) sourceSheet.getRange(row, buyerCol + 1).setValue(body.buyer);
 
   return { ok: true };
+}
+
+// Writes a real price change back into the source tab (same row-lookup as
+// markSold) and logs it to Item Actions, so acting on a pricing-action
+// recommendation actually updates the price everywhere the site reads it
+// from — not just a note that you meant to.
+function dropListingPrice(body) {
+  var itemId = body.itemId;
+  var sourceTabName = body.sourceTab;
+  var newPrice = body.newPrice;
+  if (!itemId || !sourceTabName || !newPrice) return { ok: false, error: 'Missing itemId, sourceTab, or newPrice.' };
+
+  var located = findSourceRow(itemId, sourceTabName);
+  if (located.error) return { ok: false, error: located.error };
+  var sourceSheet = located.sourceSheet, row = located.row;
+
+  var srcHeader = findHeaderRow(sourceSheet, ['List price']);
+  if (!srcHeader) return { ok: false, error: 'Could not find a "List price" column header in ' + sourceTabName + '.' };
+  var listPriceCol = colIndex(srcHeader.colMap, 'List price');
+  if (listPriceCol === -1) return { ok: false, error: 'Could not find a "List price" column in ' + sourceTabName + '.' };
+
+  sourceSheet.getRange(row, listPriceCol + 1).setValue(Number(newPrice));
+  var logged = logItemAction(itemId, 'Price Drop', String(newPrice));
+  return { ok: true, date: logged.date };
+}
+
+function getItemActionsSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(ITEM_ACTIONS_SHEET_NAME);
+  if (!sheet) {
+    sheet = ss.insertSheet(ITEM_ACTIONS_SHEET_NAME);
+    sheet.appendRow(['Date', 'Item ID', 'Action', 'Detail']);
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+
+// Logs a non-price action taken on a pricing recommendation — 'Offer Sent'
+// (detail = platform) or 'Ignored' (detail = the recommendation label that
+// was dismissed, so the site knows what to keep suppressing). Price drops
+// log through here too, via dropListingPrice above.
+function logItemAction(itemId, action, detail) {
+  if (!itemId || !action) return { ok: false, error: 'Missing itemId or action.' };
+  var sheet = getItemActionsSheet();
+  var today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  sheet.appendRow([today, itemId, action, detail || '']);
+  return { ok: true, date: today };
+}
+
+// Removes all logged actions for one item — for correcting a mis-click
+// (wrong item, fat-fingered price) rather than living with a bad log entry.
+function clearItemActions(itemId) {
+  if (!itemId) return { ok: false, error: 'Missing itemId.' };
+  var sheet = getItemActionsSheet();
+  var data = sheet.getDataRange().getValues();
+  var removed = 0;
+  for (var r = data.length - 1; r >= 1; r--) {
+    if (String(data[r][1]) === String(itemId)) { sheet.deleteRow(r + 1); removed++; }
+  }
+  return { ok: true, removed: removed };
+}
+
+function getItemActions() {
+  var sheet = getItemActionsSheet();
+  var data = sheet.getDataRange().getValues();
+  var out = [];
+  for (var r = 1; r < data.length; r++) {
+    if (!data[r][1]) continue;
+    out.push({ date: formatDate(data[r][0]), itemId: data[r][1], action: data[r][2], detail: data[r][3] || '' });
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------

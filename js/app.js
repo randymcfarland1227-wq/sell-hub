@@ -11,6 +11,7 @@ const state = {
   acquire: [],            // from Acquire Watchlist tab
   photos: [],             // from Photos tab (cover photo per item x platform)
   trends: [],             // from Market Trends tab (curated resale categories, daily auto-refresh)
+  itemActions: [],        // from Item Actions tab (price drops/offers sent/ignored, logged from pricing actions)
   expandedItems: new Set(),
   editingAcquireId: null,
 };
@@ -170,6 +171,17 @@ async function loadPhotosData() {
 function photoForItem(itemId) {
   const match = state.photos.find(p => p.itemId === itemId && p.photoUrl);
   return match ? match.photoUrl : null;
+}
+async function loadItemActionsData() {
+  if (!connected()) { state.itemActions = []; return; }
+  try { state.itemActions = (await apiGet('itemActions')) || []; }
+  catch { state.itemActions = []; }
+}
+// Item Actions rows are appended in chronological order, so the last match
+// for an item is its most recent logged action.
+function latestActionFor(itemId) {
+  const matches = state.itemActions.filter(a => String(a.itemId) === String(itemId));
+  return matches.length ? matches[matches.length - 1] : null;
 }
 
 // ---------------------------------------------------------------------
@@ -602,10 +614,10 @@ function suggestedDropPrice(listPrice, floorPrice) {
   return suggested < listPrice ? suggested : null;
 }
 
-// Turns an item's per-platform views/clicks/watchers plus its price-vs-floor
-// room into one concrete next step — this is the actual "should I adjust
-// price, and to what, or do something else" call, not just a stats dump.
-function pricingActionFor(item) {
+// The "natural" recommendation from the raw numbers alone — actual
+// suppression based on what's already been done about it lives in
+// pricingActionFor below.
+function naturalPricingAction(item) {
   const latestByPlatform = latestMetricsByItemPlatform();
   const platforms = splitPlatforms(item.platform);
   let views = 0, clicks = 0, watchers = 0, hasAnyData = false;
@@ -632,6 +644,7 @@ function pricingActionFor(item) {
       severity: 'opportunity', label: 'Send an offer',
       reason: `${where} — send an offer to close the sale instead of waiting.`,
       offerWhere: `${withWatchers[0].meta.label}: ${hint}`,
+      offerPlatformLabel: withWatchers[0].meta.label,
       views, clicks, watchers,
     };
   }
@@ -659,18 +672,78 @@ function pricingActionFor(item) {
   return { severity: 'ok', label: 'On track', reason: 'Views and clicks look normal — no action needed right now.', views, clicks, watchers };
 }
 
+// Layers "what's already been done about this today" on top of the natural
+// recommendation, so acting on a suggestion (or dismissing it) doesn't just
+// keep nagging you again the moment the page re-renders. Suppression only
+// lasts through the day it was logged — if the underlying numbers still
+// warrant it tomorrow, that's a legitimate fresh flag, not a repeat.
+function pricingActionFor(item) {
+  const natural = naturalPricingAction(item);
+  const last = latestActionFor(item.itemId);
+  const today = new Date().toISOString().slice(0, 10);
+  if (!last || last.date !== today) return natural;
+
+  if (last.action === 'Ignored') {
+    return { ...natural, severity: 'dismissed', label: 'Dismissed', reason: `You dismissed "${natural.label}" today. It'll resurface if the numbers still call for it tomorrow.` };
+  }
+  if (last.action === 'Offer Sent' && natural.severity === 'opportunity') {
+    return { ...natural, severity: 'handled', label: 'Offer sent', reason: `Offer sent today via ${escapeHtml(last.detail)}. Waiting to hear back.` };
+  }
+  if (last.action === 'Price Drop' && (natural.severity === 'urgent' || (natural.severity === 'attention' && natural.label === 'Refresh listing'))) {
+    return { ...natural, severity: 'handled', label: 'Price dropped', reason: `Dropped to ${fmtMoney(Number(last.detail))} today — give it a few days before dropping further.` };
+  }
+  return natural;
+}
+
+async function recordItemAction(itemId, itemAction, detail) {
+  state.itemActions.push({ date: new Date().toISOString().slice(0, 10), itemId, action: itemAction, detail: detail || '' });
+  if (connected()) {
+    try { await apiPost('logItemAction', { itemId, itemAction, detail }); }
+    catch { /* logged locally; will drift from the Sheet until the next successful call */ }
+  }
+}
+
+async function sendOfferForAction(itemId, platformLabel) {
+  await recordItemAction(itemId, 'Offer Sent', platformLabel);
+  renderPricingActions();
+}
+
+async function ignoreAction(itemId, label) {
+  await recordItemAction(itemId, 'Ignored', label);
+  renderPricingActions();
+}
+
+async function dropPriceForAction(item, newPrice, btn) {
+  const card = btn.closest('.pricing-card');
+  const status = card.querySelector('.pa-status');
+  if (!newPrice || newPrice <= 0) { status.textContent = 'Enter a valid price.'; return; }
+  if (!connected()) { status.textContent = 'Connect your Sheet to update prices — see SETUP.md.'; return; }
+  status.textContent = 'Saving...';
+  try {
+    const res = await apiPost('dropListingPrice', { itemId: item.itemId, sourceTab: item.sourceTab, newPrice });
+    if (!res || !res.ok) { status.textContent = (res && res.error) || 'Could not update the price.'; return; }
+  } catch { status.textContent = 'Could not save to your Sheet.'; return; }
+  item.listPrice = newPrice;
+  state.itemActions.push({ date: new Date().toISOString().slice(0, 10), itemId: item.itemId, action: 'Price Drop', detail: String(newPrice) });
+  renderPricingActions();
+}
+
 function renderPricingActions() {
   const container = document.getElementById('pricingActions');
   if (!container) return;
   const items = state.inventory.filter(it => !isSold(it));
   if (!items.length) { container.innerHTML = '<div class="empty-state">No active listings yet.</div>'; return; }
 
-  const severityRank = { urgent: 0, attention: 1, opportunity: 2, ok: 3, 'no-data': 4 };
+  const severityRank = { urgent: 0, attention: 1, opportunity: 2, handled: 3, ok: 4, dismissed: 5, 'no-data': 6 };
   const rows = items.map(it => ({ item: it, action: pricingActionFor(it) }))
     .sort((a, b) => severityRank[a.action.severity] - severityRank[b.action.severity]);
 
-  container.innerHTML = rows.map(({ item, action }) => `
-    <div class="card pricing-card pa-${action.severity}">
+  container.innerHTML = rows.map(({ item, action }) => {
+    const showOfferBtn = action.severity === 'opportunity';
+    const showPriceControls = action.severity === 'urgent' || (action.severity === 'attention' && action.label === 'Refresh listing');
+    const showIgnore = ['urgent', 'attention', 'opportunity'].includes(action.severity);
+    return `
+    <div class="card pricing-card pa-${action.severity}" data-item-id="${escapeHtml(item.itemId)}">
       <div class="card-top">
         <h3>${escapeHtml([item.brand, item.item].filter(Boolean).join(' — ') || item.itemId)}</h3>
         <span class="pa-badge pa-${action.severity}">${escapeHtml(action.label)}</span>
@@ -682,8 +755,43 @@ function renderPricingActions() {
       ${action.suggestedPrice ? `<div class="pa-callout"><b>Suggested price — ${fmtMoney(action.suggestedPrice)}</b></div>` : ''}
       ${action.offerWhere ? `<div class="pa-callout"><b>${escapeHtml(action.offerWhere)}</b></div>` : ''}
       <p class="pa-reason">${escapeHtml(action.reason)}</p>
+      ${(showOfferBtn || showPriceControls || showIgnore) ? `
+        <div class="pa-actions">
+          ${showOfferBtn ? `<button class="btn secondary pa-offer-btn" data-id="${escapeHtml(item.itemId)}" data-plat="${escapeHtml(action.offerPlatformLabel || '')}">Offer sent</button>` : ''}
+          ${showPriceControls && action.suggestedPrice ? `<button class="btn secondary pa-drop-suggested-btn" data-id="${escapeHtml(item.itemId)}" data-price="${action.suggestedPrice}">Dropped to ${fmtMoney(action.suggestedPrice)}</button>` : ''}
+          ${showPriceControls ? `
+            <span class="pa-custom-price">
+              <input type="number" min="0" step="1" class="pa-custom-input" placeholder="Custom $">
+              <button class="btn secondary pa-drop-custom-btn" data-id="${escapeHtml(item.itemId)}">Save</button>
+            </span>
+          ` : ''}
+          ${showIgnore ? `<button class="icon-btn pa-ignore-btn" data-id="${escapeHtml(item.itemId)}" data-label="${escapeHtml(action.label)}">Ignore</button>` : ''}
+        </div>
+        <div class="status-msg pa-status"></div>
+      ` : ''}
     </div>
-  `).join('');
+  `;
+  }).join('');
+
+  container.querySelectorAll('.pa-offer-btn').forEach(btn => {
+    btn.addEventListener('click', () => sendOfferForAction(btn.dataset.id, btn.dataset.plat));
+  });
+  container.querySelectorAll('.pa-ignore-btn').forEach(btn => {
+    btn.addEventListener('click', () => ignoreAction(btn.dataset.id, btn.dataset.label));
+  });
+  container.querySelectorAll('.pa-drop-suggested-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const item = rows.find(r => r.item.itemId === btn.dataset.id).item;
+      dropPriceForAction(item, Number(btn.dataset.price), btn);
+    });
+  });
+  container.querySelectorAll('.pa-drop-custom-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const item = rows.find(r => r.item.itemId === btn.dataset.id).item;
+      const input = btn.closest('.pa-custom-price').querySelector('.pa-custom-input');
+      dropPriceForAction(item, Number(input.value), btn);
+    });
+  });
 }
 
 function populateMetricForm() {
@@ -991,7 +1099,7 @@ populateMetricForm();
 loadAcquire();
 loadTrendsData().then(renderTrends);
 
-Promise.all([loadInventory(), loadDescriptionsData(), loadPostingQueueData(), loadMetricsData(), loadPhotosData()]).then(() => {
+Promise.all([loadInventory(), loadDescriptionsData(), loadPostingQueueData(), loadMetricsData(), loadPhotosData(), loadItemActionsData()]).then(() => {
   renderWheel();
   routeOverview();
   renderListChips();
