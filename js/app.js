@@ -625,7 +625,7 @@ function renderToShip() {
   container.innerHTML = sorted.map(it => {
     const soldDate = soldDateFor(it.itemId);
     return `
-      <div class="card to-ship-card" style="--cat:#2f9e6e">
+      <div class="card to-ship-card" style="--cat:#1f5c46">
         <div class="card-top">
           <h3>${escapeHtml([it.brand, it.item].filter(Boolean).join(' — ') || it.itemId)}</h3>
         </div>
@@ -913,7 +913,7 @@ async function loadTrendsData() {
 
 const TREND_CATEGORY_ORDER = ['Outerwear', 'Shirts', 'Pants', 'Shoes', 'Accessories', 'Other'];
 const TREND_CATEGORY_ICON = { Outerwear: '🧥', Shirts: '👕', Pants: '👖', Shoes: '👟', Accessories: '👜', Other: '🏷️' };
-const TREND_CATEGORY_COLOR = { Outerwear: '#5b6bd6', Shirts: '#2f9e6e', Pants: '#c9932e', Shoes: '#2fa3b8', Accessories: '#8c5bd6', Other: '#d6693f' };
+const TREND_CATEGORY_COLOR = { Outerwear: '#1f3a5c', Shirts: '#1f5c46', Pants: '#a1752e', Shoes: '#1f5c64', Accessories: '#5c3a63', Other: '#a2532f' };
 
 function trendCardHTML(c) {
   return `

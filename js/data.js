@@ -8,15 +8,15 @@
 // falls back to DEFAULT_CATEGORY_META plus a color pulled from CATEGORY_PALETTE so it
 // still gets a distinct wheel color.
 const CATEGORY_META = {
-  clothing:     { icon: '👕', color: '#5b6bd6' },
-  electronics:  { icon: '🖥️', color: '#2f9e6e' },
-  collectibles: { icon: '🧸', color: '#c9932e' },
-  home:         { icon: '🏠', color: '#2fa3b8' },
-  furniture:    { icon: '🪑', color: '#8c5bd6' },
-  jewelry:      { icon: '💍', color: '#d6693f' },
+  clothing:     { icon: '👕', color: '#1f5c46' },
+  electronics:  { icon: '🖥️', color: '#1f3a5c' },
+  collectibles: { icon: '🧸', color: '#a1752e' },
+  home:         { icon: '🏠', color: '#1f5c64' },
+  furniture:    { icon: '🪑', color: '#5c3a63' },
+  jewelry:      { icon: '💍', color: '#7a2038' },
 };
-const DEFAULT_CATEGORY_META = { icon: '📦', color: '#8c5bd6' };
-const CATEGORY_PALETTE = ['#5b6bd6', '#2f9e6e', '#c9932e', '#2fa3b8', '#8c5bd6', '#d6693f', '#c0553f', '#3f8fc0'];
+const DEFAULT_CATEGORY_META = { icon: '📦', color: '#5c3a63' };
+const CATEGORY_PALETTE = ['#1f5c46', '#1f3a5c', '#a1752e', '#1f5c64', '#5c3a63', '#7a2038', '#a2532f', '#33475b'];
 
 // Known platform -> label/color. Matched against the sheet's free-text Platform fields
 // via platformMeta() in app.js (case-insensitive substring match), so "Facebook
@@ -24,16 +24,16 @@ const CATEGORY_PALETTE = ['#5b6bd6', '#2f9e6e', '#c9932e', '#2fa3b8', '#8c5bd6',
 // offerHint: where/how to act on a watcher-has-interest signal on that
 // platform — surfaced by the Stats tab's "Send an offer" pricing action.
 const PLATFORM_META = {
-  ebay:     { label: 'eBay',                    color: '#e5652e', offerHint: "Seller Hub → Promotions → Offers to Buyers (or enable \"Best Offer\" on the listing)." },
-  poshmark: { label: 'Poshmark',                color: '#7f1c3f', offerHint: 'Open the listing → the ⋯ menu → "Offer to Likes."' },
-  depop:    { label: 'Depop',                   color: '#e0221f', offerHint: 'Open the listing → Offers → send a private offer to a liker.' },
-  facebook: { label: 'Facebook Marketplace',    color: '#1877f2', offerHint: 'Message the interested buyer directly from Your Listings.' },
-  mercari:  { label: 'Mercari',                 color: '#ff5a5f', offerHint: 'Message the buyer directly, or drop the price to trigger their saved-search alert.' },
+  ebay:     { label: 'eBay',                    color: '#8a4a2f', offerHint: "Seller Hub → Promotions → Offers to Buyers (or enable \"Best Offer\" on the listing)." },
+  poshmark: { label: 'Poshmark',                color: '#7a2038', offerHint: 'Open the listing → the ⋯ menu → "Offer to Likes."' },
+  depop:    { label: 'Depop',                   color: '#8a2635', offerHint: 'Open the listing → Offers → send a private offer to a liker.' },
+  facebook: { label: 'Facebook Marketplace',    color: '#1f3a5c', offerHint: 'Message the interested buyer directly from Your Listings.' },
+  mercari:  { label: 'Mercari',                 color: '#b3603a', offerHint: 'Message the buyer directly, or drop the price to trigger their saved-search alert.' },
 };
-const DEFAULT_PLATFORM_META = { label: 'Other', color: '#a39d8f', offerHint: 'Reach out to them directly through the platform.' };
+const DEFAULT_PLATFORM_META = { label: 'Other', color: '#8c7754', offerHint: 'Reach out to them directly through the platform.' };
 
 const PRIORITY_META = {
-  High:   { color: '#c0553f' },
-  Medium: { color: '#c9932e' },
-  Low:    { color: '#726d62' },
+  High:   { color: '#7a2038' },
+  Medium: { color: '#a1752e' },
+  Low:    { color: '#6c5c42' },
 };
