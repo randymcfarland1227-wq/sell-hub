@@ -518,6 +518,7 @@ function renderStats() {
   document.getElementById('statsSetupNote').style.display = connected() ? 'none' : 'block';
   renderOverallTiles();
   renderPlatformCards();
+  renderPricingActions();
 }
 
 function renderOverallTiles() {
@@ -582,6 +583,78 @@ function renderPlatformCards() {
       </div>
     `;
   }).join('');
+}
+
+// Thresholds behind the pricing-action calls below — tune these if the
+// recommendations feel too eager or too quiet.
+const PRICING_MIN_VIEWS_TO_JUDGE = 10;  // below this, "few clicks" isn't meaningful yet
+const PRICING_LOW_CTR = 0.03;           // under 3% clicks-per-view reads as weak interest
+const PRICING_NEAR_FLOOR_MARGIN = 0.10; // within 10% of floor price = little room left to drop
+
+// Turns an item's aggregate views/clicks/watchers plus its price-vs-floor
+// room into one concrete next step — this is the actual "should I adjust
+// price or do something else" call, not just a raw stats dump.
+function pricingActionFor(item) {
+  const latestByPlatform = latestMetricsByItemPlatform();
+  const platforms = splitPlatforms(item.platform);
+  let views = 0, clicks = 0, watchers = 0, hasAnyData = false;
+  platforms.forEach(p => {
+    const m = platformMeta(p);
+    const snap = latestByPlatform.get(item.itemId + '|' + m.id);
+    if (snap) hasAnyData = true;
+    views += Number(snap && (snap.views || snap.impressions)) || 0;
+    clicks += Number(snap && snap.clicks) || 0;
+    watchers += Number(snap && snap.watchers) || 0;
+  });
+
+  if (!hasAnyData) {
+    return { severity: 'no-data', label: 'No data yet', reason: 'Log a stat update for this item to get a recommendation.', views, clicks, watchers };
+  }
+  if (watchers > 0) {
+    return { severity: 'opportunity', label: 'Send an offer', reason: `${watchers} watcher${watchers === 1 ? '' : 's'}/like${watchers === 1 ? '' : 's'} — send an offer to close the sale instead of waiting.`, views, clicks, watchers };
+  }
+  if (views === 0) {
+    return { severity: 'attention', label: 'Boost visibility', reason: 'No views yet — refresh the listing, sharpen the title/keywords, or share it for more reach. This is a visibility problem, not a pricing one.', views, clicks, watchers };
+  }
+
+  const ctr = clicks / views;
+  const weakInterest = views >= PRICING_MIN_VIEWS_TO_JUDGE && ctr < PRICING_LOW_CTR;
+  if (weakInterest) {
+    const listPrice = parseMoney(item.listPrice);
+    const floorPrice = parseMoney(item.floorPrice);
+    const nearFloor = floorPrice > 0 && listPrice > 0 && (listPrice - floorPrice) <= floorPrice * PRICING_NEAR_FLOOR_MARGIN;
+    if (nearFloor) {
+      return { severity: 'attention', label: 'Refresh listing', reason: `Getting views but few clicks, and you're already near your ${fmtMoney(floorPrice)} floor — try new photos or a rewritten description instead of dropping price further.`, views, clicks, watchers };
+    }
+    const priceHint = floorPrice > 0 ? ` (you have room down to your ${fmtMoney(floorPrice)} floor)` : '';
+    return { severity: 'urgent', label: 'Try a price drop', reason: `Getting views but few clicks${priceHint} — the price is likely the sticking point.`, views, clicks, watchers };
+  }
+  return { severity: 'ok', label: 'On track', reason: 'Views and clicks look normal — no action needed right now.', views, clicks, watchers };
+}
+
+function renderPricingActions() {
+  const container = document.getElementById('pricingActions');
+  if (!container) return;
+  const items = state.inventory.filter(it => !isSold(it));
+  if (!items.length) { container.innerHTML = '<div class="empty-state">No active listings yet.</div>'; return; }
+
+  const severityRank = { urgent: 0, attention: 1, opportunity: 2, ok: 3, 'no-data': 4 };
+  const rows = items.map(it => ({ item: it, action: pricingActionFor(it) }))
+    .sort((a, b) => severityRank[a.action.severity] - severityRank[b.action.severity]);
+
+  container.innerHTML = rows.map(({ item, action }) => `
+    <div class="card pricing-card pa-${action.severity}">
+      <div class="card-top">
+        <h3>${escapeHtml([item.brand, item.item].filter(Boolean).join(' — ') || item.itemId)}</h3>
+        <span class="pa-badge pa-${action.severity}">${escapeHtml(action.label)}</span>
+      </div>
+      <div class="meta">
+        <span><b>List price —</b> ${escapeHtml(item.listPrice || '—')}${item.floorPrice ? ` (floor ${escapeHtml(item.floorPrice)})` : ''}</span>
+        <span><b>Views —</b> ${action.views} &nbsp; <b>Clicks —</b> ${action.clicks}${action.watchers ? ` &nbsp; <b>Watchers —</b> ${action.watchers}` : ''}</span>
+      </div>
+      <p class="pa-reason">${escapeHtml(action.reason)}</p>
+    </div>
+  `).join('');
 }
 
 function populateMetricForm() {
