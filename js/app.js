@@ -590,28 +590,50 @@ function renderPlatformCards() {
 const PRICING_MIN_VIEWS_TO_JUDGE = 10;  // below this, "few clicks" isn't meaningful yet
 const PRICING_LOW_CTR = 0.03;           // under 3% clicks-per-view reads as weak interest
 const PRICING_NEAR_FLOOR_MARGIN = 0.10; // within 10% of floor price = little room left to drop
+const PRICING_DROP_FRACTION = 0.10;     // suggested cut = 10% off list price, floored at the floor price
 
-// Turns an item's aggregate views/clicks/watchers plus its price-vs-floor
+// Suggests a concrete new list price for a weak-click-through item: a 10%
+// cut off the current price, never below the floor. Returns null when
+// there's no usable list price or the cut would round back up to it.
+function suggestedDropPrice(listPrice, floorPrice) {
+  if (!listPrice) return null;
+  const cut = Math.round(listPrice * (1 - PRICING_DROP_FRACTION));
+  const suggested = floorPrice > 0 ? Math.max(floorPrice, cut) : cut;
+  return suggested < listPrice ? suggested : null;
+}
+
+// Turns an item's per-platform views/clicks/watchers plus its price-vs-floor
 // room into one concrete next step — this is the actual "should I adjust
-// price or do something else" call, not just a raw stats dump.
+// price, and to what, or do something else" call, not just a stats dump.
 function pricingActionFor(item) {
   const latestByPlatform = latestMetricsByItemPlatform();
   const platforms = splitPlatforms(item.platform);
   let views = 0, clicks = 0, watchers = 0, hasAnyData = false;
+  const perPlatform = [];
   platforms.forEach(p => {
     const m = platformMeta(p);
     const snap = latestByPlatform.get(item.itemId + '|' + m.id);
     if (snap) hasAnyData = true;
+    const pWatchers = Number(snap && snap.watchers) || 0;
     views += Number(snap && (snap.views || snap.impressions)) || 0;
     clicks += Number(snap && snap.clicks) || 0;
-    watchers += Number(snap && snap.watchers) || 0;
+    watchers += pWatchers;
+    perPlatform.push({ meta: m, watchers: pWatchers });
   });
 
   if (!hasAnyData) {
     return { severity: 'no-data', label: 'No data yet', reason: 'Log a stat update for this item to get a recommendation.', views, clicks, watchers };
   }
   if (watchers > 0) {
-    return { severity: 'opportunity', label: 'Send an offer', reason: `${watchers} watcher${watchers === 1 ? '' : 's'}/like${watchers === 1 ? '' : 's'} — send an offer to close the sale instead of waiting.`, views, clicks, watchers };
+    const withWatchers = perPlatform.filter(p => p.watchers > 0).sort((a, b) => b.watchers - a.watchers);
+    const where = withWatchers.map(p => `${p.watchers} on ${p.meta.label}`).join(', ');
+    const hint = withWatchers[0].meta.offerHint || DEFAULT_PLATFORM_META.offerHint;
+    return {
+      severity: 'opportunity', label: 'Send an offer',
+      reason: `${where} — send an offer to close the sale instead of waiting.`,
+      offerWhere: `${withWatchers[0].meta.label}: ${hint}`,
+      views, clicks, watchers,
+    };
   }
   if (views === 0) {
     return { severity: 'attention', label: 'Boost visibility', reason: 'No views yet — refresh the listing, sharpen the title/keywords, or share it for more reach. This is a visibility problem, not a pricing one.', views, clicks, watchers };
@@ -626,8 +648,13 @@ function pricingActionFor(item) {
     if (nearFloor) {
       return { severity: 'attention', label: 'Refresh listing', reason: `Getting views but few clicks, and you're already near your ${fmtMoney(floorPrice)} floor — try new photos or a rewritten description instead of dropping price further.`, views, clicks, watchers };
     }
+    const suggested = suggestedDropPrice(listPrice, floorPrice);
     const priceHint = floorPrice > 0 ? ` (you have room down to your ${fmtMoney(floorPrice)} floor)` : '';
-    return { severity: 'urgent', label: 'Try a price drop', reason: `Getting views but few clicks${priceHint} — the price is likely the sticking point.`, views, clicks, watchers };
+    return {
+      severity: 'urgent', label: 'Try a price drop',
+      reason: `Getting views but few clicks${priceHint} — the price is likely the sticking point.`,
+      suggestedPrice: suggested, views, clicks, watchers,
+    };
   }
   return { severity: 'ok', label: 'On track', reason: 'Views and clicks look normal — no action needed right now.', views, clicks, watchers };
 }
@@ -652,6 +679,8 @@ function renderPricingActions() {
         <span><b>List price —</b> ${escapeHtml(item.listPrice || '—')}${item.floorPrice ? ` (floor ${escapeHtml(item.floorPrice)})` : ''}</span>
         <span><b>Views —</b> ${action.views} &nbsp; <b>Clicks —</b> ${action.clicks}${action.watchers ? ` &nbsp; <b>Watchers —</b> ${action.watchers}` : ''}</span>
       </div>
+      ${action.suggestedPrice ? `<div class="pa-callout"><b>Suggested price — ${fmtMoney(action.suggestedPrice)}</b></div>` : ''}
+      ${action.offerWhere ? `<div class="pa-callout"><b>${escapeHtml(action.offerWhere)}</b></div>` : ''}
       <p class="pa-reason">${escapeHtml(action.reason)}</p>
     </div>
   `).join('');
