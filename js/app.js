@@ -407,10 +407,12 @@ async function markSold(btn, onChange) {
     if (!res || !res.ok) { status.textContent = (res && res.error) || 'Could not find that row in the Sheet.'; return; }
     const item = state.inventory.find(i => i.itemId === itemId);
     if (item) { item.sourceStatus = 'Sold'; item.soldPrice = price; item.buyer = buyer; }
+    await recordItemAction(itemId, 'Sold', price);
     status.textContent = 'Marked sold.';
     onChange();
     renderWheel();
     renderStats();
+    renderAction();
   } catch {
     status.textContent = 'Could not save to your Sheet.';
   }
@@ -530,7 +532,6 @@ function renderStats() {
   document.getElementById('statsSetupNote').style.display = connected() ? 'none' : 'block';
   renderOverallTiles();
   renderPlatformCards();
-  renderPricingActions();
 }
 
 function renderOverallTiles() {
@@ -595,6 +596,54 @@ function renderPlatformCards() {
       </div>
     `;
   }).join('');
+}
+
+// ---------------------------------------------------------------------
+// Action — everything needing a next step: items to ship, plus pricing
+// suggestions (below). Shares state.itemActions with the pricing-action
+// suppression logic, so "Sold" and "Shipped" live in the same log as
+// "Price Drop"/"Offer Sent"/"Ignored".
+// ---------------------------------------------------------------------
+function hasShipped(itemId) {
+  return state.itemActions.some(a => String(a.itemId) === String(itemId) && a.action === 'Shipped');
+}
+function soldDateFor(itemId) {
+  const entry = state.itemActions.find(a => String(a.itemId) === String(itemId) && a.action === 'Sold');
+  return entry ? entry.date : '';
+}
+async function markShipped(itemId) {
+  await recordItemAction(itemId, 'Shipped', '');
+  renderToShip();
+}
+function renderToShip() {
+  const container = document.getElementById('toShipList');
+  if (!container) return;
+  const items = state.inventory.filter(it => isSold(it) && !hasShipped(it.itemId));
+  if (!items.length) { container.innerHTML = '<div class="empty-state">Nothing waiting to ship.</div>'; return; }
+
+  const sorted = items.slice().sort((a, b) => (soldDateFor(a.itemId) || '').localeCompare(soldDateFor(b.itemId) || ''));
+  container.innerHTML = sorted.map(it => {
+    const soldDate = soldDateFor(it.itemId);
+    return `
+      <div class="card to-ship-card" style="--cat:#2f9e6e">
+        <div class="card-top">
+          <h3>${escapeHtml([it.brand, it.item].filter(Boolean).join(' — ') || it.itemId)}</h3>
+        </div>
+        <div class="meta">
+          <span><b>Sold price —</b> ${escapeHtml(it.soldPrice || '—')}</span>
+          ${it.buyer ? `<span><b>Buyer/platform —</b> ${escapeHtml(it.buyer)}</span>` : ''}
+          ${soldDate ? `<span><b>Sold —</b> ${escapeHtml(soldDate)}</span>` : ''}
+        </div>
+        <button class="btn secondary ts-ship-btn" data-id="${escapeHtml(it.itemId)}">Mark shipped</button>
+      </div>
+    `;
+  }).join('');
+  container.querySelectorAll('.ts-ship-btn').forEach(btn => btn.addEventListener('click', () => markShipped(btn.dataset.id)));
+}
+
+function renderAction() {
+  renderToShip();
+  renderPricingActions();
 }
 
 // Thresholds behind the pricing-action calls below — tune these if the
@@ -836,6 +885,7 @@ async function addMetricEntry() {
   ['metricImpressions', 'metricViews', 'metricWatchers', 'metricClicks'].forEach(id => document.getElementById(id).value = '');
   status.textContent = 'Saved.';
   renderStats();
+  renderAction();
   setTimeout(() => status.textContent = '', 1500);
 }
 document.getElementById('addMetricBtn').addEventListener('click', addMetricEntry);
@@ -1095,6 +1145,7 @@ renderListChips();
 renderList();
 setMode(localGet('sellHub.mode', 'wheel'));
 renderStats();
+renderAction();
 populateMetricForm();
 loadAcquire();
 loadTrendsData().then(renderTrends);
@@ -1105,5 +1156,6 @@ Promise.all([loadInventory(), loadDescriptionsData(), loadPostingQueueData(), lo
   renderListChips();
   renderList();
   renderStats();
+  renderAction();
   populateMetricForm();
 });

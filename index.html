@@ -18,6 +18,7 @@
     <nav class="tabs">
       <button data-view="inventory" class="active">📦 Inventory</button>
       <button data-view="stats">📊 Stats</button>
+      <button data-view="action">✅ Action</button>
       <button data-view="acquire">🛒 Acquire</button>
     </nav>
   </div>
@@ -107,10 +108,6 @@
     <h3 class="subhead">By platform</h3>
     <div class="platform-cards" id="platformCards"></div>
 
-    <h3 class="subhead">Pricing actions</h3>
-    <p class="section-intro" style="margin-top:0">What to do with each active listing, based on its views/clicks/watchers and how much room is left before your floor price.</p>
-    <div id="pricingActions" class="card-grid"></div>
-
     <button class="btn add-toggle-btn" id="metricAddToggle">+ Log a stat update</button>
 
     <div class="panel" id="metricAddPanel" style="display:none">
@@ -148,6 +145,21 @@
       <button class="btn" id="addMetricBtn">Save stat update</button>
       <div class="status-msg" id="metricStatus"></div>
     </div>
+  </section>
+
+  <!-- ===================== ACTION ===================== -->
+  <section id="action" class="view">
+    <div class="section-head">
+      <h2 class="section-title">Action</h2>
+      <p class="section-intro">Everything that needs a next step from you right now — items to ship and listings that could use a price change or an offer.</p>
+    </div>
+
+    <h3 class="subhead">To ship</h3>
+    <div id="toShipList" class="card-grid"></div>
+
+    <h3 class="subhead">Pricing suggestions</h3>
+    <p class="section-intro" style="margin-top:0">What to do with each active listing, based on its views/clicks/watchers and how much room is left before your floor price.</p>
+    <div id="pricingActions" class="card-grid"></div>
   </section>
 
   <!-- ===================== ACQUIRE ===================== -->
