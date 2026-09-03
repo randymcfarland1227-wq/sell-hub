@@ -618,34 +618,67 @@ function setPhoto(body) {
 // ---------------------------------------------------------------------
 
 var TRENDS_SHEET_NAME = 'Market Trends';
-var TRENDS_HEADERS = ['Search Term', 'Platform', 'Avg Sold Price', 'Recent Sales Found', 'Sell-Through %', 'Last Checked', 'Image URL'];
+var TRENDS_HEADERS = ['Search Term', 'Platform', 'Avg Sold Price', 'Recent Sales Found', 'Sell-Through %', 'Last Checked', 'Image URL', 'Category'];
+
+// Category display order for the Acquire tab's "Trending to look for"
+// section — anything with a category not in this list falls under "Other"
+// at the end. Edit TREND_CATEGORY_ORDER to reorder sections on the site.
+var TREND_CATEGORY_ORDER = ['Outerwear', 'Shirts', 'Pants', 'Shoes', 'Accessories', 'Other'];
 
 // General thrift/yard-sale sourcing targets — brands and categories with a
 // well-established track record of reselling well, so this is a "what
-// should I keep an eye out for while I'm digging through racks/bins"
-// list, not a mirror of what's already in the Sheet. (An earlier version
-// of this list *was* built from this seller's own inventory — Timberland,
-// Ralph Lauren, Calvin Klein, etc. — which meant Acquire only ever showed
-// trends for stuff already owned, defeating its purpose as a sourcing
-// tool. A few of those categories are kept below since they're also
-// broadly well-known resale picks, not because they're already owned.)
-// Edit this list directly to add/remove categories as trends shift.
+// should I keep an eye out for while I'm digging through racks/bins" list,
+// not a mirror of what's already in the Sheet. (An earlier version of this
+// list *was* built from this seller's own inventory — Timberland, Ralph
+// Lauren, Calvin Klein, etc. — which meant Acquire only ever showed trends
+// for stuff already owned, defeating its purpose as a sourcing tool. A few
+// of those categories are kept below since they're also broadly well-known
+// resale picks, not because they're already owned.)
+// Each entry has a `category` (Outerwear/Shirts/Pants/Shoes/Accessories) so
+// the site can group cards instead of showing one flat list. Edit this
+// directly to add/remove categories/terms as trends shift.
 var TREND_CANDIDATES = [
-  'Carhartt jacket', 'Carhartt overalls',
-  'Patagonia fleece', 'Patagonia jacket',
-  'The North Face jacket', 'The North Face fleece vest',
-  "Levi's 501 jeans", "Levi's denim jacket",
-  'Wrangler jeans', 'Dickies pants',
-  'Nike Jordan sneakers', 'Nike windbreaker',
-  'Adidas track jacket', 'New Balance sneakers',
-  'Vans Old Skool', 'Doc Martens boots',
-  'Lululemon leggings', 'Champion hoodie',
-  'Columbia fleece jacket',
-  'Coach bag', 'Ray-Ban sunglasses', 'Burberry scarf',
-  'Vintage band t-shirt', 'Vintage flannel shirt',
-  'Stanley tumbler', 'Yeti tumbler',
-  'Ralph Lauren polo', 'Timberland boots', 'Calvin Klein jeans', 'Ugg boots', 'Vans shoes',
+  { term: 'Carhartt jacket', category: 'Outerwear' },
+  { term: 'Patagonia fleece', category: 'Outerwear' },
+  { term: 'Patagonia jacket', category: 'Outerwear' },
+  { term: 'The North Face jacket', category: 'Outerwear' },
+  { term: 'The North Face fleece vest', category: 'Outerwear' },
+  { term: "Levi's denim jacket", category: 'Outerwear' },
+  { term: 'Nike windbreaker', category: 'Outerwear' },
+  { term: 'Adidas track jacket', category: 'Outerwear' },
+  { term: 'Columbia fleece jacket', category: 'Outerwear' },
+
+  { term: 'Champion hoodie', category: 'Shirts' },
+  { term: 'Vintage band t-shirt', category: 'Shirts' },
+  { term: 'Vintage flannel shirt', category: 'Shirts' },
+  { term: 'Ralph Lauren polo', category: 'Shirts' },
+
+  { term: 'Carhartt overalls', category: 'Pants' },
+  { term: "Levi's 501 jeans", category: 'Pants' },
+  { term: 'Wrangler jeans', category: 'Pants' },
+  { term: 'Dickies pants', category: 'Pants' },
+  { term: 'Lululemon leggings', category: 'Pants' },
+  { term: 'Calvin Klein jeans', category: 'Pants' },
+
+  { term: 'Nike Jordan sneakers', category: 'Shoes' },
+  { term: 'New Balance sneakers', category: 'Shoes' },
+  { term: 'Vans Old Skool', category: 'Shoes' },
+  { term: 'Doc Martens boots', category: 'Shoes' },
+  { term: 'Timberland boots', category: 'Shoes' },
+  { term: 'Ugg boots', category: 'Shoes' },
+  { term: 'Vans shoes', category: 'Shoes' },
+
+  { term: 'Coach bag', category: 'Accessories' },
+  { term: 'Ray-Ban sunglasses', category: 'Accessories' },
+  { term: 'Burberry scarf', category: 'Accessories' },
+  { term: 'Stanley tumbler', category: 'Accessories' },
+  { term: 'Yeti tumbler', category: 'Accessories' },
 ];
+
+function trendCategoryFor(searchTerm) {
+  var found = TREND_CANDIDATES.filter(function (c) { return c.term === searchTerm; })[0];
+  return found ? found.category : '';
+}
 
 // Depop has no public "sold items" filter (checked directly — its search
 // results are always active listings, and there's no equivalent of eBay's
@@ -776,6 +809,7 @@ function getTrends() {
       sellThrough: data[r][4] || '',
       lastChecked: formatDate(data[r][5]),
       imageUrl: data[r][6] || '',
+      category: data[r][7] || '',
     });
   }
   return out;
@@ -784,18 +818,20 @@ function getTrends() {
 // Upserts one (searchTerm x platform) row in Market Trends — used by both
 // the automatic Poshmark refresh and the manual eBay/Terapeak pull, so
 // neither one wipes out the other's data when it runs.
-function upsertTrendRow(searchTerm, platform, avgPrice, salesFound, sellThrough, imageUrl) {
+function upsertTrendRow(searchTerm, platform, avgPrice, salesFound, sellThrough, imageUrl, category) {
   var sheet = getTrendsSheet();
   var data = sheet.getDataRange().getValues();
   var today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  var cat = category || trendCategoryFor(searchTerm);
   for (var r = 1; r < data.length; r++) {
     if (String(data[r][0]) === String(searchTerm) && String(data[r][1]) === String(platform)) {
       sheet.getRange(r + 1, 3, 1, 4).setValues([[avgPrice || '', salesFound || '', sellThrough || '', today]]);
       if (imageUrl) sheet.getRange(r + 1, 7).setValue(imageUrl);
+      if (cat) sheet.getRange(r + 1, 8).setValue(cat);
       return;
     }
   }
-  sheet.appendRow([searchTerm, platform, avgPrice || '', salesFound || '', sellThrough || '', today, imageUrl || '']);
+  sheet.appendRow([searchTerm, platform, avgPrice || '', salesFound || '', sellThrough || '', today, imageUrl || '', cat || '']);
 }
 
 // Refreshes the Poshmark side of both the Acquire Watchlist comps and the
@@ -815,9 +851,9 @@ function refreshMarketData() {
     Utilities.sleep(1500);
   }
 
-  TREND_CANDIDATES.forEach(function (term) {
-    var poshResult = searchPoshmarkSold(term);
-    upsertTrendRow(term, 'Poshmark', poshResult.avgPrice, poshResult.count, '', poshResult.imageUrl);
+  TREND_CANDIDATES.forEach(function (c) {
+    var poshResult = searchPoshmarkSold(c.term);
+    upsertTrendRow(c.term, 'Poshmark', poshResult.avgPrice, poshResult.count, '', poshResult.imageUrl, c.category);
     Utilities.sleep(1500);
   });
 }
@@ -854,7 +890,7 @@ function cleanupOldTrendRows() {
   var sheet = getTrendsSheet();
   var data = sheet.getDataRange().getValues();
   var current = {};
-  TREND_CANDIDATES.forEach(function (t) { current[t] = true; });
+  TREND_CANDIDATES.forEach(function (c) { current[c.term] = true; });
   var removed = 0;
   for (var r = data.length - 1; r >= 1; r--) {
     var isBlankPlatform = data[r][0] && !data[r][1];

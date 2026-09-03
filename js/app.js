@@ -651,29 +651,12 @@ async function loadTrendsData() {
   catch { state.trends = []; }
 }
 
-function renderTrends() {
-  const container = document.getElementById('trendsCards');
-  if (!container) return;
+const TREND_CATEGORY_ORDER = ['Outerwear', 'Shirts', 'Pants', 'Shoes', 'Accessories', 'Other'];
+const TREND_CATEGORY_ICON = { Outerwear: '🧥', Shirts: '👕', Pants: '👖', Shoes: '👟', Accessories: '👜', Other: '🏷️' };
+const TREND_CATEGORY_COLOR = { Outerwear: '#5b6bd6', Shirts: '#2f9e6e', Pants: '#c9932e', Shoes: '#2fa3b8', Accessories: '#8c5bd6', Other: '#d6693f' };
 
-  // Trends come as one row per (term x platform) — group into one card per term.
-  const byTerm = new Map();
-  state.trends.forEach(t => {
-    if (!t.avgSoldPrice) return;
-    const entry = byTerm.get(t.searchTerm) || { term: t.searchTerm, platforms: [], imageUrl: '' };
-    entry.platforms.push(t);
-    if (t.imageUrl && !entry.imageUrl) entry.imageUrl = t.imageUrl;
-    byTerm.set(t.searchTerm, entry);
-  });
-  const cards = [...byTerm.values()].sort((a, b) =>
-    b.platforms.reduce((s, p) => s + Number(p.recentSalesFound || 0), 0) -
-    a.platforms.reduce((s, p) => s + Number(p.recentSalesFound || 0), 0)
-  );
-
-  if (!cards.length) {
-    container.innerHTML = '<div class="empty-state">No trend data yet — refreshes automatically once a day (see SETUP.md to turn it on).</div>';
-    return;
-  }
-  container.innerHTML = cards.map(c => `
+function trendCardHTML(c) {
+  return `
     <div class="trend-card">
       ${c.imageUrl ? `<img class="trend-photo" src="${escapeHtml(c.imageUrl)}" alt="" loading="lazy">` : ''}
       <h4>${escapeHtml(c.term)}</h4>
@@ -683,6 +666,53 @@ function renderTrends() {
         ${p.sellThrough ? `<div class="prow"><span>${escapeHtml(p.platform)} sell-through</span><b>${p.sellThrough}%</b></div>` : ''}
       `).join('')}
       <div class="trend-date">as of ${escapeHtml(c.platforms[0].lastChecked || '')}</div>
+    </div>
+  `;
+}
+
+function renderTrends() {
+  const container = document.getElementById('trendsCards');
+  if (!container) return;
+
+  // Trends come as one row per (term x platform) — group into one card per term.
+  const byTerm = new Map();
+  state.trends.forEach(t => {
+    if (!t.avgSoldPrice) return;
+    const entry = byTerm.get(t.searchTerm) || { term: t.searchTerm, platforms: [], imageUrl: '', category: '' };
+    entry.platforms.push(t);
+    if (t.imageUrl && !entry.imageUrl) entry.imageUrl = t.imageUrl;
+    if (t.category && !entry.category) entry.category = t.category;
+    byTerm.set(t.searchTerm, entry);
+  });
+  const cards = [...byTerm.values()];
+
+  if (!cards.length) {
+    container.innerHTML = '<div class="empty-state">No trend data yet — refreshes automatically once a day (see SETUP.md to turn it on).</div>';
+    return;
+  }
+
+  // Group into categories (Outerwear/Shirts/Pants/Shoes/Accessories/Other),
+  // most-sold-first within each, so sourcing targets read like a shopping
+  // list by department instead of one flat undifferentiated grid.
+  const byCategory = new Map();
+  cards.forEach(c => {
+    const cat = TREND_CATEGORY_ORDER.includes(c.category) ? c.category : 'Other';
+    if (!byCategory.has(cat)) byCategory.set(cat, []);
+    byCategory.get(cat).push(c);
+  });
+  byCategory.forEach(list => list.sort((a, b) =>
+    b.platforms.reduce((s, p) => s + Number(p.recentSalesFound || 0), 0) -
+    a.platforms.reduce((s, p) => s + Number(p.recentSalesFound || 0), 0)
+  ));
+
+  container.innerHTML = TREND_CATEGORY_ORDER.filter(cat => byCategory.has(cat)).map(cat => `
+    <div class="cat-section" style="--cat:${TREND_CATEGORY_COLOR[cat] || TREND_CATEGORY_COLOR.Other}">
+      <div class="cat-heading">
+        <span class="icon">${TREND_CATEGORY_ICON[cat] || '🏷️'}</span>
+        <h2>${escapeHtml(cat)}</h2>
+        <span class="count">${byCategory.get(cat).length}</span>
+      </div>
+      <div class="platform-cards">${byCategory.get(cat).map(trendCardHTML).join('')}</div>
     </div>
   `).join('');
 }
