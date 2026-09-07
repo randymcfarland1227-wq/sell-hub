@@ -401,6 +401,9 @@ main.wrap {
 }
 
 .card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 7px; }
+.card-top-actions { display:flex; align-items:center; gap:7px; flex-shrink:0; }
+.action-star { width:31px; height:31px; display:grid; place-items:center; border:1px solid var(--border); border-radius:999px; background:var(--bg-elevated); color:var(--text-faint); font-size:1.08rem; line-height:1; cursor:pointer; }
+.action-star:hover, .action-star.starred { border-color:var(--gold); background:color-mix(in srgb,var(--gold) 15%,var(--bg-elevated)); color:var(--gold-deep); }
 .card h3 { font-family: 'Playfair Display', serif; font-weight: 600; font-size: 1.02rem; }
 
 .status-badge {
