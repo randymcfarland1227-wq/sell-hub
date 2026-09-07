@@ -151,7 +151,7 @@ function wireActionStars(root) {
     if (state.featuredActions.has(id)) state.featuredActions.delete(id); else state.featuredActions.add(id);
     localSet('sellHub.featuredActions', [...state.featuredActions]);
     renderAction();
-    notifyWorkroom();
+    syncWorkroomFromStar();
   }));
 }
 function resaleWorkroomSnapshot() {
@@ -179,7 +179,15 @@ function resaleWorkroomSnapshot() {
   };
 }
 function notifyWorkroom() {
-  if (window.parent !== window) window.parent.postMessage({ type: 'randys-workroom:snapshot', payload: resaleWorkroomSnapshot() }, WORKROOM_ORIGIN);
+  const message = { type: 'randys-workroom:snapshot', payload: resaleWorkroomSnapshot() };
+  if (window.opener && !window.opener.closed) window.opener.postMessage(message, WORKROOM_ORIGIN);
+  if (window.parent !== window) window.parent.postMessage(message, WORKROOM_ORIGIN);
+}
+function syncWorkroomFromStar() {
+  notifyWorkroom();
+  if (window.opener && !window.opener.closed) return;
+  const encoded = btoa(encodeURIComponent(JSON.stringify(resaleWorkroomSnapshot())));
+  window.open(`${WORKROOM_ORIGIN}/#sync=${encoded}`, 'randys-work-room');
 }
 window.addEventListener('message', event => {
   if (event.origin !== WORKROOM_ORIGIN || event.data?.type !== 'randys-workroom:request') return;
