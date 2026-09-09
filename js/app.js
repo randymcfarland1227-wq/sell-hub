@@ -12,6 +12,8 @@ const state = {
   photos: [],             // from Photos tab (cover photo per item x platform)
   trends: [],             // from Market Trends tab (curated resale categories, daily auto-refresh)
   itemActions: [],        // from Item Actions tab (price drops/offers sent/ignored, logged from pricing actions)
+  featuredActions: new Set(),
+  loadedAt: '',
   expandedItems: new Set(),
   editingAcquireId: null,
 };
@@ -136,6 +138,60 @@ function localGet(key, fallback) {
   try { return JSON.parse(localStorage.getItem(key)) || fallback; } catch { return fallback; }
 }
 function localSet(key, value) { localStorage.setItem(key, JSON.stringify(value)); }
+
+const WORKROOM_ORIGIN = 'https://randys-frontier.randymcfarland1227.chatgpt.site';
+function isFeaturedAction(itemId) { return state.featuredActions.has(String(itemId)); }
+function actionStarHTML(itemId, label) {
+  const starred = isFeaturedAction(itemId);
+  return `<button class="action-star${starred ? ' starred' : ''}" data-feature-action="${escapeHtml(itemId)}" aria-label="${starred ? 'Remove' : 'Feature'} ${escapeHtml(label)} in Randy's Work Room" title="${starred ? 'Featured in Work Room' : 'Feature in Work Room'}">${starred ? '★' : '☆'}</button>`;
+}
+function wireActionStars(root) {
+  root.querySelectorAll('[data-feature-action]').forEach(btn => btn.addEventListener('click', () => {
+    const id = String(btn.dataset.featureAction);
+    if (state.featuredActions.has(id)) state.featuredActions.delete(id); else state.featuredActions.add(id);
+    localSet('sellHub.featuredActions', [...state.featuredActions]);
+    renderAction();
+    syncWorkroomFromStar();
+  }));
+}
+function resaleWorkroomSnapshot() {
+  const active = state.inventory.filter(it => !isSold(it));
+  const sold = state.inventory.filter(isSold);
+  const latest = latestMetricsByItemPlatform();
+  let listingViews = 0;
+  latest.forEach(metric => { listingViews += Number(metric.views || metric.impressions) || 0; });
+  const featured = active.filter(it => isFeaturedAction(it.itemId)).map(item => {
+    const action = pricingActionFor(item);
+    return { id: String(item.itemId), title: [item.brand, item.item].filter(Boolean).join(' — ') || item.itemId, detail: `${action.label}: ${action.reason}`, meta: `${action.views} views · ${action.clicks} clicks` };
+  }).concat(sold.filter(it => !hasShipped(it.itemId) && isFeaturedAction(it.itemId)).map(item => ({
+    id: String(item.itemId), title: [item.brand, item.item].filter(Boolean).join(' — ') || item.itemId, detail: 'Ship this sold item.', meta: item.soldPrice ? `Sold for ${item.soldPrice}` : 'Sold'
+  })));
+  return {
+    source: 'resale',
+    metrics: {
+      listed: active.length,
+      sold: sold.length,
+      activeListings: active.reduce((count, item) => count + Math.max(1, splitPlatforms(item.platform).length), 0),
+      listingViews,
+    },
+    featured,
+    refreshedAt: state.loadedAt || new Date().toISOString(),
+  };
+}
+function notifyWorkroom() {
+  const message = { type: 'randys-workroom:snapshot', payload: resaleWorkroomSnapshot() };
+  if (window.opener && !window.opener.closed) window.opener.postMessage(message, WORKROOM_ORIGIN);
+  if (window.parent !== window) window.parent.postMessage(message, WORKROOM_ORIGIN);
+}
+function syncWorkroomFromStar() {
+  notifyWorkroom();
+  const encoded = btoa(encodeURIComponent(JSON.stringify(resaleWorkroomSnapshot())));
+  window.open(`${WORKROOM_ORIGIN}/#sync=${encoded}`, 'randys-work-room');
+}
+window.addEventListener('message', event => {
+  if (event.origin !== WORKROOM_ORIGIN || event.data?.type !== 'randys-workroom:request') return;
+  event.source?.postMessage({ type: 'randys-workroom:snapshot', payload: resaleWorkroomSnapshot() }, event.origin);
+});
 
 // ---------------------------------------------------------------------
 // Loading synced data — inventory/descriptions/postingQueue/metrics are
@@ -685,8 +741,9 @@ function renderToShip() {
     const soldDate = soldDateFor(it.itemId);
     return `
       <div class="card to-ship-card" style="--cat:#1f5c46">
-        <div class="card-top">
-          <h3>${escapeHtml([it.brand, it.item].filter(Boolean).join(' — ') || it.itemId)}</h3>
+      <div class="card-top">
+        <h3>${escapeHtml([it.brand, it.item].filter(Boolean).join(' — ') || it.itemId)}</h3>
+        ${actionStarHTML(it.itemId, [it.brand, it.item].filter(Boolean).join(' ') || it.itemId)}
         </div>
         <div class="meta">
           <span><b>Sold price —</b> ${escapeHtml(it.soldPrice || '—')}</span>
@@ -697,6 +754,7 @@ function renderToShip() {
       </div>
     `;
   }).join('');
+  wireActionStars(container);
   container.querySelectorAll('.ts-ship-btn').forEach(btn => btn.addEventListener('click', () => markShipped(btn.dataset.id)));
 }
 
@@ -868,7 +926,7 @@ function renderPricingActions() {
     <div class="card pricing-card pa-${action.severity}" data-item-id="${escapeHtml(item.itemId)}">
       <div class="card-top">
         <h3>${escapeHtml([item.brand, item.item].filter(Boolean).join(' — ') || item.itemId)}</h3>
-        <span class="pa-badge pa-${action.severity}">${escapeHtml(action.label)}</span>
+        <div class="card-top-actions">${actionStarHTML(item.itemId, [item.brand, item.item].filter(Boolean).join(' ') || item.itemId)}<span class="pa-badge pa-${action.severity}">${escapeHtml(action.label)}</span></div>
       </div>
       <div class="meta">
         <span><b>List price —</b> ${priceLineHTML(item)}${item.floorPrice ? ` (floor ${escapeHtml(item.floorPrice)})` : ''}</span>
@@ -894,6 +952,8 @@ function renderPricingActions() {
     </div>
   `;
   }).join('');
+
+  wireActionStars(container);
 
   container.querySelectorAll('.pa-offer-btn').forEach(btn => {
     btn.addEventListener('click', () => sendOfferForAction(btn.dataset.id, btn.dataset.plat));
@@ -1218,17 +1278,20 @@ renderListChips();
 renderList();
 setMode(localGet('sellHub.mode', 'wheel'));
 renderStats();
+state.featuredActions = new Set(localGet('sellHub.featuredActions', []));
 renderAction();
 populateMetricForm();
 loadAcquire();
 loadTrendsData().then(renderTrends);
 
 Promise.all([loadInventory(), loadDescriptionsData(), loadPostingQueueData(), loadMetricsData(), loadPhotosData(), loadItemActionsData()]).then(() => {
+  state.loadedAt = new Date().toISOString();
   renderWheel();
   routeOverview();
   renderListChips();
   renderList();
   renderStats();
   renderAction();
+  notifyWorkroom();
   populateMetricForm();
 });
