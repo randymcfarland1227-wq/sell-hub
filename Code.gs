@@ -533,8 +533,14 @@ function dropListingPrice(body) {
   var listPriceCol = colIndex(srcHeader.colMap, 'List price');
   if (listPriceCol === -1) return { ok: false, error: 'Could not find a "List price" column in ' + sourceTabName + '.' };
 
+  // Captured before overwriting so the log (and the site's "was $X now $Y"
+  // display) can show the actual before/after, not just the new number.
+  var oldPrice = sourceSheet.getRange(row, listPriceCol + 1).getValue();
   sourceSheet.getRange(row, listPriceCol + 1).setValue(Number(newPrice));
-  var logged = logItemAction(itemId, 'Price Drop', String(newPrice));
+  var detail = (oldPrice !== '' && oldPrice != null && !isNaN(oldPrice) && Number(oldPrice) !== Number(newPrice))
+    ? (Number(oldPrice) + '->' + Number(newPrice))
+    : String(newPrice);
+  var logged = logItemAction(itemId, 'Price Drop', detail);
   return { ok: true, date: logged.date };
 }
 

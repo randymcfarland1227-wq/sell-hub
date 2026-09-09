@@ -421,6 +421,22 @@ main.wrap {
 .card .meta { font-size: 0.75rem; color: var(--text-faint); display: flex; flex-direction: column; gap: 3px; margin-bottom: 9px; }
 .card .meta b { color: var(--text-muted); font-weight: 600; }
 
+.action-badges { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
+.action-badge {
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 3px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  color: #fff;
+}
+.action-badge.offer { background: #1f3a5c; }
+.action-badge.drop { background: #7a5a1f; }
+
+.price-was { color: var(--text-faint); font-weight: 400; text-decoration-color: var(--text-faint); margin-right: 3px; }
+
 .platform-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 7px; }
 .platform-tag {
   font-size: 0.62rem;

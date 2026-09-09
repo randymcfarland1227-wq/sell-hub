@@ -183,6 +183,64 @@ function latestActionFor(itemId) {
   const matches = state.itemActions.filter(a => String(a.itemId) === String(itemId));
   return matches.length ? matches[matches.length - 1] : null;
 }
+// Same, but scoped to one action type — so an unrelated later log entry
+// (a Correction note, a Sold/Shipped row) can't mask a still-relevant
+// Price Drop or Offer Sent from an earlier date.
+function latestActionOfType(itemId, actionType) {
+  const matches = state.itemActions.filter(a => String(a.itemId) === String(itemId) && a.action === actionType);
+  return matches.length ? matches[matches.length - 1] : null;
+}
+// dropListingPrice logs detail as "oldPrice->newPrice" when the old price
+// was available server-side, or a bare newPrice for older log rows / cases
+// where it wasn't. Returns null only when detail can't be read as a price
+// at all.
+function parsePriceDropDetail(detail) {
+  const s = String(detail == null ? '' : detail).trim();
+  if (!s) return null;
+  const m = s.match(/^([\d.]+)\s*->\s*([\d.]+)$/);
+  if (m) return { from: Number(m[1]), to: Number(m[2]) };
+  const n = Number(s);
+  return isFinite(n) ? { from: null, to: n } : null;
+}
+// How long a deployed price drop / sent offer keeps a pricing suggestion
+// marked "handled" before it's allowed to resurface. Long enough that
+// yesterday's work doesn't immediately look unfinished again, short enough
+// that a listing that's genuinely still stuck gets re-flagged rather than
+// going silent forever.
+const HANDLED_SUPPRESS_DAYS = 7;
+function daysSince(dateStr) {
+  const then = new Date(dateStr + 'T00:00:00');
+  const now = new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00');
+  return Math.round((now - then) / 86400000);
+}
+// "List price" text for a card: if the most recent Price Drop's logged
+// new price matches what's on the item right now, show the old price
+// struck through next to the current one instead of just the bare number
+// — makes a deployed price change visible at a glance, not just in the log.
+function priceLineHTML(item) {
+  const current = parseMoney(item.listPrice);
+  const drop = latestActionOfType(item.itemId, 'Price Drop');
+  const parsed = drop ? parsePriceDropDetail(drop.detail) : null;
+  if (parsed && parsed.from && current && Math.round(parsed.to) === Math.round(current)) {
+    return `<s class="price-was">${fmtMoney(parsed.from)}</s> ${fmtMoney(current)}`;
+  }
+  return item.listPrice ? escapeHtml(item.listPrice) : '—';
+}
+// Small badges surfacing "something was already done about this" directly
+// on the Inventory cards, not just in the Action tab — a price drop and/or
+// an offer sent, whichever have happened for this item.
+function actionBadgesHTML(itemId) {
+  const badges = [];
+  const offer = latestActionOfType(itemId, 'Offer Sent');
+  if (offer) badges.push(`<span class="action-badge offer">Offer sent ${escapeHtml(offer.date)}</span>`);
+  const drop = latestActionOfType(itemId, 'Price Drop');
+  if (drop) {
+    const parsed = parsePriceDropDetail(drop.detail);
+    const txt = parsed && parsed.from ? `Price dropped ${fmtMoney(parsed.from)}→${fmtMoney(parsed.to)}` : 'Price dropped';
+    badges.push(`<span class="action-badge drop">${txt} ${escapeHtml(drop.date)}</span>`);
+  }
+  return badges.length ? `<div class="action-badges">${badges.join('')}</div>` : '';
+}
 
 // ---------------------------------------------------------------------
 // Tabs
@@ -308,7 +366,7 @@ function platformStatsHTML(item) {
   const platforms = splitPlatforms(item.platform);
   if (!platforms.length) return '';
   const latestByPlatform = latestMetricsByItemPlatform();
-  const price = item.listPrice ? fmtMoney(parseMoney(item.listPrice)) : '—';
+  const price = priceLineHTML(item);
   const rows = platforms.map(p => {
     const m = platformMeta(p);
     const snap = latestByPlatform.get(item.itemId + '|' + m.id);
@@ -338,10 +396,11 @@ function itemCardHTML(item, cat) {
         <h3>${escapeHtml(titleParts.join(' — ') || item.itemId)}</h3>
         <span class="status-badge ${statusClass(item.sourceStatus)}">${escapeHtml(item.sourceStatus || '—')}</span>
       </div>
+      ${actionBadgesHTML(item.itemId)}
       <div class="meta">
         ${item.size ? `<span><b>Size —</b> ${escapeHtml(item.size)}</span>` : ''}
         ${item.condition ? `<span><b>Condition —</b> ${escapeHtml(item.condition)}</span>` : ''}
-        <span><b>List price —</b> ${escapeHtml(item.listPrice || '—')}${item.floorPrice ? ` (floor ${escapeHtml(item.floorPrice)})` : ''}</span>
+        <span><b>List price —</b> ${priceLineHTML(item)}${item.floorPrice ? ` (floor ${escapeHtml(item.floorPrice)})` : ''}</span>
         ${sold ? `<span><b>Sold —</b> ${escapeHtml(item.soldPrice || '—')}</span>` : ''}
       </div>
       ${platformStatsHTML(item)}
@@ -728,18 +787,32 @@ function naturalPricingAction(item) {
 // warrant it tomorrow, that's a legitimate fresh flag, not a repeat.
 function pricingActionFor(item) {
   const natural = naturalPricingAction(item);
-  const last = latestActionFor(item.itemId);
   const today = new Date().toISOString().slice(0, 10);
-  if (!last || last.date !== today) return natural;
 
-  if (last.action === 'Ignored') {
+  // Dismissals are deliberately short-lived: ignoring a suggestion today
+  // just means "not today," not "never again."
+  const ignored = latestActionOfType(item.itemId, 'Ignored');
+  if (ignored && ignored.date === today) {
     return { ...natural, severity: 'dismissed', label: 'Dismissed', reason: `You dismissed "${natural.label}" today. It'll resurface if the numbers still call for it tomorrow.` };
   }
-  if (last.action === 'Offer Sent' && natural.severity === 'opportunity') {
-    return { ...natural, severity: 'handled', label: 'Offer sent', reason: `Offer sent today via ${escapeHtml(last.detail)}. Waiting to hear back.` };
+
+  if (natural.severity === 'opportunity') {
+    const offer = latestActionOfType(item.itemId, 'Offer Sent');
+    if (offer && daysSince(offer.date) <= HANDLED_SUPPRESS_DAYS) {
+      const when = offer.date === today ? 'today' : `on ${offer.date}`;
+      return { ...natural, severity: 'handled', label: 'Offer sent', reason: `Offer sent ${when} via ${escapeHtml(offer.detail)}. Waiting to hear back.` };
+    }
   }
-  if (last.action === 'Price Drop' && (natural.severity === 'urgent' || (natural.severity === 'attention' && natural.label === 'Refresh listing'))) {
-    return { ...natural, severity: 'handled', label: 'Price dropped', reason: `Dropped to ${fmtMoney(Number(last.detail))} today — give it a few days before dropping further.` };
+  if (natural.severity === 'urgent' || (natural.severity === 'attention' && natural.label === 'Refresh listing')) {
+    const drop = latestActionOfType(item.itemId, 'Price Drop');
+    if (drop && daysSince(drop.date) <= HANDLED_SUPPRESS_DAYS) {
+      const parsed = parsePriceDropDetail(drop.detail);
+      const when = drop.date === today ? 'today' : `on ${drop.date}`;
+      const priceText = parsed && parsed.from
+        ? `${fmtMoney(parsed.from)} → ${fmtMoney(parsed.to)}`
+        : fmtMoney(parsed ? parsed.to : Number(drop.detail));
+      return { ...natural, severity: 'handled', label: 'Price dropped', reason: `Dropped ${priceText} ${when} — give it a few days before dropping further.` };
+    }
   }
   return natural;
 }
@@ -798,7 +871,7 @@ function renderPricingActions() {
         <span class="pa-badge pa-${action.severity}">${escapeHtml(action.label)}</span>
       </div>
       <div class="meta">
-        <span><b>List price —</b> ${escapeHtml(item.listPrice || '—')}${item.floorPrice ? ` (floor ${escapeHtml(item.floorPrice)})` : ''}</span>
+        <span><b>List price —</b> ${priceLineHTML(item)}${item.floorPrice ? ` (floor ${escapeHtml(item.floorPrice)})` : ''}</span>
         <span><b>Views —</b> ${action.views} &nbsp; <b>Clicks —</b> ${action.clicks}${action.watchers ? ` &nbsp; <b>Watchers —</b> ${action.watchers}` : ''}</span>
       </div>
       ${action.suggestedPrice ? `<div class="pa-callout"><b>Suggested price — ${fmtMoney(action.suggestedPrice)}</b></div>` : ''}
