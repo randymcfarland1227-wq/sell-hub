@@ -64,6 +64,7 @@ function platformId(name) {
   if (s.includes('depop')) return 'depop';
   if (s.includes('facebook') || s.includes('fb market')) return 'facebook';
   if (s.includes('mercari')) return 'mercari';
+  if (s.includes('grailed')) return 'grailed';
   return null;
 }
 function platformMeta(name) {
@@ -72,7 +73,7 @@ function platformMeta(name) {
   return { id: id || categoryId(name) || 'other', label: name || DEFAULT_PLATFORM_META.label, color: DEFAULT_PLATFORM_META.color };
 }
 function splitPlatforms(field) {
-  return String(field || '').split(',').map(s => s.trim()).filter(Boolean);
+  return String(field || '').split(/[,/]/).map(s => s.trim()).filter(Boolean);
 }
 function platformOptionsHTML(selected) {
   return Object.keys(PLATFORM_META).map(id => `<option value="${id}"${id === selected ? ' selected' : ''}>${PLATFORM_META[id].label}</option>`).join('');
@@ -760,8 +761,94 @@ function renderToShip() {
 
 function renderAction() {
   renderToShip();
+  renderStillToList();
   renderPricingActions();
 }
+
+// ---------------------------------------------------------------------
+// Still to list — items that aren't live everywhere their Platform field
+// says they should be. A platform counts as "done" once its Platform
+// Posting Queue row is Active (or just has a Listing URL, in case status
+// wasn't set) — otherwise (Draft, Paused, or no row at all) it's still
+// outstanding. Photographed-but-unlisted items end up with everything
+// outstanding, same as a partially cross-listed item missing just one site.
+// ---------------------------------------------------------------------
+function postingQueueEntry(itemId, platformIdWanted) {
+  return state.postingQueue.find(function (row) {
+    return String(row.itemId) === String(itemId) && platformId(row.platform) === platformIdWanted;
+  });
+}
+function isPlatformLive(entry) {
+  if (!entry) return false;
+  return String(entry.status || '').toLowerCase() === 'active' || !!String(entry.listingUrl || '').trim();
+}
+function platformsStatusFor(item) {
+  const platforms = splitPlatforms(item.platform);
+  const done = [], missing = [];
+  platforms.forEach(function (p) {
+    const meta = platformMeta(p);
+    const entry = postingQueueEntry(item.itemId, meta.id);
+    (isPlatformLive(entry) ? done : missing).push({ meta: meta, entry: entry || null });
+  });
+  return { done: done, missing: missing };
+}
+function stillToListRows() {
+  return state.inventory
+    .filter(function (it) { return !isSold(it); })
+    .map(function (it) { return { item: it, status: platformsStatusFor(it) }; })
+    .filter(function (r) { return r.status.missing.length > 0; });
+}
+function populateStillToListSiteOptions(rows) {
+  const select = document.getElementById('stillToListSite');
+  if (!select) return;
+  const prev = select.value;
+  const seen = new Map();
+  rows.forEach(function (r) {
+    r.status.missing.forEach(function (m) { seen.set(m.meta.id, m.meta.label); });
+  });
+  const options = Array.from(seen.entries()).sort(function (a, b) { return a[1].localeCompare(b[1]); });
+  select.innerHTML = '<option value="">All platforms</option>' +
+    options.map(function (o) { return `<option value="${escapeHtml(o[0])}">${escapeHtml(o[1])}</option>`; }).join('');
+  if (options.some(function (o) { return o[0] === prev; })) select.value = prev;
+}
+function renderStillToList() {
+  const container = document.getElementById('stillToListList');
+  if (!container) return;
+  const rows = stillToListRows();
+  populateStillToListSiteOptions(rows);
+
+  const siteFilter = document.getElementById('stillToListSite').value;
+  const filtered = siteFilter
+    ? rows.filter(function (r) { return r.status.missing.some(function (m) { return m.meta.id === siteFilter; }); })
+    : rows;
+  filtered.sort(function (a, b) { return (a.item.item || a.item.brand || '').localeCompare(b.item.item || b.item.brand || ''); });
+
+  if (!filtered.length) {
+    container.innerHTML = `<div class="empty-state">${siteFilter ? 'Nothing outstanding for that platform.' : 'Everything is listed everywhere it should be.'}</div>`;
+    return;
+  }
+
+  container.innerHTML = filtered.map(function ({ item, status }) {
+    const chips = status.done.map(function (d) {
+      return `<span class="stl-chip stl-done" style="--plat:${d.meta.color}">✓ ${escapeHtml(d.meta.label)}</span>`;
+    }).concat(status.missing.map(function (m) {
+      return `<span class="stl-chip stl-missing" style="--plat:${m.meta.color}">${escapeHtml(m.meta.label)}</span>`;
+    })).join('');
+    return `
+      <div class="card stl-card">
+        <div class="card-top">
+          <h3>${escapeHtml([item.brand, item.item].filter(Boolean).join(' — ') || item.itemId)}</h3>
+          <span class="status-badge ${statusClass(item.sourceStatus)}">${escapeHtml(item.sourceStatus || '—')}</span>
+        </div>
+        <div class="meta">
+          <span><b>List price —</b> ${priceLineHTML(item)}${item.floorPrice ? ` (floor ${escapeHtml(item.floorPrice)})` : ''}</span>
+        </div>
+        <div class="stl-chips">${chips}</div>
+      </div>
+    `;
+  }).join('');
+}
+document.getElementById('stillToListSite').addEventListener('change', renderStillToList);
 
 // Thresholds behind the pricing-action calls below — tune these if the
 // recommendations feel too eager or too quiet.

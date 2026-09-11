@@ -13,7 +13,7 @@
  *                                   item, condition, estValue, listPrice, floorPrice,
  *                                   platform, dateListed, buyer, soldPrice, netCash}]
  *   GET  ?action=descriptions  -> [{itemId, item, platform, suggestedTitle, description}]
- *   GET  ?action=postingQueue  -> [{listingId, itemId, platform, postingOrder}]
+ *   GET  ?action=postingQueue  -> [{listingId, itemId, platform, postingOrder, status, listingUrl, datePosted}]
  *   GET  ?action=metrics       -> [{date, listingId, itemId, platform, impressions, views,
  *                                   watchers, clicks, price, source}]
  *   GET  ?action=acquire       -> [{id, brand, itemType, size, color, condition, targetPrice,
@@ -39,6 +39,11 @@
  *   POST {action:'logItemAction', itemId, itemAction, detail} -> logs 'Offer Sent' or 'Ignored'
  *        against an item, with no price change (used by the Stats tab's pricing actions)
  *   POST {action:'clearItemActions', itemId} -> removes all logged actions for one item
+ *   POST {action:'setListingLink', itemId, platform, listingId, url, status, listPrice} ->
+ *        upserts a Platform Posting Queue row by Listing ID (e.g. "CLO-027-EBAY") with the
+ *        live URL/status/today's date — used to record a listing as actually posted
+ *   POST {action:'setListingStatus', itemId, sourceTab, status} -> writes Status back into
+ *        the source tab (same row-lookup as markSold), e.g. "Photograph" -> "Listed"
  *
  * Poshmark's side of market data (Acquire Watchlist comps + Market Trends tab)
  * refreshes itself daily via a time trigger — run setupMarketDataTrigger() once
@@ -66,7 +71,54 @@ function doGet(e) {
   if (action === 'photos') return jsonOut(getPhotos());
   if (action === 'trends') return jsonOut(getTrends());
   if (action === 'itemActions') return jsonOut(getItemActions());
+  if (action === 'debugHeaders') return jsonOut(debugHeaders());
+  if (action === 'debugRows') return jsonOut(debugRows(e.parameter.sheet, Number(e.parameter.start) || 1, Number(e.parameter.n) || 20));
   return jsonOut({ error: 'unknown action' });
+}
+
+// Emergency restore helper — writes an exact row of values back verbatim.
+// Used once to undo an accidental overwrite from an appendRow bug; not part
+// of normal operation.
+function debugRestoreRow(sheetName, rowNum, values) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+  if (!sheet) return { ok: false, error: 'not found' };
+  sheet.getRange(rowNum, 1, 1, values.length).setValues([values]);
+  return { ok: true };
+}
+
+// Dumps a raw row range (1-indexed, sheet row numbers) from any named sheet
+// for inspection — same temporary-debug spirit as debugHeaders above.
+function debugRows(sheetName, startRow, n) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+  if (!sheet) return { error: 'not found' };
+  var lastRow = sheet.getLastRow();
+  var lastCol = sheet.getLastColumn();
+  var endRow = Math.min(lastRow, startRow + n - 1);
+  if (startRow > lastRow) return { rows: [], lastRow: lastRow };
+  var vals = sheet.getRange(startRow, 1, endRow - startRow + 1, lastCol).getValues();
+  return { rows: vals, lastRow: lastRow };
+}
+
+// Temporary inspection helper — dumps the header row (and first data row)
+// of every sheet that matters for the link/status backfill work, so we're
+// not guessing at real column names before writing to them.
+function debugHeaders() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var names = ['Clothing Sell Inventory', 'Non Clothing Sell Inventory', 'Listing Hub', 'Platform Posting Queue'];
+  var out = {};
+  names.forEach(function (name) {
+    var sheet = ss.getSheetByName(name);
+    if (!sheet) { out[name] = { error: 'not found' }; return; }
+    var header = findHeaderRow(sheet, ['Status', 'Item ID', 'Listing ID']);
+    var headerRowIndex = header ? header.rowIndex : 0;
+    var lastCol = sheet.getLastColumn();
+    var headerRowVals = sheet.getRange(headerRowIndex + 1, 1, 1, lastCol).getValues()[0];
+    var firstDataRow = sheet.getLastRow() > headerRowIndex + 1
+      ? sheet.getRange(headerRowIndex + 2, 1, 1, lastCol).getValues()[0]
+      : [];
+    out[name] = { headerRowIndex: headerRowIndex, headers: headerRowVals, firstDataRow: firstDataRow, lastRow: sheet.getLastRow(), lastCol: lastCol };
+  });
+  return out;
 }
 
 function doPost(e) {
@@ -86,8 +138,95 @@ function doPost(e) {
   if (action === 'dropListingPrice') return jsonOut(dropListingPrice(body));
   if (action === 'logItemAction') return jsonOut(logItemAction(body.itemId, body.itemAction, body.detail));
   if (action === 'clearItemActions') return jsonOut(clearItemActions(body.itemId));
+  if (action === 'setListingLink') return jsonOut(setListingLink(body));
+  if (action === 'setListingStatus') return jsonOut(setListingStatus(body));
+  if (action === 'debugRestoreRow') return jsonOut(debugRestoreRow(body.sheet, body.row, body.values));
 
   return jsonOut({ error: 'unknown action' });
+}
+
+// Records a newly-live listing's URL against Platform Posting Queue —
+// updates the row if one already exists for this Listing ID (e.g. a Draft
+// row from planning), otherwise appends a new one. Existing rows in this
+// sheet have gaps between them (spacing, not reserved slots for a specific
+// item/platform), so we never guess-fill a blank row by position.
+function setListingLink(body) {
+  var itemId = body.itemId;
+  var platform = body.platform;
+  var listingId = body.listingId;
+  var url = body.url;
+  if (!itemId || !platform || !listingId || !url) {
+    return { ok: false, error: 'Missing itemId, platform, listingId, or url.' };
+  }
+
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(POSTING_QUEUE_SHEET);
+  if (!sheet) return { ok: false, error: 'Could not find "' + POSTING_QUEUE_SHEET + '" tab.' };
+  var header = findHeaderRow(sheet, ['Listing ID']);
+  if (!header) return { ok: false, error: 'Could not find a header row in ' + POSTING_QUEUE_SHEET + '.' };
+  var colMap = header.colMap;
+  var listingIdCol = colIndex(colMap, 'Listing ID');
+  if (listingIdCol === -1) return { ok: false, error: 'Could not find a "Listing ID" column.' };
+
+  var startRow = header.rowIndex + 2;
+  var lastRow = sheet.getLastRow();
+  var numCols = sheet.getLastColumn();
+  var targetRow = -1;
+  var trueLastContentRow = header.rowIndex + 1; // fallback: just the header
+  if (lastRow >= startRow) {
+    var idsRange = sheet.getRange(startRow, 1, lastRow - startRow + 1, numCols).getValues();
+    for (var i = 0; i < idsRange.length; i++) {
+      var rowIsBlank = idsRange[i].every(function (c) { return c === '' || c === null; });
+      if (!rowIsBlank) trueLastContentRow = startRow + i;
+      if (String(idsRange[i][listingIdCol] || '') === listingId) targetRow = startRow + i;
+    }
+  }
+  // Never rely on appendRow here — on this Table-formatted sheet it can land
+  // on an already-occupied row instead of past the real last content (this
+  // overwrote MISC-022's row once; fixed by writing explicitly past the
+  // last row that actually has any content, found above by scanning).
+  if (targetRow === -1) targetRow = trueLastContentRow + 1;
+
+  var today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  var itemIdCol = colIndex(colMap, 'Item ID');
+  var platformCol = colIndex(colMap, 'Platform');
+  var statusCol = colIndex(colMap, 'Status');
+  var urlCol = colIndex(colMap, 'Listing URL');
+  var datePostedCol = colIndex(colMap, 'Date posted');
+  var listPriceCol = colIndex(colMap, 'List price');
+  var titleCol = colIndex(colMap, 'Suggested title');
+
+  sheet.getRange(targetRow, listingIdCol + 1).setValue(listingId);
+  if (itemIdCol !== -1) sheet.getRange(targetRow, itemIdCol + 1).setValue(itemId);
+  if (platformCol !== -1) sheet.getRange(targetRow, platformCol + 1).setValue(platform);
+  if (statusCol !== -1) sheet.getRange(targetRow, statusCol + 1).setValue(body.status || 'Active');
+  if (urlCol !== -1) sheet.getRange(targetRow, urlCol + 1).setValue(url);
+  if (datePostedCol !== -1) sheet.getRange(targetRow, datePostedCol + 1).setValue(today);
+  if (body.listPrice && listPriceCol !== -1) sheet.getRange(targetRow, listPriceCol + 1).setValue(Number(body.listPrice));
+  if (body.title && titleCol !== -1) sheet.getRange(targetRow, titleCol + 1).setValue(body.title);
+
+  return { ok: true, row: targetRow, updatedExisting: targetRow <= trueLastContentRow };
+}
+
+// Generic status-only writer for the source tabs — same row-lookup as
+// markSold/dropListingPrice, but just flips Status (e.g. "Photograph" ->
+// "Listed") without touching price or sold fields.
+function setListingStatus(body) {
+  var itemId = body.itemId;
+  var sourceTabName = body.sourceTab;
+  var status = body.status;
+  if (!itemId || !sourceTabName || !status) return { ok: false, error: 'Missing itemId, sourceTab, or status.' };
+
+  var located = findSourceRow(itemId, sourceTabName);
+  if (located.error) return { ok: false, error: located.error };
+  var sourceSheet = located.sourceSheet, row = located.row;
+
+  var srcHeader = findHeaderRow(sourceSheet, ['Status']);
+  if (!srcHeader) return { ok: false, error: 'Could not find a "Status" column header in ' + sourceTabName + '.' };
+  var statusCol = colIndex(srcHeader.colMap, 'Status');
+  if (statusCol === -1) return { ok: false, error: 'Could not find a "Status" column in ' + sourceTabName + '.' };
+
+  sourceSheet.getRange(row, statusCol + 1).setValue(status);
+  return { ok: true };
 }
 
 function jsonOut(obj) {
@@ -280,6 +419,9 @@ function getPostingQueue() {
       itemId: String(val(row, t.colMap, 'Item ID') || ''),
       platform: val(row, t.colMap, 'Platform'),
       postingOrder: val(row, t.colMap, 'Posting order'),
+      status: val(row, t.colMap, 'Status'),
+      listingUrl: val(row, t.colMap, 'Listing URL'),
+      datePosted: formatDate(val(row, t.colMap, 'Date posted')),
     });
   });
   return out;
