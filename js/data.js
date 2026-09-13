@@ -29,6 +29,7 @@ const PLATFORM_META = {
   depop:    { label: 'Depop',                   color: '#ff4655', offerHint: 'Open the listing → Offers → send a private offer to a liker.' },
   facebook: { label: 'Facebook Marketplace',    color: '#1877f2', offerHint: 'Message the interested buyer directly from Your Listings.' },
   mercari:  { label: 'Mercari',                 color: '#5e5ce6', offerHint: 'Message the buyer directly, or drop the price to trigger their saved-search alert.' },
+  grailed:  { label: 'Grailed',                 color: '#18243a', offerHint: 'Open the listing → make an offer to a bumper/watcher.' },
 };
 const DEFAULT_PLATFORM_META = { label: 'Other', color: '#56657a', offerHint: 'Reach out to them directly through the platform.' };
 
