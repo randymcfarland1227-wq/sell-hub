@@ -467,6 +467,8 @@ main.wrap {
 /* ---------- Still to list ---------- */
 
 .stl-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.stl-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.stl-note { margin: -6px 0 16px; color: var(--text-muted); font-size: 0.78rem; }
 .stl-head .sort-control select {
   font: inherit;
   font-size: 0.78rem;
@@ -478,7 +480,9 @@ main.wrap {
   cursor: pointer;
 }
 .stl-card { --cat: #6c5c42; }
-.stl-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.stl-chips { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.stl-platform-row { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.stl-platform-row .btn, .stl-platform-row .icon-btn { padding: 5px 9px; font-size: 0.68rem; }
 .stl-chip {
   font-size: 0.66rem;
   font-weight: 700;
@@ -490,6 +494,7 @@ main.wrap {
 }
 .stl-chip.stl-done { color: #fff; background: var(--plat); }
 .stl-chip.stl-missing { color: var(--plat); background: color-mix(in srgb, var(--plat) 14%, var(--bg-elevated)); border: 1.5px dashed color-mix(in srgb, var(--plat) 50%, var(--border)); }
+.stl-chip.stl-skipped { color: var(--text-muted); background: var(--bg-elevated); border: 1px solid var(--border); }
 
 .platform-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 7px; }
 .platform-tag {
