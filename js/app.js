@@ -3,7 +3,8 @@ const state = {
   listShowSold: false,    // list mode
   listActiveCats: new Set(),
   zoom: 1,
-  listSort: 'name',
+  listSort: 'views',
+  showCompletedActions: true,
   inventory: [],          // from Listing Hub (read-only, sourced from the Sheet)
   descriptions: [],       // from Listing Descriptions
   postingQueue: [],       // from Platform Posting Queue
@@ -225,7 +226,9 @@ async function loadPhotosData() {
   catch { state.photos = []; }
 }
 function photoForItem(itemId) {
-  const match = state.photos.find(p => p.itemId === itemId && p.photoUrl);
+  const key = String(itemId || '').trim().toUpperCase();
+  const matches = state.photos.filter(p => String(p.itemId || '').trim().toUpperCase() === key && p.photoUrl);
+  const match = matches.find(p => platformId(p.platform) === 'ebay') || matches[0];
   return match ? match.photoUrl : null;
 }
 async function loadItemActionsData() {
@@ -238,6 +241,13 @@ async function loadItemActionsData() {
 function latestActionFor(itemId) {
   const matches = state.itemActions.filter(a => String(a.itemId) === String(itemId));
   return matches.length ? matches[matches.length - 1] : null;
+}
+
+function latestActionStateFor(itemId) {
+  const stateActions = state.itemActions.filter(a =>
+    String(a.itemId) === String(itemId) && ['Completed', 'Reopened', 'Deleted'].includes(a.action)
+  );
+  return stateActions.length ? stateActions[stateActions.length - 1] : null;
 }
 
 // ---------------------------------------------------------------------
@@ -387,11 +397,15 @@ function itemCardHTML(item, cat) {
   const expanded = state.expandedItems.has(item.itemId);
   const titleParts = [item.brand, item.item].filter(Boolean);
   const photo = photoForItem(item.itemId);
+  const title = titleParts.join(' — ') || item.itemId;
   return `
     <div class="card${sold ? ' sold' : ''}" style="--cat:${cat.color}">
-      ${photo ? `<img class="card-photo" src="${escapeHtml(photo)}" alt="" loading="lazy">` : ''}
+      <div class="card-media${photo ? '' : ' photo-pending'}">
+        ${photo ? `<img class="card-photo" src="${escapeHtml(photo)}" alt="${escapeHtml(title)}" loading="lazy" onerror="this.closest('.card-media').classList.add('photo-pending');this.remove()">` : ''}
+        <span>Photo pending</span>
+      </div>
       <div class="card-top">
-        <h3>${escapeHtml(titleParts.join(' — ') || item.itemId)}</h3>
+        <h3>${escapeHtml(title)}</h3>
         <span class="status-badge ${statusClass(item.sourceStatus)}">${escapeHtml(item.sourceStatus || '—')}</span>
       </div>
       <div class="meta">
@@ -527,6 +541,7 @@ document.getElementById('showSoldList').addEventListener('change', e => {
 });
 document.getElementById('listSortSelect').addEventListener('change', e => {
   state.listSort = e.target.value;
+  setMode('list', true);
   renderList();
 });
 
@@ -550,17 +565,34 @@ function renderList() {
   container.innerHTML = '';
   const latestByPlatform = latestMetricsByItemPlatform();
 
+  const compareItems = (a, b) => {
+    if (state.listSort === 'views') return b.stats.views - a.stats.views;
+    if (state.listSort === 'clicks') return b.stats.clicks - a.stats.clicks;
+    if (state.listSort === 'ctr') return b.stats.ctr - a.stats.ctr;
+    if (state.listSort === 'price') return b.stats.price - a.stats.price;
+    return (a.it.item || a.it.brand || '').localeCompare(b.it.item || b.it.brand || '');
+  };
+
+  if (state.listSort !== 'name') {
+    let items = state.inventory.filter(it => state.listActiveCats.has(categoryMeta(it.category).id));
+    if (!state.listShowSold) items = items.filter(it => !isSold(it));
+    const ranked = items.map(it => ({ it, stats: itemSortStats(it, latestByPlatform) })).sort(compareItems);
+    const labels = { views: 'Most views', clicks: 'Most clicks', ctr: 'Highest click rate', price: 'Highest price' };
+    container.innerHTML = ranked.length ? `
+      <div class="cat-section ranked-section">
+        <div class="cat-heading"><span class="rank-mark">#</span><h2>${labels[state.listSort]}</h2><span class="count">${ranked.length} items</span></div>
+        <div class="card-grid">${ranked.map(({ it }) => itemCardHTML(it, categoryMeta(it.category))).join('')}</div>
+      </div>
+    ` : '<div class="empty-state">No inventory matches these filters.</div>';
+    wireItemCards(container, renderList);
+    return;
+  }
+
   activeCategories().filter(c => state.listActiveCats.has(c.id)).forEach(cat => {
     let items = state.inventory.filter(it => categoryMeta(it.category).id === cat.id);
     if (!state.listShowSold) items = items.filter(it => !isSold(it));
     const withStats = items.map(it => ({ it, stats: itemSortStats(it, latestByPlatform) }));
-    withStats.sort((a, b) => {
-      if (state.listSort === 'views') return b.stats.views - a.stats.views;
-      if (state.listSort === 'clicks') return b.stats.clicks - a.stats.clicks;
-      if (state.listSort === 'ctr') return b.stats.ctr - a.stats.ctr;
-      if (state.listSort === 'price') return b.stats.price - a.stats.price;
-      return (a.it.item || a.it.brand || '').localeCompare(b.it.item || b.it.brand || '');
-    });
+    withStats.sort(compareItems);
     items = withStats.map(x => x.it);
 
     const section = document.createElement('div');
@@ -786,6 +818,11 @@ function naturalPricingAction(item) {
 // warrant it tomorrow, that's a legitimate fresh flag, not a repeat.
 function pricingActionFor(item) {
   const natural = naturalPricingAction(item);
+  const actionState = latestActionStateFor(item.itemId);
+  if (actionState?.action === 'Deleted') return { ...natural, hidden: true };
+  if (actionState?.action === 'Completed') {
+    return { ...natural, severity: 'complete', label: 'Completed', reason: actionState.detail || `Completed: ${natural.label}` };
+  }
   const last = latestActionFor(item.itemId);
   const today = new Date().toISOString().slice(0, 10);
   if (!last || last.date !== today) return natural;
@@ -820,6 +857,18 @@ async function ignoreAction(itemId, label) {
   renderPricingActions();
 }
 
+async function toggleActionComplete(itemId, isCompleted, label) {
+  await recordItemAction(itemId, isCompleted ? 'Reopened' : 'Completed', label);
+  renderPricingActions();
+}
+
+async function deletePricingAction(itemId, label) {
+  if (!confirm(`Delete "${label}" from your action list? This will also be recorded in the Item Actions sheet.`)) return;
+  await recordItemAction(itemId, 'Deleted', label);
+  renderPricingActions();
+  notifyWorkroom();
+}
+
 async function dropPriceForAction(item, newPrice, btn) {
   const card = btn.closest('.pricing-card');
   const status = card.querySelector('.pa-status');
@@ -841,11 +890,15 @@ function renderPricingActions() {
   const items = state.inventory.filter(it => !isSold(it));
   if (!items.length) { container.innerHTML = '<div class="empty-state">No active listings yet.</div>'; return; }
 
-  const severityRank = { urgent: 0, attention: 1, opportunity: 2, handled: 3, ok: 4, dismissed: 5, 'no-data': 6 };
+  const severityRank = { urgent: 0, attention: 1, opportunity: 2, handled: 3, ok: 4, dismissed: 5, 'no-data': 6, complete: 7 };
   const rows = items.map(it => ({ item: it, action: pricingActionFor(it) }))
+    .filter(row => !row.action.hidden && (state.showCompletedActions || row.action.severity !== 'complete'))
     .sort((a, b) => severityRank[a.action.severity] - severityRank[b.action.severity]);
 
+  if (!rows.length) { container.innerHTML = '<div class="empty-state">No open actions. Turn on “show completed” to review finished items.</div>'; return; }
+
   container.innerHTML = rows.map(({ item, action }) => {
+    const isCompleted = action.severity === 'complete';
     const showOfferBtn = action.severity === 'opportunity';
     const showPriceControls = action.severity === 'urgent' || (action.severity === 'attention' && action.label === 'Refresh listing');
     const showIgnore = ['urgent', 'attention', 'opportunity'].includes(action.severity);
@@ -862,8 +915,7 @@ function renderPricingActions() {
       ${action.suggestedPrice ? `<div class="pa-callout"><b>Suggested price — ${fmtMoney(action.suggestedPrice)}</b></div>` : ''}
       ${action.offerWhere ? `<div class="pa-callout"><b>${escapeHtml(action.offerWhere)}</b></div>` : ''}
       <p class="pa-reason">${escapeHtml(action.reason)}</p>
-      ${(showOfferBtn || showPriceControls || showIgnore) ? `
-        <div class="pa-actions">
+      <div class="pa-actions">
           ${showOfferBtn ? `<button class="btn secondary pa-offer-btn" data-id="${escapeHtml(item.itemId)}" data-plat="${escapeHtml(action.offerPlatformLabel || '')}">Offer sent</button>` : ''}
           ${showPriceControls && action.suggestedPrice ? `<button class="btn secondary pa-drop-suggested-btn" data-id="${escapeHtml(item.itemId)}" data-price="${action.suggestedPrice}">Dropped to ${fmtMoney(action.suggestedPrice)}</button>` : ''}
           ${showPriceControls ? `
@@ -873,9 +925,10 @@ function renderPricingActions() {
             </span>
           ` : ''}
           ${showIgnore ? `<button class="icon-btn pa-ignore-btn" data-id="${escapeHtml(item.itemId)}" data-label="${escapeHtml(action.label)}">Ignore</button>` : ''}
-        </div>
-        <div class="status-msg pa-status"></div>
-      ` : ''}
+          <button class="btn secondary pa-complete-btn" data-id="${escapeHtml(item.itemId)}" data-completed="${isCompleted}" data-label="${escapeHtml(action.label)}">${isCompleted ? 'Reopen' : 'Mark complete'}</button>
+          <button class="icon-btn pa-delete-btn" data-id="${escapeHtml(item.itemId)}" data-label="${escapeHtml(action.label)}" aria-label="Delete action">Delete</button>
+      </div>
+      <div class="status-msg pa-status"></div>
     </div>
   `;
   }).join('');
@@ -887,6 +940,12 @@ function renderPricingActions() {
   });
   container.querySelectorAll('.pa-ignore-btn').forEach(btn => {
     btn.addEventListener('click', () => ignoreAction(btn.dataset.id, btn.dataset.label));
+  });
+  container.querySelectorAll('.pa-complete-btn').forEach(btn => {
+    btn.addEventListener('click', () => toggleActionComplete(btn.dataset.id, btn.dataset.completed === 'true', btn.dataset.label));
+  });
+  container.querySelectorAll('.pa-delete-btn').forEach(btn => {
+    btn.addEventListener('click', () => deletePricingAction(btn.dataset.id, btn.dataset.label));
   });
   container.querySelectorAll('.pa-drop-suggested-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -902,6 +961,11 @@ function renderPricingActions() {
     });
   });
 }
+
+document.getElementById('showCompletedActions').addEventListener('change', event => {
+  state.showCompletedActions = event.target.checked;
+  renderPricingActions();
+});
 
 function populateMetricForm() {
   const itemSel = document.getElementById('metricItemSelect');
@@ -1203,7 +1267,7 @@ applyZoom();
 routeOverview();
 renderListChips();
 renderList();
-setMode(localGet('sellHub.mode', 'wheel'));
+setMode(localGet('sellHub.mode', 'list'));
 renderStats();
 state.featuredActions = new Set(localGet('sellHub.featuredActions', []));
 renderAction();
