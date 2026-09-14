@@ -148,7 +148,9 @@ function localGet(key, fallback) {
 }
 function localSet(key, value) { localStorage.setItem(key, JSON.stringify(value)); }
 
-const WORKROOM_ORIGIN = 'https://randys-frontier.randymcfarland1227.chatgpt.site';
+const WORKROOM_ORIGIN = 'https://frontier-work-room.randymcfarland1227.workers.dev';
+// Posting tasks are starred per site, separately from the item's pricing/shipping star.
+function postingTaskKey(itemId, platformIdValue) { return `list:${itemId}:${platformIdValue}`; }
 function isFeaturedAction(itemId) { return state.featuredActions.has(String(itemId)); }
 function actionStarHTML(itemId, label) {
   const starred = isFeaturedAction(itemId);
@@ -174,7 +176,14 @@ function resaleWorkroomSnapshot() {
     return { id: String(item.itemId), title: [item.brand, item.item].filter(Boolean).join(' — ') || item.itemId, detail: `${action.label}: ${action.reason}`, meta: `${action.views} views · ${action.clicks} clicks` };
   }).concat(sold.filter(it => !hasShipped(it.itemId) && isFeaturedAction(it.itemId)).map(item => ({
     id: String(item.itemId), title: [item.brand, item.item].filter(Boolean).join(' — ') || item.itemId, detail: 'Ship this sold item.', meta: item.soldPrice ? `Sold for ${item.soldPrice}` : 'Sold'
-  })));
+  }))).concat(active.flatMap(item => platformsStatusFor(item).missing
+    .filter(m => isFeaturedAction(postingTaskKey(item.itemId, m.meta.id)))
+    .map(m => ({
+      id: postingTaskKey(item.itemId, m.meta.id),
+      title: [item.brand, item.item].filter(Boolean).join(' — ') || item.itemId,
+      detail: `Post it on ${m.meta.label}.`,
+      meta: item.listPrice ? `List price ${fmtMoney(parseMoney(item.listPrice))}` : 'No list price yet',
+    }))));
   return {
     source: 'resale',
     metrics: {
@@ -929,7 +938,7 @@ function renderStillToList() {
           <div class="card stl-card" style="--cat:${g.meta.color}">
             <div class="card-top">
               <h3>${escapeHtml(itemTitle(item))}</h3>
-              <span class="status-badge ${statusClass(item.sourceStatus)}">${escapeHtml(item.sourceStatus || '—')}</span>
+              <div class="card-top-actions">${actionStarHTML(postingTaskKey(item.itemId, g.meta.id), `${itemTitle(item)} on ${g.meta.label}`)}<span class="status-badge ${statusClass(item.sourceStatus)}">${escapeHtml(item.sourceStatus || '—')}</span></div>
             </div>
             <div class="meta">
               <span><b>List price —</b> ${priceLineHTML(item)}${item.floorPrice ? ` (floor ${escapeHtml(item.floorPrice)})` : ''}</span>
@@ -967,6 +976,7 @@ function renderStillToList() {
     </details>` : '';
 
   container.innerHTML = groupHTML + skippedHTML;
+  wireActionStars(container);
   wireItemEditors(container);
   container.querySelectorAll('.stl-listed-btn').forEach(function (btn) {
     btn.addEventListener('click', async function () {
