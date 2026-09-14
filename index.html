@@ -16,9 +16,9 @@
   </div>
   <div class="wrap tabs-scroll">
     <nav class="tabs">
-      <button data-view="inventory" class="active">Inventory</button>
+      <button data-view="action" class="active">Actions</button>
+      <button data-view="inventory">Inventory</button>
       <button data-view="stats">Stats</button>
-      <button data-view="action">Actions</button>
       <button data-view="acquire">Acquire</button>
     </nav>
   </div>
@@ -27,7 +27,7 @@
 <main class="wrap">
 
   <!-- ===================== INVENTORY ===================== -->
-  <section id="inventory" class="view active">
+  <section id="inventory" class="view">
 
     <div id="inventorySetupNote" class="setup-note" style="display:none">
       Not connected to your Sheet yet, so nothing loads here. Deploy <code>Code.gs</code> on your "selling_inventory_updated" Sheet and paste the Web App URL into <code>js/config.js</code> — see <code>SETUP.md</code>.
@@ -150,23 +150,25 @@
   </section>
 
   <!-- ===================== ACTION ===================== -->
-  <section id="action" class="view">
+  <section id="action" class="view active">
     <div class="section-head">
       <h2 class="section-title">Actions</h2>
-      <p class="section-intro">Everything that needs a next step from you right now — items to ship and listings that could use a price change or an offer.</p>
+      <p class="section-intro">Your to-do hub — what to ship, where each item still needs to be posted, and which listings need an offer, a price change, or more visibility. Hit <b>Edit</b> on any card to change its price, the sites it goes on, or its next action; it saves straight to your Sheet.</p>
     </div>
+
+    <div class="action-summary" id="actionSummary"></div>
 
     <div class="action-toolbar">
       <p>Mark an action complete when it is handled, reopen it if needed, or delete it from this list. Every change is saved to the Item Actions sheet.</p>
       <label class="chip-toggle"><input type="checkbox" id="showCompletedActions" checked> show completed</label>
     </div>
 
-    <h3 class="subhead">To ship</h3>
+    <h3 class="subhead" id="sec-ship">To ship</h3>
     <div id="toShipList" class="card-grid"></div>
 
-    <h3 class="subhead">Still to list</h3>
+    <h3 class="subhead" id="sec-list">Still to list</h3>
     <div class="stl-head">
-      <p class="section-intro" style="margin:0">Track each platform separately. Mark it listed when the post is complete, or choose “Not posting” so it no longer looks unfinished.</p>
+      <p class="section-intro" style="margin:0">Grouped by the site each item still needs — Facebook first, then eBay, Poshmark, and Depop. Mark it listed when the post is up, or choose “Not posting” to drop that site.</p>
       <div class="stl-filters">
         <label class="sort-control">Site
           <select id="stillToListSite">
@@ -177,11 +179,11 @@
       </div>
     </div>
     <p class="stl-note">For clothing, a known labeled size is enough. Measurements are optional unless the size is missing, unclear, or the fit is unusual.</p>
-    <div id="stillToListList" class="card-grid"></div>
+    <div id="stillToListList"></div>
 
-    <h3 class="subhead">Pricing suggestions</h3>
-    <p class="section-intro" style="margin-top:0">What to do with each active listing, based on its views/clicks/watchers and how much room is left before your floor price.</p>
-    <div id="pricingActions" class="card-grid"></div>
+    <h3 class="subhead" id="sec-pricing">Pricing suggestions</h3>
+    <p class="section-intro" style="margin-top:0">Grouped by what to do next, based on each listing's views, clicks, watchers, and room above your floor price. Waiting and on-track items are collapsed at the bottom.</p>
+    <div id="pricingActions"></div>
   </section>
 
   <!-- ===================== ACQUIRE ===================== -->

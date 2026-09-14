@@ -24,13 +24,15 @@ const CATEGORY_PALETTE = ['#2f5bff', '#087ea4', '#a447e8', '#16836a', '#df5b35',
 // offerHint: where/how to act on a watcher-has-interest signal on that
 // platform — surfaced by the Stats tab's "Send an offer" pricing action.
 const PLATFORM_META = {
+  facebook: { label: 'Facebook Marketplace',    color: '#1877f2', offerHint: 'Message the interested buyer directly from Your Listings.' },
   ebay:     { label: 'eBay',                    color: '#3665f3', offerHint: "Seller Hub → Promotions → Offers to Buyers (or enable \"Best Offer\" on the listing)." },
   poshmark: { label: 'Poshmark',                color: '#822432', offerHint: 'Open the listing → the ⋯ menu → "Offer to Likes."' },
   depop:    { label: 'Depop',                   color: '#ff4655', offerHint: 'Open the listing → Offers → send a private offer to a liker.' },
-  facebook: { label: 'Facebook Marketplace',    color: '#1877f2', offerHint: 'Message the interested buyer directly from Your Listings.' },
-  mercari:  { label: 'Mercari',                 color: '#5e5ce6', offerHint: 'Message the buyer directly, or drop the price to trigger their saved-search alert.' },
   grailed:  { label: 'Grailed',                 color: '#18243a', offerHint: 'Open the listing → make an offer to a bumper/watcher.' },
+  mercari:  { label: 'Mercari',                 color: '#5e5ce6', offerHint: 'Message the buyer directly, or drop the price to trigger their saved-search alert.' },
 };
+// Display order wherever platforms are listed: Stats cards, Still to list groups, pickers.
+const PLATFORM_ORDER = ['facebook', 'ebay', 'poshmark', 'depop', 'grailed', 'mercari'];
 const DEFAULT_PLATFORM_META = { label: 'Other', color: '#56657a', offerHint: 'Reach out to them directly through the platform.' };
 
 const PRIORITY_META = {

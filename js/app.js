@@ -79,6 +79,10 @@ function splitPlatforms(field) {
     return value && !/^\d+(?:\.\d+)?$/.test(value);
   });
 }
+function platformRank(id) {
+  const i = PLATFORM_ORDER.indexOf(id);
+  return i === -1 ? PLATFORM_ORDER.length : i;
+}
 function platformOptionsHTML(selected) {
   return Object.keys(PLATFORM_META).map(id => `<option value="${id}"${id === selected ? ' selected' : ''}>${PLATFORM_META[id].label}</option>`).join('');
 }
@@ -321,6 +325,8 @@ document.querySelectorAll('nav.tabs button').forEach(btn => {
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
     btn.classList.add('active');
     document.getElementById(btn.dataset.view).classList.add('active');
+    // The wheel sizes itself from its container, which measures 0 while hidden.
+    if (btn.dataset.view === 'inventory') applyZoom();
   });
 });
 
@@ -727,7 +733,7 @@ function renderPlatformCards() {
   // gives "views", Poshmark only ever gives "impressions". Treat whichever is
   // present as this platform's reach number rather than showing a blank 0.
   const cards = Object.values(totals).map(c => ({ ...c, reach: c.impressions || c.views, reachLabel: c.impressions ? 'Impressions' : 'Views' }))
-    .sort((a, b) => a.meta.label.localeCompare(b.meta.label));
+    .sort((a, b) => platformRank(a.meta.id) - platformRank(b.meta.id) || a.meta.label.localeCompare(b.meta.label));
   const container = document.getElementById('platformCards');
   if (!cards.length) { container.innerHTML = '<div class="empty-state">No platform activity yet.</div>'; return; }
 
@@ -798,6 +804,34 @@ function renderAction() {
   renderToShip();
   renderStillToList();
   renderPricingActions();
+  renderActionSummary();
+}
+
+function renderActionSummary() {
+  const container = document.getElementById('actionSummary');
+  if (!container) return;
+  const toShip = state.inventory.filter(it => isSold(it) && !hasShipped(it.itemId)).length;
+  const toList = stillToListRows().reduce((n, r) => n + r.status.missing.length, 0);
+  const counts = {};
+  state.inventory.filter(it => !isSold(it)).forEach(it => {
+    const a = pricingActionFor(it);
+    if (!a.hidden) counts[a.label] = (counts[a.label] || 0) + 1;
+  });
+  const visibility = (counts['Boost visibility'] || 0) + (counts['Refresh listing'] || 0);
+  const tiles = [
+    { num: toShip, lbl: 'To ship', target: 'sec-ship' },
+    { num: toList, lbl: 'Posts to make', target: 'sec-list' },
+    { num: counts['Send an offer'] || 0, lbl: 'Offers to send', target: pricingGroupId('Send an offer') },
+    { num: counts['Try a price drop'] || 0, lbl: 'Price drops', target: pricingGroupId('Try a price drop') },
+    { num: visibility, lbl: 'Need visibility', target: pricingGroupId(counts['Boost visibility'] ? 'Boost visibility' : 'Refresh listing') },
+  ];
+  container.innerHTML = tiles.map(t => `<button class="as-tile${t.num ? '' : ' as-zero'}" data-target="${t.target}"><span class="num">${t.num}</span><span class="lbl">${t.lbl}</span></button>`).join('');
+  container.querySelectorAll('.as-tile').forEach(tile => tile.addEventListener('click', () => {
+    const el = document.getElementById(tile.dataset.target);
+    if (!el) return;
+    if (el.tagName === 'DETAILS') el.open = true;
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }));
 }
 
 // ---------------------------------------------------------------------
@@ -853,7 +887,7 @@ function populateStillToListSiteOptions(rows) {
   rows.forEach(function (r) {
     r.status.missing.concat(state.showSkippedListings ? r.status.skipped : []).forEach(function (m) { seen.set(m.meta.id, m.meta.label); });
   });
-  const options = Array.from(seen.entries()).sort(function (a, b) { return a[1].localeCompare(b[1]); });
+  const options = Array.from(seen.entries()).sort(function (a, b) { return platformRank(a[0]) - platformRank(b[0]) || a[1].localeCompare(b[1]); });
   select.innerHTML = '<option value="">All platforms</option>' +
     options.map(function (o) { return `<option value="${escapeHtml(o[0])}">${escapeHtml(o[1])}</option>`; }).join('');
   if (options.some(function (o) { return o[0] === prev; })) select.value = prev;
@@ -865,37 +899,75 @@ function renderStillToList() {
   populateStillToListSiteOptions(rows);
 
   const siteFilter = document.getElementById('stillToListSite').value;
-  const filtered = siteFilter
-    ? rows.filter(function (r) { return r.status.missing.concat(state.showSkippedListings ? r.status.skipped : []).some(function (m) { return m.meta.id === siteFilter; }); })
-    : rows;
-  filtered.sort(function (a, b) { return (a.item.item || a.item.brand || '').localeCompare(b.item.item || b.item.brand || ''); });
+  const groups = new Map();
+  rows.forEach(function (r) {
+    r.status.missing.forEach(function (m) {
+      if (siteFilter && m.meta.id !== siteFilter) return;
+      if (!groups.has(m.meta.id)) groups.set(m.meta.id, { meta: m.meta, rows: [] });
+      groups.get(m.meta.id).rows.push(r);
+    });
+  });
+  const skippedRows = state.showSkippedListings
+    ? rows.filter(function (r) { return r.status.skipped.some(function (s) { return !siteFilter || s.meta.id === siteFilter; }); })
+    : [];
 
-  if (!filtered.length) {
+  if (!groups.size && !skippedRows.length) {
     container.innerHTML = `<div class="empty-state">${siteFilter ? 'Nothing outstanding for that platform.' : 'Everything is listed everywhere it should be.'}</div>`;
     return;
   }
 
-  container.innerHTML = filtered.map(function ({ item, status }) {
-    const chips = status.done.map(function (d) {
-      return `<span class="stl-chip stl-done" style="--plat:${d.meta.color}">✓ ${escapeHtml(d.meta.label)}</span>`;
-    }).concat(status.missing.map(function (m) {
-      return `<div class="stl-platform-row"><span class="stl-chip stl-missing" style="--plat:${m.meta.color}">${escapeHtml(m.meta.label)}</span><button class="btn secondary stl-listed-btn" data-id="${escapeHtml(item.itemId)}" data-platform="${escapeHtml(m.meta.label)}">Mark listed</button><button class="icon-btn stl-skip-btn" data-id="${escapeHtml(item.itemId)}" data-platform="${escapeHtml(m.meta.label)}">Not posting</button></div>`;
-    })).concat(state.showSkippedListings ? status.skipped.map(function (s) {
-      return `<div class="stl-platform-row"><span class="stl-chip stl-skipped" style="--plat:${s.meta.color}">Not posting · ${escapeHtml(s.meta.label)}</span><button class="btn secondary stl-reopen-btn" data-id="${escapeHtml(item.itemId)}" data-platform="${escapeHtml(s.meta.label)}">Reopen</button></div>`;
-    }) : []).join('');
-    return `
-      <div class="card stl-card">
-        <div class="card-top">
-          <h3>${escapeHtml([item.brand, item.item].filter(Boolean).join(' — ') || item.itemId)}</h3>
-          <span class="status-badge ${statusClass(item.sourceStatus)}">${escapeHtml(item.sourceStatus || '—')}</span>
-        </div>
-        <div class="meta">
-          <span><b>List price —</b> ${priceLineHTML(item)}${item.floorPrice ? ` (floor ${escapeHtml(item.floorPrice)})` : ''}</span>
-        </div>
-        <div class="stl-chips">${chips}</div>
-      </div>
-    `;
-  }).join('');
+  const byName = function (a, b) { return (a.item.item || a.item.brand || '').localeCompare(b.item.item || b.item.brand || ''); };
+  const itemTitle = function (item) { return [item.brand, item.item].filter(Boolean).join(' — ') || item.itemId; };
+
+  const groupHTML = Array.from(groups.values())
+    .sort(function (a, b) { return platformRank(a.meta.id) - platformRank(b.meta.id) || a.meta.label.localeCompare(b.meta.label); })
+    .map(function (g) {
+      const cards = g.rows.slice().sort(byName).map(function ({ item, status }) {
+        const live = status.done.map(function (d) { return d.meta.label; });
+        const elsewhere = status.missing.filter(function (m) { return m.meta.id !== g.meta.id; }).map(function (m) { return m.meta.label; });
+        return `
+          <div class="card stl-card" style="--cat:${g.meta.color}">
+            <div class="card-top">
+              <h3>${escapeHtml(itemTitle(item))}</h3>
+              <span class="status-badge ${statusClass(item.sourceStatus)}">${escapeHtml(item.sourceStatus || '—')}</span>
+            </div>
+            <div class="meta">
+              <span><b>List price —</b> ${priceLineHTML(item)}${item.floorPrice ? ` (floor ${escapeHtml(item.floorPrice)})` : ''}</span>
+              ${live.length ? `<span><b>Live on —</b> ${escapeHtml(live.join(', '))}</span>` : ''}
+              ${elsewhere.length ? `<span><b>Also still needs —</b> ${escapeHtml(elsewhere.join(', '))}</span>` : ''}
+            </div>
+            <div class="stl-platform-row">
+              <button class="btn secondary stl-listed-btn" data-id="${escapeHtml(item.itemId)}" data-platform="${escapeHtml(g.meta.label)}">Mark listed</button>
+              <button class="icon-btn stl-skip-btn" data-id="${escapeHtml(item.itemId)}" data-platform="${escapeHtml(g.meta.label)}">Not posting</button>
+              ${editToggleHTML(item)}
+            </div>
+            ${itemEditPanelHTML(item)}
+          </div>`;
+      }).join('');
+      return `
+        <details class="action-group stl-group" id="stl-group-${escapeHtml(g.meta.id)}" style="--plat:${g.meta.color}" open>
+          <summary><span class="ag-title">${escapeHtml(g.meta.label)}</span><span class="ag-count">${g.rows.length}</span></summary>
+          <div class="card-grid">${cards}</div>
+        </details>`;
+    }).join('');
+
+  const skippedHTML = skippedRows.length ? `
+    <details class="action-group stl-group" open>
+      <summary><span class="ag-title">Not posting</span><span class="ag-count">${skippedRows.length}</span></summary>
+      <div class="card-grid">${skippedRows.slice().sort(byName).map(function ({ item, status }) {
+        const skipped = status.skipped.filter(function (s) { return !siteFilter || s.meta.id === siteFilter; });
+        return `
+          <div class="card stl-card">
+            <div class="card-top"><h3>${escapeHtml(itemTitle(item))}</h3></div>
+            <div class="stl-chips">${skipped.map(function (s) {
+              return `<div class="stl-platform-row"><span class="stl-chip stl-skipped" style="--plat:${s.meta.color}">Not posting · ${escapeHtml(s.meta.label)}</span><button class="btn secondary stl-reopen-btn" data-id="${escapeHtml(item.itemId)}" data-platform="${escapeHtml(s.meta.label)}">Reopen</button></div>`;
+            }).join('')}</div>
+          </div>`;
+      }).join('')}</div>
+    </details>` : '';
+
+  container.innerHTML = groupHTML + skippedHTML;
+  wireItemEditors(container);
   container.querySelectorAll('.stl-listed-btn').forEach(function (btn) {
     btn.addEventListener('click', async function () {
       await recordItemAction(btn.dataset.id, 'Listing Posted', btn.dataset.platform);
@@ -1001,8 +1073,47 @@ function naturalPricingAction(item) {
 // keep nagging you again the moment the page re-renders. Suppression only
 // lasts through the day it was logged — if the underlying numbers still
 // warrant it tomorrow, that's a legitimate fresh flag, not a repeat.
+// Manual next-action choices from the item editor, logged to Item Actions as
+// "Action Set" (latest wins; "Auto" goes back to the computed suggestion).
+const ACTION_CHOICES = [
+  { label: 'Send an offer', severity: 'opportunity' },
+  { label: 'Try a price drop', severity: 'urgent' },
+  { label: 'Boost visibility', severity: 'attention' },
+  { label: 'Refresh listing', severity: 'attention' },
+  { label: 'Hold', severity: 'held' },
+];
+function actionOverrideFor(itemId) {
+  const set = latestActionOfType(itemId, 'Action Set');
+  const choice = set && ACTION_CHOICES.find(c => c.label === set.detail);
+  return choice ? { ...choice, date: set.date } : null;
+}
+function applyActionOverride(item, natural, override) {
+  const out = {
+    ...natural, severity: override.severity, label: override.label, manual: true,
+    reason: `You set this to "${override.label}" on ${override.date}. Use Edit to change it or go back to Auto.`,
+  };
+  if (override.label === 'Send an offer') {
+    if (!out.offerWhere) {
+      const meta = platformMeta(splitPlatforms(item.platform)[0]);
+      out.offerPlatformLabel = meta.label;
+      out.offerWhere = `${meta.label}: ${meta.offerHint || DEFAULT_PLATFORM_META.offerHint}`;
+    }
+  } else {
+    delete out.offerWhere;
+    delete out.offerPlatformLabel;
+  }
+  if (override.label === 'Try a price drop') {
+    if (!out.suggestedPrice) out.suggestedPrice = suggestedDropPrice(parseMoney(item.listPrice), parseMoney(item.floorPrice));
+  } else {
+    delete out.suggestedPrice;
+  }
+  return out;
+}
+
 function pricingActionFor(item) {
-  const natural = naturalPricingAction(item);
+  let natural = naturalPricingAction(item);
+  const override = actionOverrideFor(item.itemId);
+  if (override) natural = applyActionOverride(item, natural, override);
   const actionState = latestActionStateFor(item.itemId);
   if (actionState?.action === 'Deleted') return { ...natural, hidden: true };
   if (actionState?.action === 'Completed') {
@@ -1046,6 +1157,142 @@ async function recordItemAction(itemId, itemAction, detail) {
   }
 }
 
+// ---------------------------------------------------------------------
+// Item editor — change list/floor price, the sites an item goes on, and its
+// next action from any Actions card; saved to the source tab via updateItem.
+// ---------------------------------------------------------------------
+function itemPlatformIds(item) {
+  return new Set(splitPlatforms(item.platform).map(platformId).filter(Boolean));
+}
+// Rebuilds the Platform cell from the checked sites, keeping any entries the
+// site doesn't recognize so they aren't silently dropped.
+function platformFieldFor(item, ids) {
+  const unknown = splitPlatforms(item.platform).filter(p => !platformId(p));
+  return PLATFORM_ORDER.filter(id => ids.has(id)).map(id => PLATFORM_META[id].label).concat(unknown).join(', ');
+}
+function editToggleHTML(item) {
+  return `<button class="btn secondary ie-toggle" data-id="${escapeHtml(item.itemId)}">Edit</button>`;
+}
+function itemEditPanelHTML(item) {
+  const current = itemPlatformIds(item);
+  const override = actionOverrideFor(item.itemId);
+  const suggested = naturalPricingAction(item).label;
+  const money = v => parseMoney(v) || '';
+  return `
+    <div class="item-edit" hidden>
+      <div class="field-row">
+        <div class="field"><label>List price</label><input type="number" min="0" step="0.01" class="ie-list" value="${money(item.listPrice)}" placeholder="No price"></div>
+        <div class="field"><label>Floor price</label><input type="number" min="0" step="0.01" class="ie-floor" value="${money(item.floorPrice)}" placeholder="No floor"></div>
+      </div>
+      <div class="field"><label>Posting to</label>
+        <div class="ie-platforms">${PLATFORM_ORDER.map(id => `<label class="ie-plat" style="--plat:${PLATFORM_META[id].color}"><input type="checkbox" value="${id}"${current.has(id) ? ' checked' : ''}> ${escapeHtml(PLATFORM_META[id].label)}</label>`).join('')}</div>
+      </div>
+      <div class="field"><label>Next action</label>
+        <select class="ie-action">
+          <option value="Auto">Auto — suggested: ${escapeHtml(suggested)}</option>
+          ${ACTION_CHOICES.map(c => `<option value="${escapeHtml(c.label)}"${override && override.label === c.label ? ' selected' : ''}>${escapeHtml(c.label)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="ie-buttons">
+        <button class="btn ie-save">Save to sheet</button>
+        <button class="btn secondary ie-cancel">Cancel</button>
+      </div>
+      <div class="status-msg ie-status"></div>
+    </div>`;
+}
+function wireItemEditors(container) {
+  container.querySelectorAll('.ie-toggle').forEach(btn => btn.addEventListener('click', () => {
+    const panel = btn.closest('.card').querySelector('.item-edit');
+    panel.hidden = !panel.hidden;
+    btn.textContent = panel.hidden ? 'Edit' : 'Close';
+  }));
+  container.querySelectorAll('.item-edit').forEach(panel => {
+    const toggle = panel.closest('.card').querySelector('.ie-toggle');
+    panel.querySelector('.ie-cancel').addEventListener('click', () => {
+      panel.hidden = true;
+      toggle.textContent = 'Edit';
+    });
+    panel.querySelector('.ie-save').addEventListener('click', () => {
+      const item = state.inventory.find(it => String(it.itemId) === String(toggle.dataset.id));
+      if (item) saveItemEdit(item, panel);
+    });
+  });
+}
+async function saveItemEdit(item, panel) {
+  const status = panel.querySelector('.ie-status');
+  if (!connected()) { status.textContent = 'Connect your Sheet to save edits — see SETUP.md.'; return; }
+
+  const payload = { itemId: item.itemId, sourceTab: item.sourceTab };
+  const priceChange = (input, current) => {
+    const raw = input.value.trim();
+    const next = raw === '' ? '' : Number(raw);
+    if (raw !== '' && (!isFinite(next) || next < 0)) return { error: true };
+    return next === (parseMoney(current) || '') ? null : { value: next };
+  };
+  const list = priceChange(panel.querySelector('.ie-list'), item.listPrice);
+  const floor = priceChange(panel.querySelector('.ie-floor'), item.floorPrice);
+  if ((list && list.error) || (floor && floor.error)) { status.textContent = 'Prices must be positive numbers, or blank to clear.'; return; }
+  if (list) payload.listPrice = list.value;
+  if (floor) payload.floorPrice = floor.value;
+
+  const picked = new Set(Array.from(panel.querySelectorAll('.ie-platforms input:checked')).map(i => i.value));
+  const before = itemPlatformIds(item);
+  if (picked.size !== before.size || [...picked].some(id => !before.has(id))) payload.platform = platformFieldFor(item, picked);
+
+  const chosen = panel.querySelector('.ie-action').value;
+  const override = actionOverrideFor(item.itemId);
+  if (chosen !== (override ? override.label : 'Auto')) {
+    payload.nextAction = chosen;
+    const actionState = latestActionStateFor(item.itemId);
+    if (chosen !== 'Auto' && actionState && ['Completed', 'Deleted'].includes(actionState.action)) payload.reopen = true;
+  }
+  if (Object.keys(payload).length === 2) { status.textContent = 'No changes to save.'; return; }
+
+  status.textContent = 'Saving to your Sheet…';
+  panel.querySelectorAll('button').forEach(b => { b.disabled = true; });
+  let res = null;
+  try { res = await apiPost('updateItem', payload); } catch { /* confirmed against the Sheet below */ }
+
+  if (res && res.ok) {
+    if ('listPrice' in payload) item.listPrice = payload.listPrice;
+    if ('floorPrice' in payload) item.floorPrice = payload.floorPrice;
+    if ('platform' in payload) item.platform = payload.platform;
+    (res.logged || []).forEach(entry => state.itemActions.push(entry));
+  } else if (res && res.ok === false) {
+    // A real rejection from updateItem (bad value, missing column): nothing was written.
+    panel.querySelectorAll('button').forEach(b => { b.disabled = false; });
+    status.textContent = res.error || 'Could not save to your Sheet.';
+    return;
+  } else {
+    // Google sometimes garbles the reply after the write already happened, so
+    // re-read the Sheet instead of reporting a failure that invites a duplicate retry.
+    status.textContent = 'Checking your Sheet to confirm the save…';
+    await Promise.all([loadInventory(), loadItemActionsData()]);
+    const fresh = state.inventory.find(it => String(it.itemId) === String(item.itemId));
+    if (!fresh || !editLanded(fresh, payload)) {
+      panel.querySelectorAll('button').forEach(b => { b.disabled = false; });
+      status.textContent = "Couldn't confirm the save — refresh the page to check before trying again.";
+      return;
+    }
+  }
+  renderAction();
+  renderList();
+  renderStats();
+  notifyWorkroom();
+}
+
+function editLanded(item, payload) {
+  const sameMoney = (current, wanted) => (parseMoney(current) || '') === (wanted === '' ? '' : Number(wanted));
+  if ('listPrice' in payload && !sameMoney(item.listPrice, payload.listPrice)) return false;
+  if ('floorPrice' in payload && !sameMoney(item.floorPrice, payload.floorPrice)) return false;
+  if ('platform' in payload && String(item.platform || '') !== payload.platform) return false;
+  if ('nextAction' in payload) {
+    const set = latestActionOfType(item.itemId, 'Action Set');
+    if (!set || set.detail !== payload.nextAction) return false;
+  }
+  return true;
+}
+
 async function sendOfferForAction(itemId, platformLabel) {
   await recordItemAction(itemId, 'Offer Sent', platformLabel);
   renderPricingActions();
@@ -1083,20 +1330,35 @@ async function dropPriceForAction(item, newPrice, btn) {
   renderPricingActions();
 }
 
+// Pricing suggestions are shown in these sections, in this order. Anything
+// that needs a move from you is open; waiting/done sections start collapsed.
+const PRICING_GROUPS = [
+  { key: 'Send an offer', title: 'Send an offer', color: '#1f3a5c', blurb: 'Someone is watching or liked it — nudge them with an offer.' },
+  { key: 'Try a price drop', title: 'Try a price drop', color: '#7a2038', blurb: 'Getting views but few clicks — price is the likely sticking point.' },
+  { key: 'Boost visibility', title: 'Boost visibility', color: '#a1752e', blurb: 'No views yet — refresh it, sharpen the title, or share it.' },
+  { key: 'Refresh listing', title: 'Refresh listing', color: '#a1752e', blurb: 'Already near your floor — new photos or copy instead of a lower price.' },
+  { key: 'Offer sent', title: 'Offer sent — waiting', color: '#1f5c64', collapsed: true },
+  { key: 'Price dropped', title: 'Price dropped — waiting', color: '#1f5c64', collapsed: true },
+  { key: 'Hold', title: 'On hold', color: '#56657a', collapsed: true },
+  { key: 'Dismissed', title: 'Dismissed today', color: '#74849a', collapsed: true },
+  { key: 'On track', title: 'On track', color: '#1f5c46', collapsed: true },
+  { key: 'No data yet', title: 'No data yet', color: '#74849a', collapsed: true },
+  { key: 'Completed', title: 'Completed', color: '#16836a', collapsed: true },
+];
+function pricingGroupId(label) { return 'pa-group-' + categoryId(label); }
+
 function renderPricingActions() {
   const container = document.getElementById('pricingActions');
   if (!container) return;
   const items = state.inventory.filter(it => !isSold(it));
   if (!items.length) { container.innerHTML = '<div class="empty-state">No active listings yet.</div>'; return; }
 
-  const severityRank = { urgent: 0, attention: 1, opportunity: 2, handled: 3, ok: 4, dismissed: 5, 'no-data': 6, complete: 7 };
   const rows = items.map(it => ({ item: it, action: pricingActionFor(it) }))
-    .filter(row => !row.action.hidden && (state.showCompletedActions || row.action.severity !== 'complete'))
-    .sort((a, b) => severityRank[a.action.severity] - severityRank[b.action.severity]);
+    .filter(row => !row.action.hidden && (state.showCompletedActions || row.action.severity !== 'complete'));
 
   if (!rows.length) { container.innerHTML = '<div class="empty-state">No open actions. Turn on “show completed” to review finished items.</div>'; return; }
 
-  container.innerHTML = rows.map(({ item, action }) => {
+  const cardHTML = ({ item, action }) => {
     const isCompleted = action.severity === 'complete';
     const showOfferBtn = action.severity === 'opportunity';
     const showPriceControls = action.severity === 'urgent' || (action.severity === 'attention' && action.label === 'Refresh listing');
@@ -1105,11 +1367,12 @@ function renderPricingActions() {
     <div class="card pricing-card pa-${action.severity}" data-item-id="${escapeHtml(item.itemId)}">
       <div class="card-top">
         <h3>${escapeHtml([item.brand, item.item].filter(Boolean).join(' — ') || item.itemId)}</h3>
-        <div class="card-top-actions">${actionStarHTML(item.itemId, [item.brand, item.item].filter(Boolean).join(' ') || item.itemId)}<span class="pa-badge pa-${action.severity}">${escapeHtml(action.label)}</span></div>
+        <div class="card-top-actions">${actionStarHTML(item.itemId, [item.brand, item.item].filter(Boolean).join(' ') || item.itemId)}<span class="pa-badge pa-${action.severity}">${escapeHtml(action.label)}${action.manual ? ' · set by you' : ''}</span></div>
       </div>
       <div class="meta">
         <span><b>List price —</b> ${priceLineHTML(item)}${item.floorPrice ? ` (floor ${escapeHtml(item.floorPrice)})` : ''}</span>
         <span><b>Views —</b> ${action.views} &nbsp; <b>Clicks —</b> ${action.clicks}${action.watchers ? ` &nbsp; <b>Watchers —</b> ${action.watchers}` : ''}</span>
+        <span><b>Posting to —</b> ${escapeHtml(splitPlatforms(item.platform).map(p => platformMeta(p).label).join(', ') || '—')}</span>
       </div>
       ${action.suggestedPrice ? `<div class="pa-callout"><b>Suggested price — ${fmtMoney(action.suggestedPrice)}</b></div>` : ''}
       ${action.offerWhere ? `<div class="pa-callout"><b>${escapeHtml(action.offerWhere)}</b></div>` : ''}
@@ -1125,14 +1388,32 @@ function renderPricingActions() {
           ` : ''}
           ${showIgnore ? `<button class="icon-btn pa-ignore-btn" data-id="${escapeHtml(item.itemId)}" data-label="${escapeHtml(action.label)}">Ignore</button>` : ''}
           <button class="btn secondary pa-complete-btn" data-id="${escapeHtml(item.itemId)}" data-completed="${isCompleted}" data-label="${escapeHtml(action.label)}">${isCompleted ? 'Reopen' : 'Mark complete'}</button>
+          ${editToggleHTML(item)}
           <button class="icon-btn pa-delete-btn" data-id="${escapeHtml(item.itemId)}" data-label="${escapeHtml(action.label)}" aria-label="Delete action">Delete</button>
       </div>
       <div class="status-msg pa-status"></div>
+      ${itemEditPanelHTML(item)}
     </div>
   `;
+  };
+
+  const byGroup = new Map();
+  rows.forEach(row => {
+    const key = PRICING_GROUPS.some(g => g.key === row.action.label) ? row.action.label : 'On track';
+    if (!byGroup.has(key)) byGroup.set(key, []);
+    byGroup.get(key).push(row);
+  });
+  container.innerHTML = PRICING_GROUPS.filter(g => byGroup.has(g.key)).map(g => {
+    const groupRows = byGroup.get(g.key).sort((a, b) => (b.action.watchers - a.action.watchers) || (b.action.views - a.action.views));
+    return `
+      <details class="action-group pa-group" id="${pricingGroupId(g.key)}" style="--plat:${g.color}"${g.collapsed ? '' : ' open'}>
+        <summary><span class="ag-title">${escapeHtml(g.title)}</span><span class="ag-count">${groupRows.length}</span>${g.blurb ? `<span class="ag-blurb">${escapeHtml(g.blurb)}</span>` : ''}</summary>
+        <div class="card-grid">${groupRows.map(cardHTML).join('')}</div>
+      </details>`;
   }).join('');
 
   wireActionStars(container);
+  wireItemEditors(container);
 
   container.querySelectorAll('.pa-offer-btn').forEach(btn => {
     btn.addEventListener('click', () => sendOfferForAction(btn.dataset.id, btn.dataset.plat));

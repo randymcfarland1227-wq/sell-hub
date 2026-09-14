@@ -142,6 +142,7 @@ function doPost(e) {
   if (action === 'setListingStatus') return jsonOut(setListingStatus(body));
   if (action === 'setDescription') return jsonOut(setDescription(body));
   if (action === 'cancelSale') return jsonOut(cancelSale(body));
+  if (action === 'updateItem') return jsonOut(updateItem(body));
   if (action === 'debugRestoreRow') return jsonOut(debugRestoreRow(body.sheet, body.row, body.values));
 
   return jsonOut({ error: 'unknown action' });
@@ -750,6 +751,69 @@ function dropListingPrice(body) {
     : String(newPrice);
   var logged = logItemAction(itemId, 'Price Drop', detail);
   return { ok: true, date: logged.date };
+}
+
+// Saves the Actions-tab item editor. Only keys present in the body are
+// written (a blank price clears the cell), and each change is logged to
+// Item Actions; the logged rows are returned so the site can mirror them.
+function updateItem(body) {
+  var itemId = body.itemId;
+  var sourceTabName = body.sourceTab;
+  if (!itemId || !sourceTabName) return { ok: false, error: 'Missing itemId or sourceTab.' };
+
+  var fields = [
+    { key: 'listPrice', column: 'List price', numeric: true },
+    { key: 'floorPrice', column: 'Floor price', numeric: true },
+    { key: 'platform', column: 'Platform', numeric: false },
+  ].filter(function (f) { return Object.prototype.hasOwnProperty.call(body, f.key); });
+
+  var logged = [];
+  function log(action, detail) {
+    var res = logItemAction(itemId, action, detail);
+    logged.push({ date: res.date, itemId: itemId, action: action, detail: detail });
+  }
+
+  if (fields.length) {
+    var located = findSourceRow(itemId, sourceTabName);
+    if (located.error) return { ok: false, error: located.error };
+    var sheet = located.sourceSheet, row = located.row;
+    var header = findHeaderRow(sheet, ['List price']);
+    if (!header) return { ok: false, error: 'Could not find the header row in ' + sourceTabName + '.' };
+
+    // Validate everything before writing anything, so a bad value or a
+    // missing column can't leave the row half-edited.
+    for (var i = 0; i < fields.length; i++) {
+      var field = fields[i];
+      field.col = colIndex(header.colMap, field.column);
+      if (field.col === -1) return { ok: false, error: 'Could not find a "' + field.column + '" column in ' + sourceTabName + '.' };
+      var raw = body[field.key];
+      field.value = field.numeric ? (raw === '' || raw === null ? '' : Number(raw)) : String(raw || '');
+      if (field.numeric && field.value !== '' && (isNaN(field.value) || field.value < 0)) {
+        return { ok: false, error: field.column + ' must be a positive number or blank.' };
+      }
+    }
+
+    fields.forEach(function (f) {
+      var cell = sheet.getRange(row, f.col + 1);
+      var oldVal = cell.getValue();
+      cell.setValue(f.value);
+      var oldTxt = oldVal === '' || oldVal === null ? 'none' : String(oldVal);
+      var newTxt = f.value === '' ? 'none' : String(f.value);
+      if (f.key === 'listPrice') {
+        // Same "old->new" Price Drop format dropListingPrice logs, so a lower
+        // price saved here marks the pricing suggestion as handled.
+        if (f.value !== '' && oldVal !== '' && !isNaN(oldVal) && f.value < Number(oldVal)) log('Price Drop', Number(oldVal) + '->' + f.value);
+        else log('Price Edit', oldTxt + ' -> ' + newTxt);
+      } else if (f.key === 'floorPrice') {
+        log('Floor Edit', oldTxt + ' -> ' + newTxt);
+      } else {
+        log('Platforms Updated', oldTxt + ' -> ' + newTxt);
+      }
+    });
+  }
+  if (body.nextAction) log('Action Set', String(body.nextAction));
+  if (body.reopen) log('Reopened', 'Action changed');
+  return { ok: true, logged: logged };
 }
 
 function getItemActionsSheet() {
