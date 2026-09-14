@@ -140,6 +140,8 @@ function doPost(e) {
   if (action === 'clearItemActions') return jsonOut(clearItemActions(body.itemId));
   if (action === 'setListingLink') return jsonOut(setListingLink(body));
   if (action === 'setListingStatus') return jsonOut(setListingStatus(body));
+  if (action === 'setDescription') return jsonOut(setDescription(body));
+  if (action === 'cancelSale') return jsonOut(cancelSale(body));
   if (action === 'debugRestoreRow') return jsonOut(debugRestoreRow(body.sheet, body.row, body.values));
 
   return jsonOut({ error: 'unknown action' });
@@ -380,6 +382,42 @@ function getInventory() {
 // ---------------------------------------------------------------------
 // Listing Descriptions — read-only, per (item x platform) title/description.
 // ---------------------------------------------------------------------
+
+// Overwrites the Description (and optionally Suggested title) for one
+// (itemId, platform) row in Listing Descriptions — matched by exact Item ID
+// and case-insensitive Platform text. Used to strip seller-facing to-do
+// notes ("confirm measurements before posting") that leaked into what's
+// supposed to be customer-facing copy.
+function setDescription(body) {
+  var itemId = body.itemId;
+  var platform = String(body.platform || '').trim().toLowerCase();
+  var description = body.description;
+  if (!itemId || !platform || description == null) {
+    return { ok: false, error: 'Missing itemId, platform, or description.' };
+  }
+
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(DESCRIPTIONS_SHEET);
+  if (!sheet) return { ok: false, error: 'Could not find "' + DESCRIPTIONS_SHEET + '" tab.' };
+  var t = readTable(sheet, ['Suggested title', 'Platform']);
+  var descCol = colIndex(t.colMap, 'Description');
+  var titleCol = colIndex(t.colMap, 'Suggested title');
+  if (descCol === -1) return { ok: false, error: 'Could not find a "Description" column in ' + DESCRIPTIONS_SHEET + '.' };
+
+  var startRow = t.headerSheetRow + 1;
+  var updated = 0;
+  for (var i = 0; i < t.rows.length; i++) {
+    var row = t.rows[i];
+    var rowItemId = String(val(row, t.colMap, 'Item ID') || '');
+    var rowPlatform = String(val(row, t.colMap, 'Platform') || '').trim().toLowerCase();
+    if (rowItemId === String(itemId) && rowPlatform === platform) {
+      var sheetRow = startRow + i;
+      sheet.getRange(sheetRow, descCol + 1).setValue(description);
+      if (body.title && titleCol !== -1) sheet.getRange(sheetRow, titleCol + 1).setValue(body.title);
+      updated++;
+    }
+  }
+  return { ok: true, updated: updated };
+}
 
 function getDescriptions() {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(DESCRIPTIONS_SHEET);
@@ -652,6 +690,34 @@ function markSold(body) {
   if (statusCol !== -1) sourceSheet.getRange(row, statusCol + 1).setValue('Sold');
   if (soldPriceCol !== -1) sourceSheet.getRange(row, soldPriceCol + 1).setValue(body.soldPrice || '');
   if (buyerCol !== -1 && body.buyer) sourceSheet.getRange(row, buyerCol + 1).setValue(body.buyer);
+
+  return { ok: true };
+}
+
+// Reverses markSold — a buyer-cancelled order, not just an unshipped one.
+// Clears Sold price/Buyer/Net cash and writes Status back (defaults to
+// "Listed" since the item is available again).
+function cancelSale(body) {
+  var itemId = body.itemId;
+  var sourceTabName = body.sourceTab;
+  if (!itemId || !sourceTabName) return { ok: false, error: 'Missing itemId or sourceTab.' };
+
+  var located = findSourceRow(itemId, sourceTabName);
+  if (located.error) return { ok: false, error: located.error };
+  var sourceSheet = located.sourceSheet, row = located.row;
+
+  var srcHeader = findHeaderRow(sourceSheet, ['Status']);
+  if (!srcHeader) return { ok: false, error: 'Could not find a "Status" column header in ' + sourceTabName + '.' };
+
+  var statusCol = colIndex(srcHeader.colMap, 'Status');
+  var soldPriceCol = colIndex(srcHeader.colMap, 'Sold price');
+  var buyerCol = colIndex(srcHeader.colMap, 'Buyer');
+  var netCashCol = colIndex(srcHeader.colMap, 'Net cash');
+
+  if (statusCol !== -1) sourceSheet.getRange(row, statusCol + 1).setValue(body.status || 'Listed');
+  if (soldPriceCol !== -1) sourceSheet.getRange(row, soldPriceCol + 1).setValue('');
+  if (buyerCol !== -1) sourceSheet.getRange(row, buyerCol + 1).setValue('');
+  if (netCashCol !== -1) sourceSheet.getRange(row, netCashCol + 1).setValue('');
 
   return { ok: true };
 }
