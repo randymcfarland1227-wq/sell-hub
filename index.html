@@ -16,10 +16,10 @@
   </div>
   <div class="wrap tabs-scroll">
     <nav class="tabs">
-      <button data-view="inventory" class="active">📦 Inventory</button>
-      <button data-view="stats">📊 Stats</button>
-      <button data-view="action">✅ Action</button>
-      <button data-view="acquire">🛒 Acquire</button>
+      <button data-view="inventory" class="active">Inventory</button>
+      <button data-view="stats">Stats</button>
+      <button data-view="action">Actions</button>
+      <button data-view="acquire">Acquire</button>
     </nav>
   </div>
 </header>
@@ -33,9 +33,20 @@
       Not connected to your Sheet yet, so nothing loads here. Deploy <code>Code.gs</code> on your "selling_inventory_updated" Sheet and paste the Web App URL into <code>js/config.js</code> — see <code>SETUP.md</code>.
     </div>
 
-    <div class="mode-switch" id="modeSwitch">
-      <button data-mode="wheel" class="active">◎ Wheel</button>
-      <button data-mode="list">☰ List</button>
+    <div class="inventory-toolbar">
+      <div class="mode-switch" id="modeSwitch" aria-label="Inventory view">
+        <button data-mode="wheel">Wheel</button>
+        <button data-mode="list" class="active">List</button>
+      </div>
+      <label class="sort-control">Sort inventory
+        <select id="listSortSelect">
+          <option value="views" selected>Most views</option>
+          <option value="clicks">Most clicks</option>
+          <option value="ctr">Highest click rate</option>
+          <option value="price">Highest price</option>
+          <option value="name">Name</option>
+        </select>
+      </label>
     </div>
 
     <!-- ---------- WHEEL MODE ---------- -->
@@ -76,15 +87,6 @@
     <!-- ---------- LIST MODE ---------- -->
     <div id="listMode" style="display:none">
       <div class="chip-row" id="chipRow">
-        <label class="sort-control">Sort
-          <select id="listSortSelect">
-            <option value="name">Name</option>
-            <option value="views">Most views</option>
-            <option value="clicks">Most clicks</option>
-            <option value="ctr">Highest click rate</option>
-            <option value="price">Highest price</option>
-          </select>
-        </label>
         <label class="chip-toggle"><input type="checkbox" id="showSoldList"> show sold</label>
       </div>
       <div id="catSections"></div>
@@ -150,8 +152,13 @@
   <!-- ===================== ACTION ===================== -->
   <section id="action" class="view">
     <div class="section-head">
-      <h2 class="section-title">Action</h2>
+      <h2 class="section-title">Actions</h2>
       <p class="section-intro">Everything that needs a next step from you right now — items to ship and listings that could use a price change or an offer.</p>
+    </div>
+
+    <div class="action-toolbar">
+      <p>Mark an action complete when it is handled, reopen it if needed, or delete it from this list. Every change is saved to the Item Actions sheet.</p>
+      <label class="chip-toggle"><input type="checkbox" id="showCompletedActions" checked> show completed</label>
     </div>
 
     <h3 class="subhead">To ship</h3>
@@ -159,13 +166,17 @@
 
     <h3 class="subhead">Still to list</h3>
     <div class="stl-head">
-      <p class="section-intro" style="margin:0">Items not yet live everywhere they're supposed to be — photographed-but-unlisted items, and partial cross-listings missing a platform.</p>
-      <label class="sort-control">Site
-        <select id="stillToListSite">
-          <option value="">All platforms</option>
-        </select>
-      </label>
+      <p class="section-intro" style="margin:0">Track each platform separately. Mark it listed when the post is complete, or choose “Not posting” so it no longer looks unfinished.</p>
+      <div class="stl-filters">
+        <label class="sort-control">Site
+          <select id="stillToListSite">
+            <option value="">All platforms</option>
+          </select>
+        </label>
+        <label class="chip-toggle"><input type="checkbox" id="showSkippedListings"> show not posting</label>
+      </div>
     </div>
+    <p class="stl-note">For clothing, a known labeled size is enough. Measurements are optional unless the size is missing, unclear, or the fit is unusual.</p>
     <div id="stillToListList" class="card-grid"></div>
 
     <h3 class="subhead">Pricing suggestions</h3>
