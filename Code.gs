@@ -204,7 +204,8 @@ function setListingLink(body) {
   if (platformCol !== -1) sheet.getRange(targetRow, platformCol + 1).setValue(platform);
   if (statusCol !== -1) sheet.getRange(targetRow, statusCol + 1).setValue(body.status || 'Active');
   if (urlCol !== -1) sheet.getRange(targetRow, urlCol + 1).setValue(url);
-  if (datePostedCol !== -1) sheet.getRange(targetRow, datePostedCol + 1).setValue(today);
+  // body.datePosted keeps a restored row's original date instead of stamping today.
+  if (datePostedCol !== -1) sheet.getRange(targetRow, datePostedCol + 1).setValue(body.datePosted || today);
   if (body.listPrice && listPriceCol !== -1) sheet.getRange(targetRow, listPriceCol + 1).setValue(Number(body.listPrice));
   if (body.title && titleCol !== -1) sheet.getRange(targetRow, titleCol + 1).setValue(body.title);
 

@@ -38,7 +38,11 @@
         <button data-mode="wheel">Wheel</button>
         <button data-mode="list" class="active">List</button>
       </div>
-      <label class="sort-control">Sort inventory
+      <div class="mode-switch" id="groupSwitch" aria-label="Inventory grouping">
+        <button data-group="category" class="active">By category</button>
+        <button data-group="ranked">By views</button>
+      </div>
+      <label class="sort-control">Sort by
         <select id="listSortSelect">
           <option value="views" selected>Most views</option>
           <option value="clicks">Most clicks</option>

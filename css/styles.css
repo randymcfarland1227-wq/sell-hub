@@ -374,6 +374,11 @@ main.wrap {
 
 .cat-section { margin-bottom: 36px; }
 .cat-heading { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+details.cat-section > summary.cat-heading { cursor: pointer; list-style: none; }
+details.cat-section > summary.cat-heading::-webkit-details-marker { display: none; }
+details.cat-section > summary.cat-heading::after { content: '▾'; margin-left: auto; color: var(--text-faint); font-size: .95rem; }
+details.cat-section:not([open]) > summary.cat-heading::after { content: '▸'; }
+details.cat-section:not([open]) { margin-bottom: 14px; }
 .cat-heading .icon { font-size: 1.3rem; }
 .cat-heading h2 { font-size: 1.3rem; color: var(--cat); }
 .cat-heading .count { font-size: 0.76rem; color: var(--text-faint); font-weight: 500; }

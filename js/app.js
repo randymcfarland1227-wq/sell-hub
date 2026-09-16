@@ -4,6 +4,8 @@ const state = {
   listActiveCats: new Set(),
   zoom: 1,
   listSort: 'views',
+  listGroup: 'category',  // 'category' = collapsible sections, 'ranked' = one sorted list
+  collapsedCats: new Set(),
   showCompletedActions: true,
   showSkippedListings: false,
   inventory: [],          // from Listing Hub (read-only, sourced from the Sheet)
@@ -362,6 +364,17 @@ document.querySelectorAll('#modeSwitch button').forEach(btn => {
   btn.addEventListener('click', () => setMode(btn.dataset.mode, true));
 });
 
+document.querySelectorAll('#groupSwitch button').forEach(btn => {
+  btn.addEventListener('click', () => setListGroup(btn.dataset.group));
+});
+
+function setListGroup(group) {
+  state.listGroup = group;
+  localSet('sellHub.listGroup', group);
+  document.querySelectorAll('#groupSwitch button').forEach(b => b.classList.toggle('active', b.dataset.group === group));
+  renderList();
+}
+
 function setMode(mode, resetHash) {
   document.querySelectorAll('#modeSwitch button').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
   document.getElementById('wheelMode').style.display = mode === 'wheel' ? '' : 'none';
@@ -682,11 +695,11 @@ function renderList() {
     return (a.it.item || a.it.brand || '').localeCompare(b.it.item || b.it.brand || '');
   };
 
-  if (state.listSort !== 'name') {
+  if (state.listGroup === 'ranked') {
     let items = state.inventory.filter(it => state.listActiveCats.has(categoryMeta(it.category).id));
     if (!state.listShowSold) items = items.filter(it => !isSold(it));
     const ranked = items.map(it => ({ it, stats: itemSortStats(it, latestByPlatform) })).sort(compareItems);
-    const labels = { views: 'Most views', clicks: 'Most clicks', ctr: 'Highest click rate', price: 'Highest price' };
+    const labels = { views: 'Most views', clicks: 'Most clicks', ctr: 'Highest click rate', price: 'Highest price', name: 'By name' };
     container.innerHTML = ranked.length ? `
       <div class="cat-section ranked-section">
         <div class="cat-heading"><span class="rank-mark">#</span><h2>${labels[state.listSort]}</h2><span class="count">${ranked.length} items</span></div>
@@ -704,17 +717,23 @@ function renderList() {
     withStats.sort(compareItems);
     items = withStats.map(x => x.it);
 
-    const section = document.createElement('div');
+    // <details> so a category can be closed; which ones are closed is remembered.
+    const section = document.createElement('details');
     section.className = 'cat-section';
+    section.open = !state.collapsedCats.has(cat.id);
     section.style.setProperty('--cat', cat.color);
     section.innerHTML = `
-      <div class="cat-heading">
+      <summary class="cat-heading">
         <span class="icon">${cat.icon}</span>
         <h2>${cat.label}</h2>
         <span class="count">${items.length}</span>
-      </div>
+      </summary>
       ${items.length ? `<div class="card-grid">${items.map(it => itemCardHTML(it, cat)).join('')}</div>` : '<div class="empty-state">Nothing here yet.</div>'}
     `;
+    section.addEventListener('toggle', () => {
+      if (section.open) state.collapsedCats.delete(cat.id); else state.collapsedCats.add(cat.id);
+      localSet('sellHub.collapsedCats', [...state.collapsedCats]);
+    });
     wireItemCards(section, renderList);
     container.appendChild(section);
   });
@@ -1885,6 +1904,10 @@ document.getElementById('addAcquireBtn').addEventListener('click', addAcquireIte
 // Init
 // ---------------------------------------------------------------------
 document.getElementById('acqBestPlatform').innerHTML = platformOptionsHTML();
+
+state.listGroup = localGet('sellHub.listGroup', 'category');
+state.collapsedCats = new Set(localGet('sellHub.collapsedCats', []));
+document.querySelectorAll('#groupSwitch button').forEach(b => b.classList.toggle('active', b.dataset.group === state.listGroup));
 
 renderWheel();
 applyZoom();
