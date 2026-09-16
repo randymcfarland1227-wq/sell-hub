@@ -896,6 +896,28 @@ details.cat-section:not([open]) { margin-bottom: 14px; }
 .action-group > .card-grid { padding: 0 14px 14px; }
 .pricing-card.pa-held { --cat: #56657a; }
 
+/* Listing details — closed dropdown at the bottom of a Still-to-list card,
+   holding what's needed to actually make the post. */
+.stl-details { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border); }
+.stl-details > summary { display: flex; align-items: center; gap: 7px; list-style: none; cursor: pointer; font-size: .74rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); }
+.stl-details > summary::-webkit-details-marker { display: none; }
+.stl-details > summary::before { content: '▸'; color: var(--text-faint); transition: transform .15s; }
+.stl-details[open] > summary::before { transform: rotate(90deg); }
+.ld-body { margin-top: 10px; display: flex; flex-direction: column; gap: 11px; }
+.ld-photo { width: 100%; max-width: 190px; border-radius: var(--radius-sm); display: block; }
+.ld-specs { display: grid; grid-template-columns: repeat(auto-fill, minmax(135px, 1fr)); gap: 7px 12px; margin: 0; }
+.ld-specs div { min-width: 0; }
+.ld-specs dt { font-size: .66rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-faint); }
+.ld-specs dd { margin: 1px 0 0; font-size: .82rem; color: var(--text); overflow-wrap: anywhere; }
+.ld-label { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; font-size: .66rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-faint); }
+.ld-borrowed { font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--text-muted); }
+.ld-label .ld-copy { margin-left: auto; padding: 3px 9px; font-size: .66rem; }
+.ld-value { padding: 9px 11px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-card); font-size: .82rem; color: var(--text); overflow-wrap: anywhere; }
+.ld-desc { white-space: pre-wrap; max-height: 260px; overflow-y: auto; }
+.ld-empty { margin: 0; font-size: .82rem; color: var(--text-faint); }
+.ld-links { display: flex; flex-wrap: wrap; gap: 7px; }
+.ld-links .btn { padding: 5px 10px; font-size: .68rem; text-decoration: none; }
+
 .item-edit { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--border); }
 .item-edit .field { margin-bottom: 10px; }
 .ie-platforms { display: flex; flex-direction: column; gap: 6px; }

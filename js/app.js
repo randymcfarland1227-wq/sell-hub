@@ -1034,6 +1034,101 @@ function populateStillToListSiteOptions(rows) {
     options.map(function (o) { return `<option value="${escapeHtml(o[0])}">${escapeHtml(o[1])}</option>`; }).join('');
   if (options.some(function (o) { return o[0] === prev; })) select.value = prev;
 }
+// Everything needed to actually make the post, behind a dropdown at the bottom
+// of the card: the spec line, the saved title and description for this site
+// (falling back to another site's copy when this one has none), and links to
+// the listings already up elsewhere to copy from. It renders closed every time
+// the list re-renders, so only the posting being worked on is open.
+// The copy buttons sit next to the value they copy, so they read it straight
+// out of the DOM rather than carrying a second escaped copy in an attribute.
+// Selecting the text first means the worst case is still a usable one: if
+// neither copy path works, it's sitting there highlighted ready for Cmd-C.
+// execCommand goes first because it's synchronous — navigator.clipboard can
+// sit pending forever behind a permission prompt, which would leave the button
+// silent, so its promise is raced against a timeout.
+async function copyListingField(btn, value) {
+  const selection = window.getSelection();
+  const range = document.createRange();
+  range.selectNodeContents(value);
+  selection.removeAllRanges();
+  selection.addRange(range);
+
+  let copied = false;
+  try { copied = document.execCommand('copy'); } catch { copied = false; }
+  if (!copied && navigator.clipboard) {
+    try {
+      await Promise.race([
+        navigator.clipboard.writeText(value.innerText),
+        new Promise(function (_, reject) { setTimeout(function () { reject(new Error('timeout')); }, 1200); }),
+      ]);
+      copied = true;
+    } catch { copied = false; }
+  }
+  if (copied) selection.removeAllRanges();
+  btn.textContent = copied ? 'Copied' : 'Selected — press Cmd-C';
+  setTimeout(function () { btn.textContent = 'Copy'; }, 1800);
+}
+
+function wireCopyButtons(container) {
+  container.querySelectorAll('.ld-copy').forEach(function (btn) {
+    btn.addEventListener('click', function (event) {
+      event.preventDefault();
+      const value = btn.closest('.ld-field').querySelector('.ld-value');
+      if (value) copyListingField(btn, value);
+    });
+  });
+}
+
+function stlListingDetailsHTML(item, meta) {
+  const descs = state.descriptions.filter(function (d) {
+    return String(d.itemId || '').trim().toUpperCase() === String(item.itemId).trim().toUpperCase();
+  });
+  const own = descs.find(function (d) { return platformId(d.platform) === meta.id; });
+  const borrowed = own ? null : descs.find(function (d) { return d.suggestedTitle || d.description; });
+  const copy = own || borrowed;
+  const photo = photoForItem(item.itemId);
+
+  const specs = [
+    ['Category', item.category], ['Brand', item.brand], ['Item', item.item],
+    ['Size', item.size], ['Condition', item.condition], ['Item #', item.itemNumber],
+    ['Est. value', item.estValue], ['List price', item.listPrice], ['Floor', item.floorPrice],
+  ].filter(function (pair) { return String(pair[1] == null ? '' : pair[1]).trim(); });
+
+  const liveElsewhere = splitPlatforms(item.platform)
+    .map(function (p) { const m = platformMeta(p); return { meta: m, entry: postingQueueEntry(item.itemId, m.id) }; })
+    .filter(function (x) {
+      return x.meta.id !== meta.id && x.entry && String(x.entry.listingUrl || '').trim() && !queueStatusEnded(x.entry);
+    });
+
+  const copyBlock = copy ? `
+      ${copy.suggestedTitle ? `
+        <div class="ld-field">
+          <div class="ld-label">Title${borrowed ? ` <span class="ld-borrowed">from your ${escapeHtml(platformMeta(borrowed.platform).label)} copy</span>` : ''}<button class="btn secondary ld-copy" type="button">Copy</button></div>
+          <div class="ld-value ld-title">${escapeHtml(copy.suggestedTitle)}</div>
+        </div>` : ''}
+      ${copy.description ? `
+        <div class="ld-field">
+          <div class="ld-label">Description<button class="btn secondary ld-copy" type="button">Copy</button></div>
+          <div class="ld-value ld-desc">${escapeHtml(copy.description)}</div>
+        </div>` : ''}`
+    : `<p class="ld-empty">No saved title or description for this item yet.</p>`;
+
+  return `
+    <details class="stl-details">
+      <summary>Listing details</summary>
+      <div class="ld-body">
+        ${photo ? `<img class="ld-photo" src="${escapeHtml(photo)}" alt="" loading="lazy" onerror="this.remove()">` : ''}
+        ${specs.length ? `<dl class="ld-specs">${specs.map(function (pair) {
+          return `<div><dt>${escapeHtml(pair[0])}</dt><dd>${escapeHtml(String(pair[1]))}</dd></div>`;
+        }).join('')}</dl>` : ''}
+        ${copyBlock}
+        ${liveElsewhere.length ? `<div class="ld-links">${liveElsewhere.map(function (x) {
+          return `<a class="btn secondary" href="${escapeHtml(x.entry.listingUrl)}" target="_blank" rel="noopener">Open ${escapeHtml(x.meta.label)} listing</a>`;
+        }).join('')}</div>` : ''}
+      </div>
+    </details>`;
+}
+
 function renderStillToList() {
   const container = document.getElementById('stillToListList');
   if (!container) return;
@@ -1084,6 +1179,7 @@ function renderStillToList() {
               ${editToggleHTML(item)}
             </div>
             ${itemEditPanelHTML(item)}
+            ${stlListingDetailsHTML(item, g.meta)}
           </div>`;
       }).join('');
       return `
@@ -1111,6 +1207,7 @@ function renderStillToList() {
   container.innerHTML = groupHTML + skippedHTML;
   wireActionStars(container);
   wireItemEditors(container);
+  wireCopyButtons(container);
   container.querySelectorAll('.stl-listed-btn').forEach(function (btn) {
     btn.addEventListener('click', async function () {
       await recordItemAction(btn.dataset.id, 'Listing Posted', btn.dataset.platform);
