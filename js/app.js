@@ -966,8 +966,13 @@ function postingQueueEntry(itemId, platformIdWanted) {
     return String(row.itemId) === String(itemId) && platformId(row.platform) === platformIdWanted;
   });
 }
+// A queue row keeps its listing URL after the listing comes down, so the URL
+// alone can't mean "live" — a status of Ended/Sold/Removed wins over it.
+function queueStatusEnded(entry) {
+  return ['ended', 'sold', 'removed'].includes(String(entry && entry.status || '').toLowerCase());
+}
 function isPlatformLive(entry) {
-  if (!entry) return false;
+  if (!entry || queueStatusEnded(entry)) return false;
   return String(entry.status || '').toLowerCase() === 'active' || !!String(entry.listingUrl || '').trim();
 }
 function latestListingDecision(itemId, platformIdWanted) {
@@ -981,6 +986,7 @@ function latestListingDecision(itemId, platformIdWanted) {
 // A listing taken down after the item sold elsewhere, logged per platform so
 // it stops counting as live without waiting for the queue row to be re-read.
 function listingEndedFor(itemId, platformIdWanted) {
+  if (queueStatusEnded(postingQueueEntry(itemId, platformIdWanted))) return true;
   return state.itemActions.some(function (a) {
     return String(a.itemId) === String(itemId) && a.action === 'Listing Ended' && platformId(a.detail) === platformIdWanted;
   });
