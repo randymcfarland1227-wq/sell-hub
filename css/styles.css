@@ -891,7 +891,13 @@ main.wrap {
 
 .item-edit { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--border); }
 .item-edit .field { margin-bottom: 10px; }
-.ie-platforms { display: flex; flex-wrap: wrap; gap: 6px; }
+.ie-platforms { display: flex; flex-direction: column; gap: 6px; }
+.ie-site { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ie-site .ie-plat { min-width: 190px; }
+.ie-site-state { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-faint); }
+.ie-site-live .ie-site-state { color: var(--plat); }
+.ie-site-skipped .ie-site-state { color: #b42335; }
+.ie-site .btn { padding: 5px 10px; font-size: .68rem; }
 .field .ie-plat { display: inline-flex; align-items: center; gap: 5px; margin: 0; padding: 5px 9px; border: 1px solid var(--border); border-radius: 999px; background: var(--bg-card); color: var(--text); font-size: .78rem; font-weight: 600; text-transform: none; letter-spacing: 0; cursor: pointer; }
 .field .ie-plat input { width: auto; margin: 0; padding: 0; accent-color: var(--plat); }
 .field .ie-plat:has(input:checked) { border-color: var(--plat); background: color-mix(in srgb, var(--plat) 12%, var(--bg-card)); }

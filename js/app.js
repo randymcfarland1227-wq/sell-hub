@@ -284,9 +284,16 @@ function parsePriceDropDetail(detail) {
 // that a listing that's genuinely still stuck gets re-flagged rather than
 // going silent forever.
 const HANDLED_SUPPRESS_DAYS = 7;
+// Dates are compared against the Sheet's own "yyyy-MM-dd" stamps, which the
+// Apps Script writes in local time — so "today" has to be local too, or an
+// evening action reads as tomorrow everywhere east of UTC's date line.
+function todayStr() {
+  const now = new Date();
+  return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+}
 function daysSince(dateStr) {
   const then = new Date(dateStr + 'T00:00:00');
-  const now = new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00');
+  const now = new Date(todayStr() + 'T00:00:00');
   return Math.round((now - then) / 86400000);
 }
 // "List price" text for a card: if the most recent Price Drop's logged
@@ -1129,7 +1136,7 @@ function pricingActionFor(item) {
   if (actionState?.action === 'Completed') {
     return { ...natural, severity: 'complete', label: 'Completed', reason: actionState.detail || `Completed: ${natural.label}` };
   }
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayStr();
 
   // Dismissals are deliberately short-lived: ignoring a suggestion today
   // just means "not today," not "never again."
@@ -1160,7 +1167,7 @@ function pricingActionFor(item) {
 }
 
 async function recordItemAction(itemId, itemAction, detail) {
-  state.itemActions.push({ date: new Date().toISOString().slice(0, 10), itemId, action: itemAction, detail: detail || '' });
+  state.itemActions.push({ date: todayStr(), itemId, action: itemAction, detail: detail || '' });
   if (connected()) {
     try { await apiPost('logItemAction', { itemId, itemAction, detail }); }
     catch { /* logged locally; will drift from the Sheet until the next successful call */ }
@@ -1183,19 +1190,44 @@ function platformFieldFor(item, ids) {
 function editToggleHTML(item) {
   return `<button class="btn secondary ie-toggle" data-id="${escapeHtml(item.itemId)}">Edit</button>`;
 }
+// One row per site inside the editor: whether the item belongs on that site at
+// all (checkbox, saved to the Platform column) plus where it stands right now,
+// with a per-site "not posting" toggle that logs straight to Item Actions.
+function siteRowHTML(item, id, current, stateById) {
+  const meta = PLATFORM_META[id];
+  const state = stateById.get(id) || (current.has(id) ? 'todo' : 'off');
+  const stateLabel = { live: 'Live', todo: 'Still to post', skipped: 'Not posting', off: 'Not on this item' }[state];
+  const button = state === 'skipped'
+    ? `<button class="btn secondary ie-reopen-btn" data-id="${escapeHtml(item.itemId)}" data-platform="${escapeHtml(meta.label)}">Post it after all</button>`
+    : state === 'todo'
+      ? `<button class="btn secondary ie-skip-btn" data-id="${escapeHtml(item.itemId)}" data-platform="${escapeHtml(meta.label)}">Not posting here</button>`
+      : '';
+  return `
+    <div class="ie-site ie-site-${state}" style="--plat:${meta.color}">
+      <label class="ie-plat"><input type="checkbox" value="${id}"${current.has(id) ? ' checked' : ''}> ${escapeHtml(meta.label)}</label>
+      <span class="ie-site-state">${stateLabel}</span>
+      ${button}
+    </div>`;
+}
+
 function itemEditPanelHTML(item) {
   const current = itemPlatformIds(item);
   const override = actionOverrideFor(item.itemId);
   const suggested = naturalPricingAction(item).label;
   const money = v => parseMoney(v) || '';
+  const status = platformsStatusFor(item);
+  const stateById = new Map();
+  status.done.forEach(d => stateById.set(d.meta.id, 'live'));
+  status.missing.forEach(m => stateById.set(m.meta.id, 'todo'));
+  status.skipped.forEach(s => stateById.set(s.meta.id, 'skipped'));
   return `
     <div class="item-edit" hidden>
       <div class="field-row">
         <div class="field"><label>List price</label><input type="number" min="0" step="0.01" class="ie-list" value="${money(item.listPrice)}" placeholder="No price"></div>
         <div class="field"><label>Floor price</label><input type="number" min="0" step="0.01" class="ie-floor" value="${money(item.floorPrice)}" placeholder="No floor"></div>
       </div>
-      <div class="field"><label>Posting to</label>
-        <div class="ie-platforms">${PLATFORM_ORDER.map(id => `<label class="ie-plat" style="--plat:${PLATFORM_META[id].color}"><input type="checkbox" value="${id}"${current.has(id) ? ' checked' : ''}> ${escapeHtml(PLATFORM_META[id].label)}</label>`).join('')}</div>
+      <div class="field"><label>Sites <span class="optional">tick the sites this item belongs on; mark any one not posting</span></label>
+        <div class="ie-platforms">${PLATFORM_ORDER.map(id => siteRowHTML(item, id, current, stateById)).join('')}</div>
       </div>
       <div class="field"><label>Next action</label>
         <select class="ie-action">
@@ -1226,6 +1258,14 @@ function wireItemEditors(container) {
       const item = state.inventory.find(it => String(it.itemId) === String(toggle.dataset.id));
       if (item) saveItemEdit(item, panel);
     });
+    // Per-site decisions save on click rather than waiting for Save, matching
+    // the same buttons on the Still to list cards.
+    panel.querySelectorAll('.ie-skip-btn, .ie-reopen-btn').forEach(btn => btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      const decision = btn.classList.contains('ie-skip-btn') ? 'Not Posting' : 'Reopened Listing';
+      await recordItemAction(btn.dataset.id, decision, btn.dataset.platform);
+      renderAction();
+    }));
   });
 }
 async function saveItemEdit(item, panel) {
@@ -1336,7 +1376,7 @@ async function dropPriceForAction(item, newPrice, btn) {
     if (!res || !res.ok) { status.textContent = (res && res.error) || 'Could not update the price.'; return; }
   } catch { status.textContent = 'Could not save to your Sheet.'; return; }
   item.listPrice = newPrice;
-  state.itemActions.push({ date: new Date().toISOString().slice(0, 10), itemId: item.itemId, action: 'Price Drop', detail: String(newPrice) });
+  state.itemActions.push({ date: todayStr(), itemId: item.itemId, action: 'Price Drop', detail: String(newPrice) });
   renderPricingActions();
 }
 
@@ -1493,7 +1533,7 @@ async function addMetricEntry() {
   status.textContent = 'Saving...';
   try {
     await apiPost('addMetricEntry', body);
-    state.metrics.push({ ...body, date: new Date().toISOString().slice(0, 10), source: 'manual' });
+    state.metrics.push({ ...body, date: todayStr(), source: 'manual' });
   } catch { status.textContent = 'Could not save to your Sheet.'; return; }
 
   ['metricImpressions', 'metricViews', 'metricWatchers', 'metricClicks'].forEach(id => document.getElementById(id).value = '');
@@ -1707,7 +1747,7 @@ async function addAcquireItem() {
   if (!body.brand || !body.itemType) { status.textContent = 'Fill in brand and item type.'; return; }
   status.textContent = 'Saving...';
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayStr();
   const localEntry = { ...body, id: `acq-${Date.now()}`, dateAdded: today };
 
   if (connected()) {
