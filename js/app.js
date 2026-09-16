@@ -1065,8 +1065,8 @@ function renderStillToList() {
               ${elsewhere.length ? `<span><b>Also still needs —</b> ${escapeHtml(elsewhere.join(', '))}</span>` : ''}
             </div>
             <div class="stl-platform-row">
-              <button class="btn secondary stl-listed-btn" data-id="${escapeHtml(item.itemId)}" data-platform="${escapeHtml(g.meta.label)}">Mark listed</button>
-              <button class="icon-btn stl-skip-btn" data-id="${escapeHtml(item.itemId)}" data-platform="${escapeHtml(g.meta.label)}">Not posting</button>
+              <button class="btn secondary stl-listed-btn" data-id="${escapeHtml(item.itemId)}" data-platform="${escapeHtml(g.meta.label)}">Mark listed on ${escapeHtml(g.meta.label)}</button>
+              <button class="icon-btn stl-skip-btn" data-id="${escapeHtml(item.itemId)}" data-platform="${escapeHtml(g.meta.label)}">Not posting on ${escapeHtml(g.meta.label)}</button>
               ${editToggleHTML(item)}
             </div>
             ${itemEditPanelHTML(item)}
@@ -1088,7 +1088,7 @@ function renderStillToList() {
           <div class="card stl-card">
             <div class="card-top"><h3>${escapeHtml(itemTitle(item))}</h3></div>
             <div class="stl-chips">${skipped.map(function (s) {
-              return `<div class="stl-platform-row"><span class="stl-chip stl-skipped" style="--plat:${s.meta.color}">Not posting · ${escapeHtml(s.meta.label)}</span><button class="btn secondary stl-reopen-btn" data-id="${escapeHtml(item.itemId)}" data-platform="${escapeHtml(s.meta.label)}">Reopen</button></div>`;
+              return `<div class="stl-platform-row"><span class="stl-chip stl-skipped" style="--plat:${s.meta.color}">Not posting · ${escapeHtml(s.meta.label)}</span><button class="btn secondary stl-reopen-btn" data-id="${escapeHtml(item.itemId)}" data-platform="${escapeHtml(s.meta.label)}">Post it on ${escapeHtml(s.meta.label)} after all</button></div>`;
             }).join('')}</div>
           </div>`;
       }).join('')}</div>
