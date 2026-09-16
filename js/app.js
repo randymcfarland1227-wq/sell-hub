@@ -512,6 +512,14 @@ function siteStatusChipsHTML(item) {
   return chips.length ? `<div class="site-chips">${chips.join('')}</div>` : '';
 }
 
+// Cover photos are pulled from the live listings, so an item that isn't up
+// anywhere yet has no image to pull — say which of the two it is rather than
+// leaving every empty card reading the same thing.
+function photoPendingLabel(item) {
+  const status = String(item.sourceStatus || '').trim().toLowerCase();
+  return status === 'photograph' || status === 'identify' ? 'Needs photos' : 'Photo pending';
+}
+
 function itemCardHTML(item, cat) {
   const sold = isSold(item);
   const expanded = state.expandedItems.has(item.itemId);
@@ -522,7 +530,7 @@ function itemCardHTML(item, cat) {
     <div class="card${sold ? ' sold' : ''}" style="--cat:${cat.color}">
       <div class="card-media${photo ? '' : ' photo-pending'}">
         ${photo ? `<img class="card-photo" src="${escapeHtml(photo)}" alt="${escapeHtml(title)}" loading="lazy" onerror="this.closest('.card-media').classList.add('photo-pending');this.remove()">` : ''}
-        <span>Photo pending</span>
+        <span>${photoPendingLabel(item)}</span>
       </div>
       <div class="card-top">
         <h3>${escapeHtml(title)}</h3>
