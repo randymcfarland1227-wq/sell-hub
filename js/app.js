@@ -517,7 +517,7 @@ function siteStatusChipsHTML(item) {
 // leaving every empty card reading the same thing.
 function photoPendingLabel(item) {
   const status = String(item.sourceStatus || '').trim().toLowerCase();
-  return status === 'photograph' || status === 'identify' ? 'Needs photos' : 'Photo pending';
+  return ['photograph', 'identify', 'blank', ''].includes(status) ? 'Needs photos' : 'Photo pending';
 }
 
 function itemCardHTML(item, cat) {
