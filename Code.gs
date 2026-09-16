@@ -805,6 +805,8 @@ function updateItem(body) {
     { key: 'listPrice', column: 'List price', numeric: true },
     { key: 'floorPrice', column: 'Floor price', numeric: true },
     { key: 'platform', column: 'Platform', numeric: false },
+    { key: 'brand', column: 'Brand', numeric: false },
+    { key: 'item', column: 'Item', numeric: false },
   ].filter(function (f) { return Object.prototype.hasOwnProperty.call(body, f.key); });
 
   var logged = [];
@@ -846,8 +848,10 @@ function updateItem(body) {
         else log('Price Edit', oldTxt + ' -> ' + newTxt);
       } else if (f.key === 'floorPrice') {
         log('Floor Edit', oldTxt + ' -> ' + newTxt);
-      } else {
+      } else if (f.key === 'platform') {
         log('Platforms Updated', oldTxt + ' -> ' + newTxt);
+      } else {
+        log('Renamed', f.column + ': ' + oldTxt + ' -> ' + newTxt);
       }
     });
   }
