@@ -796,6 +796,22 @@ function dropListingPrice(body) {
 // Saves the Actions-tab item editor. Only keys present in the body are
 // written (a blank price clears the cell), and each change is logged to
 // Item Actions; the logged rows are returned so the site can mirror them.
+// Listing Hub carries a couple of fields the source tabs don't — Brand exists
+// on Clothing Sell Inventory but not on Non Clothing, for instance — so an edit
+// to one of those writes the hub row itself instead of failing.
+function findHubRow(itemId) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var hubSheet = ss.getSheetByName(LISTING_HUB_SHEET);
+  if (!hubSheet) return { error: 'Could not find the Listing Hub tab.' };
+  var t = readTable(hubSheet, ['Item ID']);
+  for (var i = 0; i < t.rows.length; i++) {
+    if (String(val(t.rows[i], t.colMap, 'Item ID')) === String(itemId)) {
+      return { sheet: hubSheet, row: t.headerSheetRow + 1 + i, colMap: t.colMap };
+    }
+  }
+  return { error: 'Could not find ' + itemId + ' in Listing Hub.' };
+}
+
 function updateItem(body) {
   var itemId = body.itemId;
   var sourceTabName = body.sourceTab;
@@ -824,10 +840,26 @@ function updateItem(body) {
 
     // Validate everything before writing anything, so a bad value or a
     // missing column can't leave the row half-edited.
+    var hub = null;
     for (var i = 0; i < fields.length; i++) {
       var field = fields[i];
       field.col = colIndex(header.colMap, field.column);
-      if (field.col === -1) return { ok: false, error: 'Could not find a "' + field.column + '" column in ' + sourceTabName + '.' };
+      if (field.col === -1) {
+        if (!hub) hub = findHubRow(itemId);
+        if (hub.error) return { ok: false, error: hub.error };
+        var hubCol = colIndex(hub.colMap, field.column);
+        if (hubCol === -1) {
+          return { ok: false, error: 'Could not find a "' + field.column + '" column in ' + sourceTabName + ' or Listing Hub.' };
+        }
+        // A formula there is pulling the value from somewhere else — overwriting
+        // it with a literal would quietly break that link.
+        if (String(hub.sheet.getRange(hub.row, hubCol + 1).getFormula() || '')) {
+          return { ok: false, error: '"' + field.column + '" is a formula in Listing Hub for ' + itemId + ' — change it at the source instead.' };
+        }
+        field.sheet = hub.sheet;
+        field.row = hub.row;
+        field.col = hubCol;
+      }
       var raw = body[field.key];
       field.value = field.numeric ? (raw === '' || raw === null ? '' : Number(raw)) : String(raw || '');
       if (field.numeric && field.value !== '' && (isNaN(field.value) || field.value < 0)) {
@@ -836,7 +868,7 @@ function updateItem(body) {
     }
 
     fields.forEach(function (f) {
-      var cell = sheet.getRange(row, f.col + 1);
+      var cell = (f.sheet || sheet).getRange(f.row || row, f.col + 1);
       var oldVal = cell.getValue();
       cell.setValue(f.value);
       var oldTxt = oldVal === '' || oldVal === null ? 'none' : String(oldVal);
