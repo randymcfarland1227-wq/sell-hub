@@ -143,6 +143,7 @@ function doPost(e) {
   if (action === 'setDescription') return jsonOut(setDescription(body));
   if (action === 'cancelSale') return jsonOut(cancelSale(body));
   if (action === 'updateItem') return jsonOut(updateItem(body));
+  if (action === 'setQueueStatus') return jsonOut(setQueueStatus(body));
   if (action === 'debugRestoreRow') return jsonOut(debugRestoreRow(body.sheet, body.row, body.values));
 
   return jsonOut({ error: 'unknown action' });
@@ -208,6 +209,44 @@ function setListingLink(body) {
   if (body.title && titleCol !== -1) sheet.getRange(targetRow, titleCol + 1).setValue(body.title);
 
   return { ok: true, row: targetRow, updatedExisting: targetRow <= trueLastContentRow };
+}
+
+// Flips one Platform Posting Queue row's Status — e.g. to "Ended" when the
+// item sold somewhere else and that listing came down. Matched by Listing ID,
+// or by Item ID + Platform when the site doesn't know the Listing ID.
+function setQueueStatus(body) {
+  var status = body.status;
+  if (!status || (!body.listingId && !(body.itemId && body.platform))) {
+    return { ok: false, error: 'Missing status, and listingId or itemId+platform.' };
+  }
+
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(POSTING_QUEUE_SHEET);
+  if (!sheet) return { ok: false, error: 'Could not find "' + POSTING_QUEUE_SHEET + '" tab.' };
+  var header = findHeaderRow(sheet, ['Listing ID']);
+  if (!header) return { ok: false, error: 'Could not find a header row in ' + POSTING_QUEUE_SHEET + '.' };
+  var colMap = header.colMap;
+  var statusCol = colIndex(colMap, 'Status');
+  if (statusCol === -1) return { ok: false, error: 'Could not find a "Status" column in ' + POSTING_QUEUE_SHEET + '.' };
+  var listingIdCol = colIndex(colMap, 'Listing ID');
+  var itemIdCol = colIndex(colMap, 'Item ID');
+  var platformCol = colIndex(colMap, 'Platform');
+
+  var startRow = header.rowIndex + 2;
+  var lastRow = sheet.getLastRow();
+  if (lastRow < startRow) return { ok: false, error: 'No rows in ' + POSTING_QUEUE_SHEET + ' yet.' };
+  var values = sheet.getRange(startRow, 1, lastRow - startRow + 1, sheet.getLastColumn()).getValues();
+  var wantPlatform = String(body.platform || '').trim().toLowerCase();
+  var updated = 0;
+  for (var i = 0; i < values.length; i++) {
+    var row = values[i];
+    var match = body.listingId
+      ? (listingIdCol !== -1 && String(row[listingIdCol] || '') === String(body.listingId))
+      : (itemIdCol !== -1 && platformCol !== -1 &&
+         String(row[itemIdCol] || '') === String(body.itemId) &&
+         String(row[platformCol] || '').trim().toLowerCase() === wantPlatform);
+    if (match) { sheet.getRange(startRow + i, statusCol + 1).setValue(status); updated++; }
+  }
+  return { ok: true, updated: updated };
 }
 
 // Generic status-only writer for the source tabs — same row-lookup as

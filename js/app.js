@@ -183,7 +183,14 @@ function resaleWorkroomSnapshot() {
       title: [item.brand, item.item].filter(Boolean).join(' — ') || item.itemId,
       detail: `Post it on ${m.meta.label}.`,
       meta: item.listPrice ? `List price ${fmtMoney(parseMoney(item.listPrice))}` : 'No list price yet',
-    }))));
+    })))).concat(soldElsewhereTasks()
+      .filter(t => isFeaturedAction(endTaskKey(t.item.itemId, t.meta.id)))
+      .map(t => ({
+        id: endTaskKey(t.item.itemId, t.meta.id),
+        title: [t.item.brand, t.item.item].filter(Boolean).join(' — ') || t.item.itemId,
+        detail: `It sold — take the ${t.meta.label} listing down.`,
+        meta: t.item.soldPrice ? `Sold for ${t.item.soldPrice}` : 'Sold',
+      })));
   return {
     source: 'resale',
     metrics: {
@@ -476,6 +483,22 @@ function platformStatsHTML(item) {
   return `<div class="platform-stats">${rows}</div>`;
 }
 
+// Per-site state on an inventory card: where this item is live versus still
+// waiting to be posted, so the card answers "where is this up right now?"
+// without opening the Actions page.
+function siteStatusChipsHTML(item) {
+  const status = platformsStatusFor(item);
+  const sold = isSold(item);
+  const chip = (row, cls, text, title) =>
+    `<span class="stl-chip ${cls}" style="--plat:${row.meta.color}" title="${escapeHtml(title)}">${escapeHtml(text)}</span>`;
+  const chips = status.done
+    .map(d => chip(d, 'stl-done', '✓ ' + d.meta.label, sold ? 'Still live on ' + d.meta.label + ' — needs ending' : 'Live on ' + d.meta.label))
+    .concat(status.ended.map(e => chip(e, 'stl-skipped', 'Ended · ' + e.meta.label, 'Listing ended on ' + e.meta.label)))
+    .concat(sold ? [] : status.missing.map(m => chip(m, 'stl-missing', m.meta.label, 'Still to post on ' + m.meta.label)))
+    .concat(sold ? [] : status.skipped.map(s => chip(s, 'stl-skipped', 'Not posting · ' + s.meta.label, 'Not posting on ' + s.meta.label)));
+  return chips.length ? `<div class="site-chips">${chips.join('')}</div>` : '';
+}
+
 function itemCardHTML(item, cat) {
   const sold = isSold(item);
   const expanded = state.expandedItems.has(item.itemId);
@@ -493,6 +516,7 @@ function itemCardHTML(item, cat) {
         <span class="status-badge ${statusClass(item.sourceStatus)}">${escapeHtml(item.sourceStatus || '—')}</span>
       </div>
       ${actionBadgesHTML(item.itemId)}
+      ${siteStatusChipsHTML(item)}
       <div class="meta">
         ${item.size ? `<span><b>Size —</b> ${escapeHtml(item.size)}</span>` : ''}
         ${item.condition ? `<span><b>Condition —</b> ${escapeHtml(item.condition)}</span>` : ''}
@@ -816,8 +840,67 @@ function renderToShip() {
   container.querySelectorAll('.ts-ship-btn').forEach(btn => btn.addEventListener('click', () => markShipped(btn.dataset.id)));
 }
 
+// Selling on one site leaves the same item live on the others, so each still-live
+// site becomes its own task until that listing is taken down.
+function soldElsewhereTasks() {
+  const tasks = [];
+  state.inventory.filter(isSold).forEach(item => {
+    const soldOn = platformId(item.buyer);
+    platformsStatusFor(item).done.forEach(row => {
+      if (row.meta.id === soldOn) return;
+      tasks.push({ item, meta: row.meta, entry: row.entry, soldOn });
+    });
+  });
+  return tasks;
+}
+function endTaskKey(itemId, platformIdValue) { return `end:${itemId}:${platformIdValue}`; }
+
+async function endListingElsewhere(itemId, platformLabel, listingId) {
+  await recordItemAction(itemId, 'Listing Ended', platformLabel);
+  if (connected()) {
+    try { await apiPost('setQueueStatus', { listingId, itemId, platform: platformLabel, status: 'Ended' }); }
+    catch { /* Item Actions already records it; the queue row just stays as it was */ }
+  }
+  renderAction();
+  renderList();
+}
+
+function renderSoldElsewhere() {
+  const container = document.getElementById('soldElsewhereList');
+  if (!container) return;
+  const tasks = soldElsewhereTasks();
+  if (!tasks.length) { container.innerHTML = '<div class="empty-state">No sold item still has a listing up elsewhere.</div>'; return; }
+
+  container.innerHTML = tasks.map(({ item, meta, entry, soldOn }) => {
+    const title = [item.brand, item.item].filter(Boolean).join(' — ') || item.itemId;
+    const soldWhere = soldOn ? ` on ${escapeHtml(platformMeta(item.buyer).label)}` : item.buyer ? ` (${escapeHtml(item.buyer)})` : '';
+    return `
+      <div class="card end-card">
+        <div class="card-top">
+          <h3>${escapeHtml(title)}</h3>
+          <div class="card-top-actions">${actionStarHTML(endTaskKey(item.itemId, meta.id), `${title} on ${meta.label}`)}<span class="stl-chip stl-done" style="--plat:${meta.color}">${escapeHtml(meta.label)}</span></div>
+        </div>
+        <div class="meta">
+          <span><b>Sold —</b> ${escapeHtml(item.soldPrice || '—')}${soldWhere}</span>
+          <span><b>Still up on —</b> ${escapeHtml(meta.label)}</span>
+        </div>
+        <div class="stl-platform-row">
+          ${entry && entry.listingUrl ? `<a class="btn secondary" href="${escapeHtml(entry.listingUrl)}" target="_blank" rel="noopener">Open listing</a>` : ''}
+          <button class="btn secondary end-btn" data-id="${escapeHtml(item.itemId)}" data-platform="${escapeHtml(meta.label)}" data-listing="${escapeHtml((entry && entry.listingId) || '')}">Mark ended on ${escapeHtml(meta.label)}</button>
+        </div>
+      </div>`;
+  }).join('');
+
+  wireActionStars(container);
+  container.querySelectorAll('.end-btn').forEach(btn => btn.addEventListener('click', () => {
+    btn.disabled = true;
+    endListingElsewhere(btn.dataset.id, btn.dataset.platform, btn.dataset.listing);
+  }));
+}
+
 function renderAction() {
   renderToShip();
+  renderSoldElsewhere();
   renderStillToList();
   renderPricingActions();
   renderActionSummary();
@@ -836,6 +919,7 @@ function renderActionSummary() {
   const visibility = (counts['Boost visibility'] || 0) + (counts['Refresh listing'] || 0);
   const tiles = [
     { num: toShip, lbl: 'To ship', target: 'sec-ship' },
+    { num: soldElsewhereTasks().length, lbl: 'Listings to end', target: 'sec-end' },
     { num: toList, lbl: 'Posts to make', target: 'sec-list' },
     { num: counts['Send an offer'] || 0, lbl: 'Offers to send', target: pricingGroupId('Send an offer') },
     { num: counts['Try a price drop'] || 0, lbl: 'Price drops', target: pricingGroupId('Try a price drop') },
@@ -875,19 +959,28 @@ function latestListingDecision(itemId, platformIdWanted) {
   });
   return matches.length ? matches[matches.length - 1] : null;
 }
+// A listing taken down after the item sold elsewhere, logged per platform so
+// it stops counting as live without waiting for the queue row to be re-read.
+function listingEndedFor(itemId, platformIdWanted) {
+  return state.itemActions.some(function (a) {
+    return String(a.itemId) === String(itemId) && a.action === 'Listing Ended' && platformId(a.detail) === platformIdWanted;
+  });
+}
 function platformsStatusFor(item) {
   const platforms = splitPlatforms(item.platform);
-  const done = [], missing = [], skipped = [];
+  const done = [], missing = [], skipped = [], ended = [];
   platforms.forEach(function (p) {
     const meta = platformMeta(p);
     const entry = postingQueueEntry(item.itemId, meta.id);
     const decision = latestListingDecision(item.itemId, meta.id);
     const row = { meta: meta, entry: entry || null, decision: decision };
-    if (isPlatformLive(entry) || (decision && decision.action === 'Listing Posted')) done.push(row);
+    const live = isPlatformLive(entry) || (decision && decision.action === 'Listing Posted');
+    if (listingEndedFor(item.itemId, meta.id)) ended.push(row);
+    else if (live) done.push(row);
     else if (decision && decision.action === 'Not Posting') skipped.push(row);
     else missing.push(row);
   });
-  return { done: done, missing: missing, skipped: skipped };
+  return { done: done, missing: missing, skipped: skipped, ended: ended };
 }
 function stillToListRows() {
   return state.inventory
@@ -1196,7 +1289,7 @@ function editToggleHTML(item) {
 function siteRowHTML(item, id, current, stateById) {
   const meta = PLATFORM_META[id];
   const state = stateById.get(id) || (current.has(id) ? 'todo' : 'off');
-  const stateLabel = { live: 'Live', todo: 'Still to post', skipped: 'Not posting', off: 'Not on this item' }[state];
+  const stateLabel = { live: 'Live', todo: 'Still to post', skipped: 'Not posting', ended: 'Ended', off: 'Not on this item' }[state];
   const button = state === 'skipped'
     ? `<button class="btn secondary ie-reopen-btn" data-id="${escapeHtml(item.itemId)}" data-platform="${escapeHtml(meta.label)}">Post it after all</button>`
     : state === 'todo'
@@ -1220,6 +1313,7 @@ function itemEditPanelHTML(item) {
   status.done.forEach(d => stateById.set(d.meta.id, 'live'));
   status.missing.forEach(m => stateById.set(m.meta.id, 'todo'));
   status.skipped.forEach(s => stateById.set(s.meta.id, 'skipped'));
+  status.ended.forEach(e => stateById.set(e.meta.id, 'ended'));
   return `
     <div class="item-edit" hidden>
       <div class="field-row">

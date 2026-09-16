@@ -480,6 +480,8 @@ main.wrap {
   cursor: pointer;
 }
 .stl-card { --cat: #6c5c42; }
+.site-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 9px; }
+.end-card { --cat: #7a2038; }
 .stl-chips { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
 .stl-platform-row { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
 .stl-platform-row .btn, .stl-platform-row .icon-btn { padding: 5px 9px; font-size: 0.68rem; }
