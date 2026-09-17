@@ -5,6 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Resale Hub</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏷️</text></svg>">
+<script>
+  // Apply the saved theme before first paint so the page never flashes the wrong one.
+  try { var t = localStorage.getItem('sellHub.theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
+</script>
 <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
@@ -12,7 +16,10 @@
 <header class="top">
   <div class="wrap top-inner">
     <h1>Resale Hub</h1>
-    <span class="date" id="todayLabel"></span>
+    <div class="top-actions">
+      <span class="date" id="todayLabel"></span>
+      <button type="button" class="theme-toggle" id="themeToggle" aria-label="Theme: follows your device. Switch to dark."><span class="theme-icon" aria-hidden="true">🌓</span><span class="theme-label">Auto</span></button>
+    </div>
   </div>
   <div class="wrap tabs-scroll">
     <nav class="tabs">
@@ -112,6 +119,38 @@
     </div>
 
     <div class="stat-tiles" id="overallTiles"></div>
+
+    <h3 class="subhead" id="sec-sales">Sales by site</h3>
+    <p class="section-intro" style="margin-top:0">What each site sold for, what you kept after fees and shipping labels, and the cash each site is holding for you. Available cash can be withdrawn now; pending or on hold is still clearing.</p>
+    <div class="stat-tiles" id="salesTotals"></div>
+    <div class="platform-cards sales-cards" id="salesCards"></div>
+
+    <button class="btn add-toggle-btn" id="balanceAddToggle" aria-expanded="false" aria-controls="balanceAddPanel">+ Update available cash</button>
+    <div class="panel" id="balanceAddPanel" style="display:none">
+      <h3>Update available cash</h3>
+      <div class="field-row">
+        <div class="field">
+          <label for="balancePlatform">Site</label>
+          <select id="balancePlatform"></select>
+        </div>
+        <div class="field">
+          <label for="balanceAvailable">Available <span class="optional">ready to withdraw</span></label>
+          <input type="number" id="balanceAvailable" step="0.01" inputmode="decimal" placeholder="0.00">
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label for="balancePending">Pending / on hold <span class="optional">optional</span></label>
+          <input type="number" id="balancePending" step="0.01" inputmode="decimal" placeholder="0.00">
+        </div>
+        <div class="field">
+          <label for="balanceNotes">Note <span class="optional">optional</span></label>
+          <input type="text" id="balanceNotes" placeholder="e.g. payout scheduled Friday">
+        </div>
+      </div>
+      <button class="btn" id="saveBalanceBtn">Save available cash</button>
+      <div class="status-msg" id="balanceStatus" role="status"></div>
+    </div>
 
     <h3 class="subhead">By platform</h3>
     <div class="platform-cards" id="platformCards"></div>

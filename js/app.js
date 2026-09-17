@@ -13,6 +13,8 @@ const state = {
   postingQueue: [],       // from Platform Posting Queue
   metrics: [],            // from Metrics tab (auto eBay + manual entries)
   acquire: [],            // from Acquire Watchlist tab
+  sales: [],              // from Sales tab (one row per sale: price, fees, label, net cash, site)
+  balances: [],           // from Platform Balances tab (available / pending cash per site, by date)
   photos: [],             // from Photos tab (cover photo per item x platform)
   itemActions: [],        // from Item Actions tab (price drops/offers sent/ignored, logged from pricing actions)
   featuredActions: new Set(),
@@ -132,6 +134,28 @@ async function apiGet(action) {
   const res = await fetch(`${APPS_SCRIPT_URL}?action=${action}`);
   if (!res.ok) throw new Error('Request failed');
   return res.json();
+}
+// Apps Script occasionally never answers one of several requests fired at page
+// load (the same call made again returns in seconds), so this gives each
+// attempt a deadline and tries again instead of waiting forever.
+async function apiGetWithRetry(action, { timeoutMs = 30000, attempts = 3, onRetry } = {}) {
+  if (!connected()) return null;
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const res = await fetch(`${APPS_SCRIPT_URL}?action=${action}`, { signal: ctrl.signal });
+      if (!res.ok) throw new Error('Request failed');
+      return await res.json();
+    } catch (err) {
+      lastError = err;
+      if (attempt < attempts && onRetry) onRetry(attempt);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  throw lastError;
 }
 async function apiPost(action, payload) {
   if (!connected()) return null;
@@ -356,6 +380,36 @@ document.querySelectorAll('nav.tabs button').forEach(btn => {
 document.getElementById('todayLabel').textContent = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
 
 // ---------------------------------------------------------------------
+// Theme — Auto (follows the device), Dark, or Light. Saved per browser; the
+// inline script in <head> applies it before first paint.
+// ---------------------------------------------------------------------
+const THEME_STEPS = [
+  { id: 'auto', icon: '🌓', label: 'Auto', next: 'dark', describe: 'follows your device' },
+  { id: 'dark', icon: '🌙', label: 'Dark', next: 'light', describe: 'dark' },
+  { id: 'light', icon: '☀️', label: 'Light', next: 'auto', describe: 'light' },
+];
+function currentTheme() {
+  const t = document.documentElement.dataset.theme;
+  return t === 'dark' || t === 'light' ? t : 'auto';
+}
+function applyTheme(id) {
+  if (id === 'auto') delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = id;
+  try { if (id === 'auto') localStorage.removeItem('sellHub.theme'); else localStorage.setItem('sellHub.theme', id); } catch { /* per-browser preference only */ }
+  const step = THEME_STEPS.find(s => s.id === id);
+  const next = THEME_STEPS.find(s => s.id === step.next);
+  const btn = document.getElementById('themeToggle');
+  if (!btn) return;
+  btn.querySelector('.theme-icon').textContent = step.icon;
+  btn.querySelector('.theme-label').textContent = step.label;
+  btn.setAttribute('aria-label', `Theme: ${step.describe}. Switch to ${next.label.toLowerCase()}.`);
+}
+document.getElementById('themeToggle').addEventListener('click', () => {
+  applyTheme(THEME_STEPS.find(s => s.id === currentTheme()).next);
+});
+applyTheme(currentTheme());
+
+// ---------------------------------------------------------------------
 // Inventory — mode switch (wheel vs list)
 // ---------------------------------------------------------------------
 document.querySelectorAll('#modeSwitch button').forEach(btn => {
@@ -566,8 +620,13 @@ function itemDetailHTML(item) {
 
   const soldForm = !isSold(item) ? `
     <div class="mark-sold-row">
-      <input type="text" class="ms-price" placeholder="Sold price">
-      <input type="text" class="ms-buyer" placeholder="Buyer (optional)">
+      <input type="text" class="ms-price" placeholder="Sold price" aria-label="Sold price" inputmode="decimal">
+      <select class="ms-platform" aria-label="Sold on">
+        <option value="">Sold on…</option>
+        ${soldOnOptionsHTML(item)}
+      </select>
+      <input type="text" class="ms-net" placeholder="You kept (optional)" aria-label="Net cash you kept, after fees and shipping" inputmode="decimal">
+      <input type="text" class="ms-buyer" placeholder="Buyer (optional)" aria-label="Buyer">
       <button class="btn secondary ms-submit" data-id="${item.itemId}" data-source="${escapeHtml(item.sourceTab || '')}">Mark sold</button>
     </div>
     <div class="status-msg ms-status"></div>
@@ -594,17 +653,26 @@ async function markSold(btn, onChange) {
   const status = card.querySelector('.ms-status');
   const price = card.querySelector('.ms-price').value.trim();
   const buyer = card.querySelector('.ms-buyer').value.trim();
+  const platformLabel = card.querySelector('.ms-platform').value;
+  const netRaw = card.querySelector('.ms-net').value.trim();
   const itemId = btn.dataset.id;
   const sourceTab = btn.dataset.source;
   if (!price) { status.textContent = 'Enter a sold price.'; return; }
+  if (!platformLabel) { status.textContent = 'Pick the site it sold on, so Stats can total it.'; return; }
   if (!connected()) { status.textContent = 'Connect your Sheet to mark items sold — see SETUP.md.'; return; }
 
   status.textContent = 'Saving...';
   try {
-    const res = await apiPost('markSold', { itemId, sourceTab, soldPrice: price, buyer });
+    const netCash = netRaw ? parseMoney(netRaw) : '';
+    const res = await apiPost('markSold', { itemId, sourceTab, soldPrice: parseMoney(price), buyer, platform: platformLabel, netCash, dateSold: todayStr() });
     if (!res || !res.ok) { status.textContent = (res && res.error) || 'Could not find that row in the Sheet.'; return; }
     const item = state.inventory.find(i => i.itemId === itemId);
-    if (item) { item.sourceStatus = 'Sold'; item.soldPrice = price; item.buyer = buyer; }
+    if (item) { item.sourceStatus = 'Sold'; item.soldPrice = parseMoney(price); item.buyer = buyer; if (netCash !== '') item.netCash = netCash; }
+    const saleId = `${platformId(platformLabel) || 'other'}-${itemId}`;
+    state.sales = state.sales.filter(sl => sl.saleId !== saleId).concat([{
+      saleId, itemId, item: item ? [item.brand, item.item].filter(Boolean).join(' ') : itemId, platform: platformLabel,
+      salePrice: parseMoney(price), netCash, dateSold: todayStr(), source: 'Marked sold on site',
+    }]);
     await recordItemAction(itemId, 'Sold', price);
     status.textContent = 'Marked sold.';
     onChange();
@@ -753,7 +821,195 @@ function renderList() {
 function renderStats() {
   document.getElementById('statsSetupNote').style.display = connected() ? 'none' : 'block';
   renderOverallTiles();
+  renderSalesBySite();
   renderPlatformCards();
+}
+
+// ---------------------------------------------------------------------
+// Sales by site — sale amount, what was kept, and the cash each site holds.
+// Sales rows are the source of truth; a sold item with no Sales row still
+// shows up (as "not recorded by site") so nothing silently drops out.
+// ---------------------------------------------------------------------
+async function loadSalesData() {
+  if (!connected()) { state.sales = []; state.balances = []; return; }
+  try {
+    const bundle = await apiGetWithRetry('salesBundle');
+    state.sales = (bundle && bundle.sales) || [];
+    state.balances = (bundle && bundle.balances) || [];
+  } catch {
+    state.sales = [];
+    state.balances = [];
+  }
+}
+
+function soldOnOptionsHTML(item) {
+  const ids = new Set(splitPlatforms(item.platform).map(platformId).filter(Boolean));
+  const ordered = PLATFORM_ORDER.filter(id => ids.has(id)).concat(PLATFORM_ORDER.filter(id => !ids.has(id)));
+  return ordered.map(id => `<option value="${escapeHtml(PLATFORM_META[id].label)}">${escapeHtml(PLATFORM_META[id].label)}</option>`).join('');
+}
+
+function money2(n) {
+  if (n === null || n === undefined || n === '' || !Number.isFinite(Number(n))) return '—';
+  const v = Number(n);
+  return (v < 0 ? '−$' : '$') + Math.abs(v).toFixed(2);
+}
+// A deduction: "−$6.11", or plain "$0.00" when nothing was taken out.
+function minusMoney(n) {
+  const v = Math.abs(Number(n) || 0);
+  return v ? '−$' + v.toFixed(2) : '$0.00';
+}
+function saleNumber(v) {
+  if (v === '' || v === null || v === undefined) return null;
+  const n = Number(String(v).replace(/[$,]/g, ''));
+  return Number.isFinite(n) ? n : null;
+}
+
+// Latest balance snapshot per site.
+function latestBalancesBySite() {
+  const latest = new Map();
+  state.balances.forEach(b => {
+    const id = platformId(b.platform) || String(b.platform || '').toLowerCase();
+    const date = String(b.date || '').slice(0, 10);
+    if (!latest.has(id) || date >= latest.get(id).date) latest.set(id, { ...b, date });
+  });
+  return latest;
+}
+
+function salesBySite() {
+  const sites = new Map();
+  const ensure = label => {
+    const meta = platformMeta(label);
+    if (!sites.has(meta.id)) sites.set(meta.id, { meta, sales: [], salePrice: 0, shippingCharged: 0, fees: 0, labels: 0, net: 0, netKnown: 0, inPerson: 0 });
+    return sites.get(meta.id);
+  };
+  state.sales.forEach(sale => {
+    const site = ensure(sale.platform);
+    site.sales.push(sale);
+    site.salePrice += saleNumber(sale.salePrice) || 0;
+    site.shippingCharged += saleNumber(sale.shippingCharged) || 0;
+    site.fees += saleNumber(sale.platformFees) || 0;
+    site.labels += saleNumber(sale.shippingLabel) || 0;
+    const net = saleNumber(sale.netCash);
+    if (net !== null) { site.net += net; site.netKnown++; }
+    if (/in person/i.test(String(sale.fundsStatus || '')) && net !== null) site.inPerson += net;
+  });
+  const balances = latestBalancesBySite();
+  balances.forEach((b, id) => { if (!sites.has(id)) ensure(b.platform); });
+  sites.forEach((site, id) => { site.balance = balances.get(id) || null; });
+  return [...sites.values()].sort((a, b) => platformRank(a.meta.id) - platformRank(b.meta.id) || a.meta.label.localeCompare(b.meta.label));
+}
+
+function renderSalesBySite() {
+  const totalsEl = document.getElementById('salesTotals');
+  const cardsEl = document.getElementById('salesCards');
+  if (!totalsEl || !cardsEl) return;
+  const sites = salesBySite();
+  const recordedIds = new Set(state.sales.map(sl => String(sl.itemId)));
+  const unrecorded = state.inventory.filter(it => isSold(it) && !recordedIds.has(String(it.itemId)));
+
+  const sum = key => sites.reduce((acc, site) => acc + site[key], 0);
+  const saleAmount = sum('salePrice');
+  const shipping = sum('shippingCharged');
+  const costs = sum('fees') + sum('labels');
+  const net = sum('net');
+  const inPerson = sum('inPerson');
+  const withBalance = sites.filter(site => site.balance);
+  const available = withBalance.reduce((acc, site) => acc + (saleNumber(site.balance.available) || 0), 0);
+  const pending = withBalance.reduce((acc, site) => acc + (saleNumber(site.balance.pending) || 0), 0);
+  const orderTotal = saleAmount + shipping;
+
+  const tiles = [
+    { num: state.sales.length, lbl: 'Sales recorded', sub: unrecorded.length ? `${unrecorded.length} sold item${unrecorded.length === 1 ? '' : 's'} not recorded` : '' },
+    { num: money2(saleAmount), lbl: 'Sale amount', sub: shipping ? `+ ${money2(shipping)} shipping charged` : '' },
+    { num: minusMoney(costs), lbl: 'Fees & labels' },
+    { num: money2(net), lbl: 'Net cash kept', sub: orderTotal ? `${Math.round((net / orderTotal) * 100)}% of what buyers paid` : '' },
+    { num: withBalance.length ? money2(available) : '—', lbl: 'Available on sites', sub: inPerson ? `+ ${money2(inPerson)} paid in person` : '', negative: available < 0 },
+    { num: withBalance.length ? money2(pending) : '—', lbl: 'Pending / on hold' },
+  ];
+  totalsEl.innerHTML = tiles.map(t => `
+    <div class="stat-tile${t.negative ? ' negative' : ''}"><div class="num">${t.num}</div><div class="lbl">${t.lbl}</div>${t.sub ? `<div class="sub">${escapeHtml(t.sub)}</div>` : ''}</div>
+  `).join('');
+
+  if (!sites.length && !unrecorded.length) {
+    cardsEl.innerHTML = '<div class="empty-state">No sales yet.</div>';
+    return;
+  }
+
+  const saleLine = sale => {
+    const netVal = saleNumber(sale.netCash);
+    return `
+      <li>
+        <b title="${escapeHtml(sale.item || sale.itemId)}">${escapeHtml(sale.item || sale.itemId)}</b>
+        <span class="sl-money">${money2(saleNumber(sale.salePrice))} → ${netVal === null ? '<span title="Net not recorded">—</span>' : money2(netVal)}</span>
+        <small${sale.notes ? ' class="flag"' : ''}>${escapeHtml([String(sale.dateSold || '').slice(0, 10), sale.fundsStatus, sale.notes].filter(Boolean).join(' · '))}</small>
+      </li>`;
+  };
+
+  const cards = sites.map(site => {
+    const orderPaid = site.salePrice + site.shippingCharged;
+    const b = site.balance;
+    const availableVal = b ? saleNumber(b.available) : null;
+    const cash = b ? `
+      <div class="sales-cash">
+        <div class="prow avail${availableVal !== null && availableVal < 0 ? ' negative' : ''}"><span>Available cash</span><b>${money2(availableVal)}</b></div>
+        <div class="prow"><span>Pending / on hold</span><b>${money2(saleNumber(b.pending))}</b></div>
+        <div class="sales-cash-note">As of ${escapeHtml(String(b.date).slice(0, 10))}${b.notes ? ' · ' + escapeHtml(b.notes) : ''}</div>
+      </div>` : site.inPerson ? `
+      <div class="sales-cash">
+        <div class="prow avail"><span>Cash in hand</span><b>${money2(site.inPerson)}</b></div>
+        <div class="sales-cash-note">Paid in person — no site balance to withdraw.</div>
+      </div>` : `
+      <div class="sales-cash">
+        <div class="prow avail"><span>Available cash</span><b>—</b></div>
+        <div class="sales-cash-note">Not checked yet — use “Update available cash” below.</div>
+      </div>`;
+    return `
+      <div class="platform-card sales-card" style="--plat:${site.meta.color}">
+        <h4>${escapeHtml(site.meta.label)}<span class="sales-count">${site.sales.length} sold</span></h4>
+        <div class="prow"><span>Sale amount</span><b>${money2(site.salePrice)}</b></div>
+        ${site.shippingCharged ? `<div class="prow"><span>Shipping charged to buyers</span><b>${money2(site.shippingCharged)}</b></div>` : ''}
+        <div class="prow minus"><span>Platform fees</span><b>${minusMoney(site.fees)}</b></div>
+        <div class="prow minus"><span>Shipping labels</span><b>${minusMoney(site.labels)}</b></div>
+        <div class="prow net"><span>Net cash kept</span><b>${site.netKnown ? money2(site.net) : '—'}</b></div>
+        ${site.netKnown && orderPaid ? `<div class="sales-keep">${Math.round((site.net / orderPaid) * 100)}% of what buyers paid${site.netKnown < site.sales.length ? ` · ${site.sales.length - site.netKnown} without a net amount` : ''}</div>` : ''}
+        ${cash}
+        ${site.sales.length ? `<ul class="sales-list">${site.sales.slice().sort((a, b) => String(b.dateSold).localeCompare(String(a.dateSold))).map(saleLine).join('')}</ul>` : ''}
+      </div>`;
+  });
+  if (unrecorded.length) {
+    cards.push(`
+      <div class="platform-card sales-card unrecorded">
+        <h4>Not recorded by site<span class="sales-count">${unrecorded.length}</span></h4>
+        <div class="sales-cash-note">Marked sold in the inventory, but there's no Sales row saying which site it sold on, so it isn't in the totals above.</div>
+        <ul class="sales-list">${unrecorded.map(it => `
+          <li><b>${escapeHtml([it.brand, it.item].filter(Boolean).join(' ') || it.itemId)}</b><span class="sl-money">${money2(saleNumber(it.soldPrice))}</span></li>`).join('')}</ul>
+      </div>`);
+  }
+  cardsEl.innerHTML = cards.join('');
+}
+
+async function saveBalance() {
+  const status = document.getElementById('balanceStatus');
+  const platform = document.getElementById('balancePlatform').value;
+  const available = document.getElementById('balanceAvailable').value.trim();
+  const pending = document.getElementById('balancePending').value.trim();
+  const notes = document.getElementById('balanceNotes').value.trim();
+  if (available === '') { status.textContent = 'Enter the available amount (0 is fine).'; return; }
+  if (!connected()) { status.textContent = 'Connect your Sheet to save cash balances — see SETUP.md.'; return; }
+  const row = { date: todayStr(), platform, available: Number(available), pending: pending === '' ? '' : Number(pending), notes, source: 'Entered on site' };
+  status.textContent = 'Saving…';
+  try {
+    const res = await apiPost('setBalances', { rows: [row] });
+    if (!res || !res.ok) throw new Error('not saved');
+  } catch {
+    status.textContent = "Couldn't confirm the save — it may still have landed. Reload to check.";
+    return;
+  }
+  state.balances = state.balances.filter(b => !(String(b.date).slice(0, 10) === row.date && platformId(b.platform) === platformId(platform))).concat([row]);
+  ['balanceAvailable', 'balancePending', 'balanceNotes'].forEach(id => { document.getElementById(id).value = ''; });
+  status.textContent = 'Saved.';
+  setTimeout(() => { status.textContent = ''; }, 1500);
+  renderSalesBySite();
 }
 
 function renderOverallTiles() {
@@ -761,7 +1017,9 @@ function renderOverallTiles() {
   const listed = items.filter(it => !isSold(it)).length;
   const sold = items.filter(isSold).length;
   const estValue = items.filter(it => !isSold(it)).reduce((s, it) => s + parseMoney(it.estValue), 0);
-  const netCash = items.filter(isSold).reduce((s, it) => s + parseMoney(it.netCash || it.soldPrice), 0);
+  // Prefer what the site actually paid out (Sales tab) over the inventory's Net cash column.
+  const netBySale = new Map(state.sales.filter(sl => saleNumber(sl.netCash) !== null).map(sl => [String(sl.itemId), saleNumber(sl.netCash)]));
+  const netCash = items.filter(isSold).reduce((s, it) => s + (netBySale.has(String(it.itemId)) ? netBySale.get(String(it.itemId)) : parseMoney(it.netCash || it.soldPrice)), 0);
   const tiles = [
     { num: items.length, lbl: 'Total items' },
     { num: listed, lbl: 'Listed' },
@@ -1765,6 +2023,16 @@ async function addMetricEntry() {
   setTimeout(() => status.textContent = '', 1500);
 }
 document.getElementById('addMetricBtn').addEventListener('click', addMetricEntry);
+document.getElementById('balancePlatform').innerHTML = PLATFORM_ORDER.map(id => `<option value="${escapeHtml(PLATFORM_META[id].label)}">${escapeHtml(PLATFORM_META[id].label)}</option>`).join('');
+document.getElementById('balanceAddToggle').addEventListener('click', () => {
+  const panel = document.getElementById('balanceAddPanel');
+  const open = panel.style.display !== 'none';
+  panel.style.display = open ? 'none' : '';
+  const toggle = document.getElementById('balanceAddToggle');
+  toggle.textContent = open ? '+ Update available cash' : '− Close';
+  toggle.setAttribute('aria-expanded', String(!open));
+});
+document.getElementById('saveBalanceBtn').addEventListener('click', saveBalance);
 
 // Acquire (sourcing intelligence, hunt list CRUD) lives in js/acquire.js,
 // with its assumptions in js/acquire-config.js and its math in
@@ -1789,6 +2057,7 @@ state.featuredActions = new Set(localGet('sellHub.featuredActions', []));
 renderAction();
 populateMetricForm();
 
+loadSalesData().then(renderStats);
 Promise.all([loadInventory(), loadDescriptionsData(), loadPostingQueueData(), loadMetricsData(), loadPhotosData(), loadItemActionsData()]).then(() => {
   state.loadedAt = new Date().toISOString();
   renderWheel();

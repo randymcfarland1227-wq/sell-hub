@@ -73,6 +73,7 @@ function doGet(e) {
   if (action === 'marketHistory') return jsonOut(getMarketHistory());
   if (action === 'sourcingIntel') return jsonOut(getSourcingIntel());
   if (action === 'acquireBundle') return jsonOut(getAcquireBundle());
+  if (action === 'salesBundle') return jsonOut(getSalesBundle());
   if (action === 'itemActions') return jsonOut(getItemActions());
   if (action === 'debugHeaders') return jsonOut(debugHeaders());
   if (action === 'debugRows') return jsonOut(debugRows(e.parameter.sheet, Number(e.parameter.start) || 1, Number(e.parameter.n) || 20));
@@ -138,6 +139,8 @@ function doPost(e) {
   if (action === 'setTrendEbayData') return jsonOut(setTrendEbayData(body));
   if (action === 'setMarketObservations') return jsonOut(setMarketObservations(body));
   if (action === 'upsertSourcingIntel') return jsonOut(upsertSourcingIntel(body));
+  if (action === 'upsertSales') return jsonOut(upsertSales(body));
+  if (action === 'setBalances') return jsonOut(setBalances(body));
   if (action === 'runMaintenance') return jsonOut(runMaintenance(body.task));
   if (action === 'debugPoshmark') return jsonOut(debugPoshmark(body.query));
   if (action === 'dropListingPrice') return jsonOut(dropListingPrice(body));
@@ -767,7 +770,17 @@ function markSold(body) {
   if (statusCol !== -1) sourceSheet.getRange(row, statusCol + 1).setValue('Sold');
   if (soldPriceCol !== -1) sourceSheet.getRange(row, soldPriceCol + 1).setValue(body.soldPrice || '');
   if (buyerCol !== -1 && body.buyer) sourceSheet.getRange(row, buyerCol + 1).setValue(body.buyer);
+  var netCashCol = colIndex(srcHeader.colMap, 'Net cash');
+  if (netCashCol !== -1 && body.netCash !== undefined && body.netCash !== '') sourceSheet.getRange(row, netCashCol + 1).setValue(Number(body.netCash));
 
+  // Where it sold goes to the Sales sheet, so Stats can total each site.
+  if (body.platform) {
+    upsertSales({ rows: [{
+      itemId: itemId, platform: body.platform, salePrice: body.soldPrice,
+      netCash: body.netCash === undefined ? '' : body.netCash, dateSold: body.dateSold || todayIso(),
+      source: 'Marked sold on site',
+    }] });
+  }
   return { ok: true };
 }
 
@@ -1545,6 +1558,142 @@ function upsertMarketObservations(observations) {
 
 function setMarketObservations(body) {
   return upsertMarketObservations(body.observations || [body]);
+}
+
+// ---------------------------------------------------------------------
+// Sales and platform balances — what each site sold for, what you kept,
+// and the cash each site is holding. Sales: one row per sale. Platform
+// Balances: one snapshot per day per site (available vs. pending), so the
+// Stats tab shows the latest and older ones stay as a record.
+// ---------------------------------------------------------------------
+
+var SALES_SHEET_NAME = 'Sales';
+var SALES_HEADERS = [
+  'Sale ID', 'Date Sold', 'Item ID', 'Item', 'Platform', 'Sale Price', 'Shipping Charged', 'Order Total',
+  'Platform Fees', 'Shipping Label', 'Net Cash', 'Funds Status', 'Order ID', 'Source', 'Notes', 'Last Updated',
+];
+var SALES_FIELD_HEADERS = {
+  saleId: 'Sale ID', dateSold: 'Date Sold', itemId: 'Item ID', item: 'Item', platform: 'Platform',
+  salePrice: 'Sale Price', shippingCharged: 'Shipping Charged', orderTotal: 'Order Total', platformFees: 'Platform Fees',
+  shippingLabel: 'Shipping Label', netCash: 'Net Cash', fundsStatus: 'Funds Status', orderId: 'Order ID',
+  source: 'Source', notes: 'Notes',
+};
+
+var BALANCES_SHEET_NAME = 'Platform Balances';
+var BALANCES_HEADERS = ['Date', 'Platform', 'Available', 'Pending', 'Source', 'Notes'];
+
+function salesPlatformKey(platform) {
+  var p = String(platform || '').toLowerCase();
+  if (p.indexOf('ebay') !== -1) return 'ebay';
+  if (p.indexOf('posh') !== -1) return 'poshmark';
+  if (p.indexOf('facebook') !== -1 || p.indexOf('marketplace') !== -1) return 'facebook';
+  if (p.indexOf('depop') !== -1) return 'depop';
+  if (p.indexOf('grailed') !== -1) return 'grailed';
+  if (p.indexOf('mercari') !== -1) return 'mercari';
+  return opportunityIdFor(p);
+}
+
+function getSalesSheet() { return getOrCreateSheet(SALES_SHEET_NAME, SALES_HEADERS); }
+function getBalancesSheet() { return getOrCreateSheet(BALANCES_SHEET_NAME, BALANCES_HEADERS); }
+
+function numOrBlank(v) {
+  if (v === '' || v === null || v === undefined) return '';
+  var n = Number(String(v).replace(/[$,]/g, ''));
+  return isNaN(n) ? '' : n;
+}
+
+function getSales() {
+  return readRecords(getSalesSheet()).filter(function (r) { return r['Sale ID']; }).map(function (r) {
+    var out = {};
+    Object.keys(SALES_FIELD_HEADERS).forEach(function (k) { out[k] = r[SALES_FIELD_HEADERS[k]]; });
+    out.lastUpdated = r['Last Updated'];
+    return out;
+  });
+}
+
+function getBalances() {
+  return readRecords(getBalancesSheet()).filter(function (r) { return r['Platform']; }).map(function (r) {
+    return { date: r['Date'], platform: r['Platform'], available: r['Available'], pending: r['Pending'], source: r['Source'], notes: r['Notes'] };
+  });
+}
+
+function getSalesBundle() {
+  return { sales: getSales(), balances: getBalances() };
+}
+
+// Upserts sales by Sale ID (defaults to "<site>-<order id>" or "<site>-<item id>",
+// so marking the same item sold twice on the same site never double-counts).
+// syncInventory: also writes Sold price and Net cash back to the item's row in
+// its source tab, keeping the inventory in step with what the site paid out.
+function upsertSales(body) {
+  var today = todayIso();
+  var records = (body.rows || []).map(function (row) {
+    var key = salesPlatformKey(row.platform);
+    var rec = {};
+    Object.keys(SALES_FIELD_HEADERS).forEach(function (k) {
+      if (!Object.prototype.hasOwnProperty.call(row, k)) return;
+      var money = ['salePrice', 'shippingCharged', 'orderTotal', 'platformFees', 'shippingLabel', 'netCash'].indexOf(k) !== -1;
+      rec[SALES_FIELD_HEADERS[k]] = money ? numOrBlank(row[k]) : row[k];
+    });
+    rec['Sale ID'] = row.saleId || (key + '-' + (row.orderId || row.itemId || ''));
+    rec['Last Updated'] = today;
+    return rec;
+  }).filter(function (rec) { return rec['Sale ID'] && !/-$/.test(rec['Sale ID']); });
+  if (!records.length) return { ok: false, error: 'No sales with a platform and an item or order ID.' };
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  var res;
+  try {
+    res = upsertRecords(getSalesSheet(), SALES_HEADERS, records, function (get) { return String(get('Sale ID') || ''); });
+  } finally {
+    lock.releaseLock();
+  }
+
+  var synced = [];
+  if (body.syncInventory) {
+    var hub = readTable(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(LISTING_HUB_SHEET), ['Item ID']);
+    (body.rows || []).forEach(function (row) {
+      if (!row.itemId) return;
+      var hubRow = hub.rows.filter(function (r) { return String(val(r, hub.colMap, 'Item ID')) === String(row.itemId); })[0];
+      if (!hubRow) return;
+      var located = findSourceRow(row.itemId, val(hubRow, hub.colMap, 'Source tab'));
+      if (located.error) return;
+      var header = findHeaderRow(located.sourceSheet, ['Status']);
+      if (!header) return;
+      var soldCol = colIndex(header.colMap, 'Sold price');
+      var netCol = colIndex(header.colMap, 'Net cash');
+      if (soldCol !== -1 && numOrBlank(row.salePrice) !== '') located.sourceSheet.getRange(located.row, soldCol + 1).setValue(numOrBlank(row.salePrice));
+      if (netCol !== -1 && numOrBlank(row.netCash) !== '') located.sourceSheet.getRange(located.row, netCol + 1).setValue(numOrBlank(row.netCash));
+      synced.push(row.itemId);
+    });
+  }
+  return { ok: true, updated: res.updated, added: res.added, syncedInventory: synced };
+}
+
+// One snapshot per day per site; re-sending the same day replaces it.
+function setBalances(body) {
+  var today = todayIso();
+  var records = (body.rows || [body]).filter(function (row) { return row.platform; }).map(function (row) {
+    return {
+      'Date': row.date || today, 'Platform': row.platform,
+      'Available': numOrBlank(row.available), 'Pending': numOrBlank(row.pending),
+      'Source': row.source || 'Entered on site', 'Notes': row.notes || '',
+    };
+  });
+  if (!records.length) return { ok: false, error: 'No balance rows with a platform.' };
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    var res = upsertRecords(getBalancesSheet(), BALANCES_HEADERS, records, function (get) {
+      var d = get('Date');
+      if (Object.prototype.toString.call(d) === '[object Date]') d = formatDate(d);
+      return get('Platform') ? d + '|' + salesPlatformKey(get('Platform')) : '';
+    });
+    return { ok: true, updated: res.updated, added: res.added };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // Kept for the original manual eBay pull, which sends one term at a time.

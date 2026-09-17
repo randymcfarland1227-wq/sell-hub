@@ -28,8 +28,32 @@
   --neutral-bg: color-mix(in srgb, var(--text-faint) 12%, var(--bg-card));
 }
 
+/* Dark theme: follows the device unless a theme is chosen in the header
+   (data-theme on <html>, saved per browser). */
+:root { color-scheme: light; }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #08111f;
+  --bg-elevated: #0f1b2d;
+  --bg-card: #142238;
+  --border: #2a3b53;
+  --text: #f5f8fc;
+  --text-muted: #b9c5d6;
+  --text-faint: #8fa0b6;
+  --gold: #ff8064;
+  --gold-deep: #ff9b84;
+  --primary: #7290ff;
+  --header-bg: #071221;
+  --header-bg-2: #102a4a;
+  --header-text: #ffffff;
+  --shadow: 0 1px 2px rgba(0,0,0,0.4), 0 18px 36px -18px rgba(0,0,0,0.75);
+  --good: #4fd1a8;
+  --warn: #f0b55a;
+  --bad: #ff8a95;
+}
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
     --bg: #08111f;
     --bg-elevated: #0f1b2d;
     --bg-card: #142238;
@@ -107,6 +131,20 @@ header.top {
   font-size: 2rem;
   color: var(--header-text);
   letter-spacing: -0.045em;
+}
+.top-actions { display: flex; align-items: center; gap: 12px; }
+.theme-toggle {
+  appearance: none; font: inherit; font-size: .74rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 5px 12px; cursor: pointer;
+  border-radius: 999px; border: 1px solid color-mix(in srgb, var(--header-text) 30%, transparent);
+  background: color-mix(in srgb, var(--header-text) 8%, transparent); color: var(--header-text);
+}
+.theme-toggle:hover { background: color-mix(in srgb, var(--header-text) 16%, transparent); }
+.theme-toggle:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+.theme-toggle .theme-icon { font-size: .95rem; letter-spacing: 0; }
+@media (max-width: 480px) {
+  .theme-toggle { padding: 5px 9px; }
+  .theme-toggle .theme-label { display: none; }
 }
 .top-inner .date {
   font-size: 0.72rem;
@@ -645,6 +683,30 @@ details.cat-section:not([open]) { margin-bottom: 14px; }
 .platform-bar { height: 6px; border-radius: 999px; background: var(--border); overflow: hidden; margin-top: 9px; }
 .platform-bar-fill { height: 100%; background: var(--plat); border-radius: 999px; }
 .platform-bar-label { font-size: 0.66rem; color: var(--text-faint); margin-top: 5px; text-transform: uppercase; letter-spacing: 0.03em; }
+
+/* ---------- Sales by site ---------- */
+
+.sales-cards { grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); }
+.sales-card .sales-count { font-size: .72rem; font-weight: 700; color: var(--text-faint); margin-left: 6px; font-family: 'DM Sans', sans-serif; }
+.sales-card .prow.minus b { color: var(--text-muted); font-weight: 600; }
+.sales-card .prow.net { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); font-size: .86rem; }
+.sales-card .prow.net b { font-family: 'Space Grotesk', sans-serif; font-size: 1.15rem; color: var(--good); }
+.sales-keep { font-size: .68rem; color: var(--text-faint); text-align: right; margin: -2px 0 8px; }
+.sales-cash { margin-top: 10px; padding: 10px 11px; border-radius: var(--radius-sm); background: var(--bg-elevated); border: 1px solid var(--border); }
+.sales-cash .prow { margin-bottom: 3px; }
+.sales-cash .prow.avail b { font-family: 'Space Grotesk', sans-serif; font-size: 1.1rem; }
+.sales-cash .prow.avail.negative b { color: var(--bad); }
+.sales-cash-note { font-size: .7rem; color: var(--text-faint); line-height: 1.35; margin-top: 4px; }
+.sales-list { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; }
+.sales-list li { font-size: .74rem; color: var(--text-muted); display: grid; grid-template-columns: 1fr auto; gap: 1px 8px; }
+.sales-list li b { color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sales-list li span.sl-money { text-align: right; white-space: nowrap; }
+.sales-list li small { grid-column: 1 / -1; color: var(--text-faint); font-size: .68rem; }
+.sales-list li small.flag { color: var(--warn); }
+.sales-card.unrecorded { --plat: var(--text-faint); border-left-style: dashed; }
+.stat-tile.negative .num { color: var(--bad); }
+.stat-tile .sub { font-size: .66rem; color: var(--text-faint); margin-top: 2px; }
+.mark-sold-row select { font: inherit; font-size: 0.8rem; padding: 7px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text); }
 
 /* ---------- Pricing actions ---------- */
 

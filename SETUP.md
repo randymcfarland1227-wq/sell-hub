@@ -81,3 +81,12 @@ Acquire is built from four Sheet tabs, each holding a different kind of informat
 ## Editing categories/platforms
 
 `js/data.js` holds icon/color lookups for categories and platforms (`CATEGORY_META`, `PLATFORM_META`) — edit directly to add a brand-new platform or give a category a specific icon. Categories you never add there still work; they just get an automatically-assigned color and a generic 📦 icon. Everything else (actual inventory, descriptions, stats, acquire list) lives in the Sheet, not in this file.
+
+## 5. Sales by site (Stats tab)
+
+Two Sheet tabs, both created automatically:
+
+- **Sales** — one row per sale: site, sale price, shipping charged, platform fees, shipping label, **net cash** (what you kept) and funds status. Marking an item sold on the site asks where it sold and (optionally) what you kept, and writes this row. Real fees and earnings come from each site's order page (eBay: Seller Hub → Orders → order details; Poshmark: My Sales), so ask Claude to pull them when you want exact numbers.
+- **Platform Balances** — one snapshot per day per site of **available** cash (ready to withdraw) and **pending / on hold**. Update it from Stats → "Update available cash", or ask Claude to read eBay's financial summary and Poshmark's My Balance.
+
+A sold item with no Sales row shows under "Not recorded by site" instead of disappearing from the totals.
