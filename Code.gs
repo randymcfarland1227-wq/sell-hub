@@ -70,6 +70,9 @@ function doGet(e) {
   if (action === 'acquire') return jsonOut(getAcquire());
   if (action === 'photos') return jsonOut(getPhotos());
   if (action === 'trends') return jsonOut(getTrends());
+  if (action === 'marketHistory') return jsonOut(getMarketHistory());
+  if (action === 'sourcingIntel') return jsonOut(getSourcingIntel());
+  if (action === 'acquireBundle') return jsonOut(getAcquireBundle());
   if (action === 'itemActions') return jsonOut(getItemActions());
   if (action === 'debugHeaders') return jsonOut(debugHeaders());
   if (action === 'debugRows') return jsonOut(debugRows(e.parameter.sheet, Number(e.parameter.start) || 1, Number(e.parameter.n) || 20));
@@ -133,6 +136,8 @@ function doPost(e) {
   if (action === 'setPhoto') return jsonOut(setPhoto(body));
   if (action === 'setAcquireEbayData') return jsonOut(setAcquireEbayData(body));
   if (action === 'setTrendEbayData') return jsonOut(setTrendEbayData(body));
+  if (action === 'setMarketObservations') return jsonOut(setMarketObservations(body));
+  if (action === 'upsertSourcingIntel') return jsonOut(upsertSourcingIntel(body));
   if (action === 'runMaintenance') return jsonOut(runMaintenance(body.task));
   if (action === 'debugPoshmark') return jsonOut(debugPoshmark(body.query));
   if (action === 'dropListingPrice') return jsonOut(dropListingPrice(body));
@@ -562,56 +567,80 @@ function addMetricEntry(body) {
 // Acquire Watchlist — new tab, auto-created. Full CRUD from the site.
 // ---------------------------------------------------------------------
 
+// Columns after Image URL were added for the Hunt List; older rows simply
+// have them blank. Apparel fields (Size, Color) stay but are optional now.
 var ACQUIRE_HEADERS = [
   'ID', 'Brand', 'Item Type', 'Size', 'Color', 'Condition', 'Target Price', 'Best Platform', 'Priority', 'Notes', 'Date Added',
   'eBay Avg Price', 'eBay Sales Found', 'Poshmark Avg Price', 'Poshmark Sales Found', 'Last Checked',
   'eBay Sell-Through %', 'Image URL',
+  'Category', 'Subcategory', 'Model', 'Target Variant', 'Desired Profit', 'Where To Find', 'Inspection Notes',
+  'Opportunity ID',
 ];
 
+// Hunt List fields as the site sends them -> sheet header.
+var ACQUIRE_FIELD_HEADERS = {
+  brand: 'Brand', itemType: 'Item Type', size: 'Size', color: 'Color', condition: 'Condition',
+  targetPrice: 'Target Price', bestPlatform: 'Best Platform', priority: 'Priority', notes: 'Notes',
+  category: 'Category', subcategory: 'Subcategory', model: 'Model', targetVariant: 'Target Variant',
+  desiredProfit: 'Desired Profit', whereToFind: 'Where To Find', inspectionNotes: 'Inspection Notes',
+  opportunityId: 'Opportunity ID',
+};
+
+// Poshmark only has meaningful sold comps for fashion, so a Hunt List entry for
+// a camcorder or a drill doesn't get a (misleading) Poshmark lookup.
+var FASHION_CATEGORIES = ['fashion', 'outerwear', 'shirts', 'pants', 'shoes', 'bags', 'accessories', 'designer', 'vintage clothing'];
+function isFashionCategory(category, subcategory) {
+  var c = String(category || '').trim().toLowerCase();
+  var sub = String(subcategory || '').trim().toLowerCase();
+  if (!c && !sub) return true; // entries from before categories existed were all apparel
+  return FASHION_CATEGORIES.indexOf(c) !== -1 || FASHION_CATEGORIES.indexOf(sub) !== -1;
+}
+
 function getAcquireSheet() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(ACQUIRE_SHEET_NAME);
-  if (!sheet) {
-    sheet = ss.insertSheet(ACQUIRE_SHEET_NAME);
-    sheet.appendRow(ACQUIRE_HEADERS);
-    sheet.setFrozenRows(1);
-  } else if (sheet.getLastColumn() < ACQUIRE_HEADERS.length) {
-    // Appends any newly-added header columns (e.g. Image URL) without
-    // touching existing rows/columns — safe as long as new columns are
-    // always added at the end, never inserted in the middle.
-    sheet.getRange(1, 1, 1, ACQUIRE_HEADERS.length).setValues([ACQUIRE_HEADERS]);
-  }
-  return sheet;
+  return getOrCreateSheet(ACQUIRE_SHEET_NAME, ACQUIRE_HEADERS);
 }
 
 function getAcquire() {
-  var sheet = getAcquireSheet();
-  var data = sheet.getDataRange().getValues();
-  var out = [];
-  for (var r = 1; r < data.length; r++) {
-    if (!data[r][0]) continue;
-    out.push({
-      id: data[r][0],
-      brand: data[r][1],
-      itemType: data[r][2],
-      size: data[r][3],
-      color: data[r][4],
-      condition: data[r][5],
-      targetPrice: data[r][6],
-      bestPlatform: data[r][7],
-      priority: data[r][8],
-      notes: data[r][9],
-      dateAdded: formatDate(data[r][10]),
-      ebayAvgPrice: data[r][11] || '',
-      ebaySalesFound: data[r][12] || '',
-      poshmarkAvgPrice: data[r][13] || '',
-      poshmarkSalesFound: data[r][14] || '',
-      lastChecked: formatDate(data[r][15]),
-      ebaySellThrough: data[r][16] || '',
-      imageUrl: data[r][17] || '',
-    });
-  }
-  return out;
+  return readRecords(getAcquireSheet()).filter(function (r) { return r['ID']; }).map(function (r) {
+    return {
+      id: r['ID'],
+      brand: r['Brand'],
+      itemType: r['Item Type'],
+      size: r['Size'],
+      color: r['Color'],
+      condition: r['Condition'],
+      targetPrice: r['Target Price'],
+      bestPlatform: r['Best Platform'],
+      priority: r['Priority'],
+      notes: r['Notes'],
+      dateAdded: r['Date Added'],
+      ebayAvgPrice: r['eBay Avg Price'] || '',
+      ebaySalesFound: r['eBay Sales Found'] || '',
+      poshmarkAvgPrice: r['Poshmark Avg Price'] || '',
+      poshmarkSalesFound: r['Poshmark Sales Found'] || '',
+      lastChecked: r['Last Checked'] || '',
+      ebaySellThrough: r['eBay Sell-Through %'] || '',
+      imageUrl: r['Image URL'] || '',
+      category: r['Category'] || '',
+      subcategory: r['Subcategory'] || '',
+      model: r['Model'] || '',
+      targetVariant: r['Target Variant'] || '',
+      desiredProfit: r['Desired Profit'] || '',
+      whereToFind: r['Where To Find'] || '',
+      inspectionNotes: r['Inspection Notes'] || '',
+      opportunityId: r['Opportunity ID'] || '',
+    };
+  });
+}
+
+// Builds a sheet record from a Hunt List payload. Fields the payload doesn't
+// carry are left out, so an older client can't blank the newer columns.
+function acquireRecordFrom(body) {
+  var rec = {};
+  Object.keys(ACQUIRE_FIELD_HEADERS).forEach(function (k) {
+    if (Object.prototype.hasOwnProperty.call(body, k)) rec[ACQUIRE_FIELD_HEADERS[k]] = body[k] === null ? '' : body[k];
+  });
+  return rec;
 }
 
 // Looks up a Poshmark comp + a real reference photo for this row right away
@@ -631,36 +660,43 @@ function refreshAcquireRow(sheet, row, brand, itemType, size, color) {
   };
 }
 
+function findAcquireRowNumber(sheet, id) {
+  var ids = sheet.getLastRow() > 1 ? sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues() : [];
+  for (var i = 0; i < ids.length; i++) if (String(ids[i][0]) === String(id)) return i + 2;
+  return -1;
+}
+
 function addAcquireItem(body) {
   var sheet = getAcquireSheet();
   var id = 'acq-' + new Date().getTime();
-  var dateAdded = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
-  sheet.appendRow([
-    id, body.brand || '', body.itemType || '', body.size || '', body.color || '', body.condition || '',
-    body.targetPrice || '', body.bestPlatform || '', body.priority || 'Medium', body.notes || '', dateAdded,
-  ]);
-  var refreshed = refreshAcquireRow(sheet, sheet.getLastRow(), body.brand, body.itemType, body.size, body.color);
+  var dateAdded = todayIso();
+  var rec = acquireRecordFrom(body);
+  rec['ID'] = id;
+  rec['Date Added'] = dateAdded;
+  if (!rec['Priority']) rec['Priority'] = 'Medium';
+  upsertRecords(sheet, ACQUIRE_HEADERS, [rec], function (get) { return String(get('ID') || ''); });
   var out = { id: id, dateAdded: dateAdded };
-  if (refreshed) for (var k in refreshed) out[k] = refreshed[k];
+  if (isFashionCategory(body.category, body.subcategory)) {
+    var refreshed = refreshAcquireRow(sheet, findAcquireRowNumber(sheet, id), body.brand, body.itemType, body.size, body.color);
+    if (refreshed) for (var k in refreshed) out[k] = refreshed[k];
+  }
   return out;
 }
 
 function updateAcquireItem(body) {
   var sheet = getAcquireSheet();
-  var data = sheet.getDataRange().getValues();
-  for (var r = 1; r < data.length; r++) {
-    if (String(data[r][0]) === String(body.id)) {
-      sheet.getRange(r + 1, 2, 1, 9).setValues([[
-        body.brand || '', body.itemType || '', body.size || '', body.color || '', body.condition || '',
-        body.targetPrice || '', body.bestPlatform || '', body.priority || 'Medium', body.notes || '',
-      ]]);
-      var refreshed = refreshAcquireRow(sheet, r + 1, body.brand, body.itemType, body.size, body.color);
-      var out = { ok: true };
-      if (refreshed) for (var k in refreshed) out[k] = refreshed[k];
-      return out;
-    }
+  var row = findAcquireRowNumber(sheet, body.id);
+  if (row === -1) return { ok: false };
+  var rec = acquireRecordFrom(body);
+  rec['ID'] = body.id;
+  if (Object.prototype.hasOwnProperty.call(rec, 'Priority') && !rec['Priority']) rec['Priority'] = 'Medium';
+  upsertRecords(sheet, ACQUIRE_HEADERS, [rec], function (get) { return String(get('ID') || ''); });
+  var out = { ok: true };
+  if (isFashionCategory(body.category, body.subcategory)) {
+    var refreshed = refreshAcquireRow(sheet, row, body.brand, body.itemType, body.size, body.color);
+    if (refreshed) for (var k in refreshed) out[k] = refreshed[k];
   }
-  return { ok: false };
+  return out;
 }
 
 function deleteAcquireItem(id) {
@@ -1063,7 +1099,38 @@ function setPhoto(body) {
 // ---------------------------------------------------------------------
 
 var TRENDS_SHEET_NAME = 'Market Trends';
-var TRENDS_HEADERS = ['Search Term', 'Platform', 'Avg Sold Price', 'Recent Sales Found', 'Sell-Through %', 'Last Checked', 'Image URL', 'Category'];
+// The first eight columns are the original layout and stay where they are;
+// everything after them was added for Acquire V2 and is read by header name,
+// so rows written before those columns existed still load (blank = unknown).
+var TRENDS_HEADERS = [
+  'Search Term', 'Platform', 'Avg Sold Price', 'Recent Sales Found', 'Sell-Through %', 'Last Checked', 'Image URL', 'Category',
+  'Opportunity ID', 'Median Sold Price', 'Low Sold Price', 'High Sold Price', 'Sample Size', 'Active Listings',
+  'Avg Shipping', 'Source',
+];
+
+// Append-only log of every market observation. Market Trends only ever holds
+// the latest snapshot, so this is what makes a real trend direction possible
+// later instead of just today's number. One row per day per opportunity x
+// platform x source — a same-day re-pull replaces that day's row rather than
+// stacking duplicates.
+var MARKET_HISTORY_SHEET_NAME = 'Market History';
+var MARKET_HISTORY_HEADERS = [
+  'Date', 'Opportunity ID', 'Search Term', 'Platform', 'Avg Sold Price', 'Median Sold Price', 'Low Sold Price',
+  'High Sold Price', 'Sales Found', 'Sample Size', 'Active Listings', 'Sell Through', 'Avg Shipping', 'Source',
+];
+
+// Sourcing intelligence — what to research and how to judge it in the store:
+// risks, shipping class, typical buy cost, inspection checklist, recognition
+// clues. This is knowledge, not market data, so it lives apart from the
+// marketplace numbers and never overwrites them. Adding a row here (any
+// category, including new ones) adds a research target with no code change.
+var SOURCING_INTEL_SHEET_NAME = 'Sourcing Intel';
+var SOURCING_INTEL_HEADERS = [
+  'Opportunity ID', 'Search Term', 'eBay Query', 'Poshmark Query', 'Brand', 'Model', 'Category', 'Subcategory',
+  'Keywords', 'Shipping Class', 'Testing Risk', 'Counterfeit Risk', 'Shipping Difficulty', 'Fragility', 'Return Risk',
+  'Knowledge Level', 'Condition Requirement', 'Typical Cost Low', 'Typical Cost High', 'Sourcing Locations',
+  'Inspection Notes', 'Recognition Notes', 'Platform Notes', 'Active', 'Last Updated',
+];
 
 // Category display order for the Acquire tab's "Trending to look for"
 // section — anything with a category not in this list falls under "Other"
@@ -1210,11 +1277,26 @@ function searchPoshmarkSold(query, debug) {
     if (code !== 200) return { avgPrice: 0, count: 0, imageUrl: '', debug: debugInfo };
     if (!prices.length) return { avgPrice: 0, count: 0, imageUrl: '', debug: debugInfo };
     var sum = prices.reduce(function (a, b) { return a + b; }, 0);
-    return { avgPrice: Math.round((sum / prices.length) * 100) / 100, count: prices.length, imageUrl: imageUrl, debug: debugInfo };
+    var sorted = prices.slice().sort(function (a, b) { return a - b; });
+    return {
+      avgPrice: Math.round((sum / prices.length) * 100) / 100, count: prices.length, imageUrl: imageUrl, debug: debugInfo,
+      medianPrice: percentile(sorted, 0.5), lowPrice: percentile(sorted, 0.25), highPrice: percentile(sorted, 0.75),
+    };
   } catch (err) {
     if (debug) Logger.log('[Poshmark] query=%s EXCEPTION %s', query, err);
     return { avgPrice: 0, count: 0, imageUrl: '', debug: debug ? { exception: String(err) } : null };
   }
+}
+
+// Linear-interpolated percentile of an ascending array, to the cent. Low/High
+// Sold Price are the 25th/75th percentiles — the typical range, not the
+// extremes, so one outlier sale can't stretch it.
+function percentile(sorted, q) {
+  if (!sorted.length) return '';
+  var pos = (sorted.length - 1) * q;
+  var lo = Math.floor(pos), hi = Math.ceil(pos);
+  var v = sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
+  return Math.round(v * 100) / 100;
 }
 
 // Diagnostic helper — run this directly from the Run menu and check the
@@ -1224,59 +1306,265 @@ function debugSearchSoldListings() {
   searchPoshmarkSold('Carhartt jacket', true);
 }
 
-function getTrendsSheet() {
+// Adds any header in `headers` that the sheet doesn't have yet, at the end of
+// row 1. Never reorders or renames existing columns, so hand-added columns and
+// existing data stay put.
+function ensureHeaderColumns(sheet, headers) {
+  var lastCol = Math.max(sheet.getLastColumn(), 1);
+  var current = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  var have = {};
+  current.forEach(function (h) { if (String(h).trim()) have[String(h).trim().toLowerCase()] = true; });
+  var missing = headers.filter(function (h) { return !have[h.toLowerCase()]; });
+  if (!missing.length) return;
+  var start = current.some(function (h) { return String(h).trim(); }) ? lastCol + 1 : 1;
+  sheet.getRange(1, start, 1, missing.length).setValues([missing]);
+}
+
+function getOrCreateSheet(name, headers) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(TRENDS_SHEET_NAME);
+  var sheet = ss.getSheetByName(name);
   if (!sheet) {
-    sheet = ss.insertSheet(TRENDS_SHEET_NAME);
-    sheet.appendRow(TRENDS_HEADERS);
+    sheet = ss.insertSheet(name);
+    sheet.appendRow(headers);
     sheet.setFrozenRows(1);
-  } else if (sheet.getLastColumn() < TRENDS_HEADERS.length) {
-    // Appends any newly-added header columns (e.g. Image URL) without
-    // touching existing rows/columns — safe as long as new columns are
-    // always added at the end, never inserted in the middle.
-    sheet.getRange(1, 1, 1, TRENDS_HEADERS.length).setValues([TRENDS_HEADERS]);
+    return sheet;
   }
+  ensureHeaderColumns(sheet, headers);
   return sheet;
 }
 
-function getTrends() {
-  var sheet = getTrendsSheet();
-  var data = sheet.getDataRange().getValues();
+function getTrendsSheet() {
+  return getOrCreateSheet(TRENDS_SHEET_NAME, TRENDS_HEADERS);
+}
+
+// Same slug rule as opportunityIdFor() in js/acquire-model.js — the two must
+// agree, since it's how a Market Trends row finds its Sourcing Intel row.
+function opportunityIdFor(searchTerm) {
+  return String(searchTerm || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+function todayIso() {
+  return Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+}
+
+// Reads a header-row table into plain objects keyed by the header text.
+function readRecords(sheet) {
+  var lastRow = sheet.getLastRow();
+  var lastCol = sheet.getLastColumn();
+  if (lastRow < 2 || lastCol < 1) return [];
+  var values = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+  var headers = values[0].map(function (h) { return String(h).trim(); });
   var out = [];
-  for (var r = 1; r < data.length; r++) {
-    if (!data[r][0]) continue;
-    out.push({
-      searchTerm: data[r][0],
-      platform: data[r][1],
-      avgSoldPrice: data[r][2] || '',
-      recentSalesFound: data[r][3] || '',
-      sellThrough: data[r][4] || '',
-      lastChecked: formatDate(data[r][5]),
-      imageUrl: data[r][6] || '',
-      category: data[r][7] || '',
+  for (var r = 1; r < values.length; r++) {
+    var rec = {};
+    var any = false;
+    headers.forEach(function (h, c) {
+      if (!h) return;
+      var v = values[r][c];
+      if (Object.prototype.toString.call(v) === '[object Date]') v = formatDate(v);
+      rec[h] = v;
+      if (v !== '' && v !== null) any = true;
     });
+    if (any) out.push(rec);
   }
   return out;
 }
 
-// Upserts one (searchTerm x platform) row in Market Trends — used by both
-// the automatic Poshmark refresh and the manual eBay/Terapeak pull, so
-// neither one wipes out the other's data when it runs.
-function upsertTrendRow(searchTerm, platform, avgPrice, salesFound, sellThrough, imageUrl, category) {
-  var sheet = getTrendsSheet();
-  var data = sheet.getDataRange().getValues();
-  var today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
-  var cat = category || trendCategoryFor(searchTerm);
-  for (var r = 1; r < data.length; r++) {
-    if (String(data[r][0]) === String(searchTerm) && String(data[r][1]) === String(platform)) {
-      sheet.getRange(r + 1, 3, 1, 4).setValues([[avgPrice || '', salesFound || '', sellThrough || '', today]]);
-      if (imageUrl) sheet.getRange(r + 1, 7).setValue(imageUrl);
-      if (cat) sheet.getRange(r + 1, 8).setValue(cat);
-      return;
-    }
+// Upserts records (objects keyed by header text) in one read and one write.
+// Only keys present on a record are written, so a partial update never blanks
+// the columns it didn't mention. `keyOf(get)` builds the match key from a
+// getter, used for both existing rows and incoming records.
+function upsertRecords(sheet, headers, records, keyOf) {
+  ensureHeaderColumns(sheet, headers);
+  var lastCol = sheet.getLastColumn();
+  var headerRow = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  var colOf = {};
+  headerRow.forEach(function (h, c) { if (String(h).trim()) colOf[String(h).trim().toLowerCase()] = c; });
+  var lastRow = sheet.getLastRow();
+  var data = lastRow > 1 ? sheet.getRange(2, 1, lastRow - 1, lastCol).getValues() : [];
+  var index = {};
+  data.forEach(function (row, i) {
+    var k = keyOf(function (name) { var c = colOf[name.toLowerCase()]; return c === undefined ? '' : row[c]; });
+    if (k) index[k] = i;
+  });
+  var updated = 0, added = 0;
+  records.forEach(function (rec) {
+    var k = keyOf(function (name) { return rec[name]; });
+    if (!k) return;
+    var row;
+    if (Object.prototype.hasOwnProperty.call(index, k)) { row = data[index[k]]; updated++; }
+    else { row = new Array(lastCol).fill(''); data.push(row); index[k] = data.length - 1; added++; }
+    Object.keys(rec).forEach(function (name) {
+      var c = colOf[name.toLowerCase()];
+      if (c === undefined || rec[name] === undefined) return;
+      row[c] = rec[name] === null ? '' : rec[name];
+    });
+  });
+  if (data.length) sheet.getRange(2, 1, data.length, lastCol).setValues(data);
+  return { updated: updated, added: added };
+}
+
+function getTrends() {
+  return readRecords(getTrendsSheet()).filter(function (r) { return r['Search Term']; }).map(function (r) {
+    return {
+      searchTerm: r['Search Term'],
+      platform: r['Platform'],
+      avgSoldPrice: r['Avg Sold Price'] || '',
+      recentSalesFound: r['Recent Sales Found'] || '',
+      sellThrough: r['Sell-Through %'] || '',
+      lastChecked: r['Last Checked'] || '',
+      imageUrl: r['Image URL'] || '',
+      category: r['Category'] || '',
+      opportunityId: r['Opportunity ID'] || opportunityIdFor(r['Search Term']),
+      medianSoldPrice: r['Median Sold Price'] || '',
+      lowSoldPrice: r['Low Sold Price'] || '',
+      highSoldPrice: r['High Sold Price'] || '',
+      sampleSize: r['Sample Size'] || '',
+      activeListings: r['Active Listings'] || '',
+      avgShipping: r['Avg Shipping'] === 0 ? 0 : (r['Avg Shipping'] || ''),
+      source: r['Source'] || '',
+    };
+  });
+}
+
+function getMarketHistorySheet() {
+  return getOrCreateSheet(MARKET_HISTORY_SHEET_NAME, MARKET_HISTORY_HEADERS);
+}
+
+function getMarketHistory() {
+  return readRecords(getMarketHistorySheet()).filter(function (r) { return r['Opportunity ID']; }).map(function (r) {
+    return {
+      date: r['Date'], opportunityId: r['Opportunity ID'], searchTerm: r['Search Term'], platform: r['Platform'],
+      avgSoldPrice: r['Avg Sold Price'], medianSoldPrice: r['Median Sold Price'], lowSoldPrice: r['Low Sold Price'],
+      highSoldPrice: r['High Sold Price'], salesFound: r['Sales Found'], sampleSize: r['Sample Size'],
+      activeListings: r['Active Listings'], sellThrough: r['Sell Through'], avgShipping: r['Avg Shipping'], source: r['Source'],
+    };
+  });
+}
+
+function getSourcingIntelSheet() {
+  return getOrCreateSheet(SOURCING_INTEL_SHEET_NAME, SOURCING_INTEL_HEADERS);
+}
+
+function getSourcingIntel() {
+  return readRecords(getSourcingIntelSheet()).filter(function (r) { return r['Search Term'] || r['Opportunity ID']; }).map(function (r) {
+    return {
+      opportunityId: r['Opportunity ID'] || opportunityIdFor(r['Search Term']),
+      searchTerm: r['Search Term'], ebayQuery: r['eBay Query'], poshmarkQuery: r['Poshmark Query'],
+      brand: r['Brand'], model: r['Model'], category: r['Category'], subcategory: r['Subcategory'], keywords: r['Keywords'],
+      shippingClass: r['Shipping Class'], testingRisk: r['Testing Risk'], counterfeitRisk: r['Counterfeit Risk'],
+      shippingDifficulty: r['Shipping Difficulty'], fragility: r['Fragility'], returnRisk: r['Return Risk'],
+      knowledgeLevel: r['Knowledge Level'], conditionRequirement: r['Condition Requirement'],
+      typicalCostLow: r['Typical Cost Low'], typicalCostHigh: r['Typical Cost High'],
+      sourcingLocations: r['Sourcing Locations'], inspectionNotes: r['Inspection Notes'],
+      recognitionNotes: r['Recognition Notes'], platformNotes: r['Platform Notes'],
+      active: r['Active'], lastUpdated: r['Last Updated'],
+    };
+  });
+}
+
+// Maps the camelCase shape the site and pull scripts use onto sheet headers.
+var INTEL_FIELD_HEADERS = {
+  opportunityId: 'Opportunity ID', searchTerm: 'Search Term', ebayQuery: 'eBay Query', poshmarkQuery: 'Poshmark Query',
+  brand: 'Brand', model: 'Model', category: 'Category', subcategory: 'Subcategory', keywords: 'Keywords',
+  shippingClass: 'Shipping Class', testingRisk: 'Testing Risk', counterfeitRisk: 'Counterfeit Risk',
+  shippingDifficulty: 'Shipping Difficulty', fragility: 'Fragility', returnRisk: 'Return Risk',
+  knowledgeLevel: 'Knowledge Level', conditionRequirement: 'Condition Requirement',
+  typicalCostLow: 'Typical Cost Low', typicalCostHigh: 'Typical Cost High', sourcingLocations: 'Sourcing Locations',
+  inspectionNotes: 'Inspection Notes', recognitionNotes: 'Recognition Notes', platformNotes: 'Platform Notes',
+  active: 'Active',
+};
+
+function upsertSourcingIntel(body) {
+  var rows = (body.rows || [body]).map(function (row) {
+    var rec = {};
+    Object.keys(INTEL_FIELD_HEADERS).forEach(function (k) {
+      if (Object.prototype.hasOwnProperty.call(row, k)) rec[INTEL_FIELD_HEADERS[k]] = row[k];
+    });
+    if (!rec['Opportunity ID']) rec['Opportunity ID'] = opportunityIdFor(row.searchTerm);
+    rec['Last Updated'] = todayIso();
+    return rec;
+  }).filter(function (rec) { return rec['Opportunity ID']; });
+  if (!rows.length) return { ok: false, error: 'No rows with a search term or opportunity ID.' };
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    var res = upsertRecords(getSourcingIntelSheet(), SOURCING_INTEL_HEADERS, rows, function (get) {
+      return String(get('Opportunity ID') || '').trim();
+    });
+    return { ok: true, updated: res.updated, added: res.added };
+  } finally {
+    lock.releaseLock();
   }
-  sheet.appendRow([searchTerm, platform, avgPrice || '', salesFound || '', sellThrough || '', today, imageUrl || '', cat || '']);
+}
+
+// Writes marketplace observations: the latest snapshot into Market Trends
+// (one row per search term x platform) and the same numbers into Market
+// History (one row per day x opportunity x platform x source).
+function upsertMarketObservations(observations) {
+  var today = todayIso();
+  var trendRows = [], historyRows = [];
+  observations.forEach(function (o) {
+    if (!o.searchTerm || !o.platform) return;
+    var id = o.opportunityId || opportunityIdFor(o.searchTerm);
+    var cat = o.category || trendCategoryFor(o.searchTerm);
+    var trend = {
+      'Search Term': o.searchTerm, 'Platform': o.platform, 'Opportunity ID': id, 'Last Checked': today,
+      'Avg Sold Price': o.avgPrice, 'Recent Sales Found': o.salesFound, 'Sell-Through %': o.sellThrough,
+      'Median Sold Price': o.medianPrice, 'Low Sold Price': o.lowPrice, 'High Sold Price': o.highPrice,
+      'Sample Size': o.sampleSize, 'Active Listings': o.activeListings, 'Avg Shipping': o.avgShipping, 'Source': o.source,
+    };
+    if (o.imageUrl) trend['Image URL'] = o.imageUrl;
+    if (cat) trend['Category'] = cat;
+    trendRows.push(trend);
+    historyRows.push({
+      'Date': today, 'Opportunity ID': id, 'Search Term': o.searchTerm, 'Platform': o.platform,
+      'Avg Sold Price': o.avgPrice, 'Median Sold Price': o.medianPrice, 'Low Sold Price': o.lowPrice,
+      'High Sold Price': o.highPrice, 'Sales Found': o.salesFound, 'Sample Size': o.sampleSize,
+      'Active Listings': o.activeListings, 'Sell Through': o.sellThrough, 'Avg Shipping': o.avgShipping,
+      'Source': o.source || '',
+    });
+  });
+  if (!trendRows.length) return { ok: false, error: 'No observations with a search term and platform.' };
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    var t = upsertRecords(getTrendsSheet(), TRENDS_HEADERS, trendRows, function (get) {
+      return get('Search Term') && get('Platform') ? String(get('Search Term')) + '|' + String(get('Platform')) : '';
+    });
+    var h = upsertRecords(getMarketHistorySheet(), MARKET_HISTORY_HEADERS, historyRows, function (get) {
+      var d = get('Date');
+      if (Object.prototype.toString.call(d) === '[object Date]') d = formatDate(d);
+      return get('Opportunity ID') ? [d, get('Opportunity ID'), get('Platform'), get('Source')].join('|') : '';
+    });
+    return { ok: true, trends: t, history: h };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function setMarketObservations(body) {
+  return upsertMarketObservations(body.observations || [body]);
+}
+
+// Kept for the original manual eBay pull, which sends one term at a time.
+function upsertTrendRow(searchTerm, platform, avgPrice, salesFound, sellThrough, imageUrl, category) {
+  upsertMarketObservations([{
+    searchTerm: searchTerm, platform: platform, avgPrice: avgPrice, salesFound: salesFound,
+    sellThrough: sellThrough, imageUrl: imageUrl, category: category,
+  }]);
+}
+
+// Everything Acquire needs in one request. Apps Script GETs are slow and
+// flaky when several run at once, so the tab loads this instead of four calls.
+function getAcquireBundle() {
+  return {
+    watchlist: getAcquire(),
+    trends: getTrends(),
+    history: getMarketHistory(),
+    intel: getSourcingIntel(),
+    generatedAt: new Date().toISOString(),
+  };
 }
 
 // Refreshes the Poshmark side of both the Acquire Watchlist comps and the
@@ -1288,19 +1576,44 @@ function upsertTrendRow(searchTerm, platform, avgPrice, salesFound, sellThrough,
 function refreshMarketData() {
   var acqSheet = getAcquireSheet();
   var acqData = acqSheet.getDataRange().getValues();
+  var acqCategory = colIndex(buildColMap(acqData[0] || []), 'Category');
+  var acqSubcategory = colIndex(buildColMap(acqData[0] || []), 'Subcategory');
   for (var r = 1; r < acqData.length; r++) {
     if (!acqData[r][0]) continue;
+    if (!isFashionCategory(acqCategory === -1 ? '' : acqData[r][acqCategory], acqSubcategory === -1 ? '' : acqData[r][acqSubcategory])) continue;
     // Brand + Item Type + Size + Color, so the comp matches what you'd
     // actually be looking for at the thrift, not just the broad category.
     refreshAcquireRow(acqSheet, r + 1, acqData[r][1], acqData[r][2], acqData[r][3], acqData[r][4]);
     Utilities.sleep(1500);
   }
 
-  TREND_CANDIDATES.forEach(function (c) {
-    var poshResult = searchPoshmarkSold(c.term);
-    upsertTrendRow(c.term, 'Poshmark', poshResult.avgPrice, poshResult.count, '', poshResult.imageUrl, c.category);
+  // The original candidate list plus any Sourcing Intel row that names a
+  // Poshmark query — Poshmark only has meaningful comps for fashion-type
+  // items, so intel rows opt in rather than every research target being searched.
+  var terms = {};
+  TREND_CANDIDATES.forEach(function (c) { terms[c.term] = { term: c.term, query: c.term, category: c.category }; });
+  getSourcingIntel().forEach(function (row) {
+    var active = String(row.active === '' || row.active === undefined ? 'Y' : row.active).toUpperCase();
+    if (!row.poshmarkQuery || active === 'N' || active === 'NO' || active === 'FALSE') return;
+    terms[row.searchTerm] = { term: row.searchTerm, query: row.poshmarkQuery, category: row.subcategory || row.category, opportunityId: row.opportunityId };
+  });
+
+  var observations = [];
+  Object.keys(terms).forEach(function (key) {
+    var t = terms[key];
+    var r = searchPoshmarkSold(t.query);
+    if (r.count) {
+      // Poshmark's search shows sold listings only, with no active-supply count
+      // or sell-through, so those stay blank rather than being guessed.
+      observations.push({
+        searchTerm: t.term, opportunityId: t.opportunityId, platform: 'Poshmark', category: t.category,
+        avgPrice: r.avgPrice, medianPrice: r.medianPrice, lowPrice: r.lowPrice, highPrice: r.highPrice,
+        salesFound: r.count, sampleSize: r.count, imageUrl: r.imageUrl, source: 'Poshmark sold search',
+      });
+    }
     Utilities.sleep(1500);
   });
+  if (observations.length) upsertMarketObservations(observations);
 }
 
 // Manual write paths for eBay/Terapeak data, pulled through a live browser
@@ -1322,7 +1635,10 @@ function setAcquireEbayData(body) {
 }
 
 function setTrendEbayData(body) {
-  upsertTrendRow(body.searchTerm, 'eBay', body.avgPrice, body.salesFound, body.sellThrough);
+  upsertMarketObservations([{
+    searchTerm: body.searchTerm, platform: 'eBay', avgPrice: body.avgPrice, salesFound: body.salesFound,
+    sellThrough: body.sellThrough, source: body.source || 'eBay sold search',
+  }]);
   return { ok: true };
 }
 
@@ -1336,6 +1652,9 @@ function cleanupOldTrendRows() {
   var data = sheet.getDataRange().getValues();
   var current = {};
   TREND_CANDIDATES.forEach(function (c) { current[c.term] = true; });
+  // Research targets added through Sourcing Intel are current too — without
+  // this, running the cleanup would delete every non-apparel opportunity.
+  getSourcingIntel().forEach(function (row) { if (row.searchTerm) current[row.searchTerm] = true; });
   var removed = 0;
   for (var r = data.length - 1; r >= 1; r--) {
     var isBlankPlatform = data[r][0] && !data[r][1];

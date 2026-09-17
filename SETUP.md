@@ -59,19 +59,24 @@ Poshmark and Depop have no public API, so their stats are always logged manually
 
 Until this is set up, log eBay stats manually from the Stats tab — the same form used for Poshmark/Depop.
 
-## 4. Acquire market data (Poshmark auto-refreshes; eBay is a manual pull)
+## 4. Acquire — sourcing intelligence
 
-The Acquire tab's "Trending to look for" section and each watchlist item's sold-price comps come from two different sources, because they behave differently:
+Acquire is built from four Sheet tabs, each holding a different kind of information so the site never mixes up what a marketplace reported with what's an estimate:
 
-**Poshmark** — its public sold-listings search (no login needed) works fine from an automated script. Turn it on once:
+| Tab | What it holds | Who writes it |
+|---|---|---|
+| **Sourcing Intel** | One row per research target: search term, eBay/Poshmark queries, category, risks, shipping class, typical buy cost, inspection checklist, recognition clues | You (or Claude). Add a row here — any category — to add a research target; no code change needed. Set **Active** to `N` to hide one. |
+| **Market Trends** | The latest market snapshot per research target × platform: median, 25th–75th percentile sold range, sample size, sold count, active listings, sell-through, buyer-paid shipping | Poshmark refresh (automatic) and eBay pull (manual) |
+| **Market History** | The same numbers appended every day they're pulled, never overwritten | Same as above. Trend direction (↑ rising / ↓ cooling) appears once there's about a week of history. |
+| **Acquire Watchlist** | Your Hunt List | The site |
 
-1. In the Apps Script editor's **Run** menu, select the `setupMarketDataTrigger` function and run it once (authorize if prompted).
-2. This installs a daily timer that keeps Poshmark numbers fresh automatically, and runs one refresh immediately so you're not staring at empty data until tomorrow.
-3. That's it — no further clicking.
+**Poshmark** — its public sold-listings search works from an automated script. Turn it on once: in the Apps Script editor, **Run → setupMarketDataTrigger** (authorize when prompted). It refreshes daily for every Sourcing Intel row with a *Poshmark Query* (fashion items — Poshmark has no useful comps for electronics or tools).
 
-**eBay** — its public search actively blocks automated requests (returns a 403 error page to anything that isn't a real browser), so this can't run on a timer. The real data lives in eBay's free Seller Hub **Research** tool (Terapeak — More → Research in Seller Hub, no Store subscription needed) and includes the actual sell-through rate, which is better data than the scrape ever would have given. Since it needs your live login, it's a manual pull: ask Claude to refresh it whenever you want current eBay numbers, the same way the per-listing stats and cover photos worked.
+**eBay** — its search blocks automated requests, so eBay numbers are pulled through a real browser session and written in with the `setMarketObservations` action. Ask Claude to refresh eBay comps whenever you want current numbers; the header on the Acquire tab shows how old each source is.
 
-**Editing the trending categories:** open `Code.gs` and edit the `TREND_CANDIDATES` array near the top of the "Market data" section — it's a plain list of general sourcing categories (e.g. `'Carhartt jacket'`), meant to answer "what's worth grabbing at the thrift store," not to mirror what's already in the Sheet. Add, remove, or change entries, then redeploy (New version). This list drives both the Poshmark auto-refresh and whatever eBay pull is run manually.
+**How the numbers are made:** every fee, shipping estimate, minimum profit, risk reserve, score weight and threshold lives in `js/acquire-config.js`. The calculations (Opportunity Score, max buy, profit, confidence, trend) are in `js/acquire-model.js`. Change an assumption in the config and every card, filter and the deal calculator follow it. Missing data stays missing — the site shows "—" or "Not enough data" rather than a guess.
+
+**eBay query tip:** eBay treats every bare word as required, so `-box only` means "exclude box, and require the word *only*". Write exclusions as separate `-words`, and don't exclude words that normal complete listings contain (`-shaft` on golf drivers, `-lid` on Dutch ovens).
 
 ## Editing categories/platforms
 

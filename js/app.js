@@ -14,12 +14,10 @@ const state = {
   metrics: [],            // from Metrics tab (auto eBay + manual entries)
   acquire: [],            // from Acquire Watchlist tab
   photos: [],             // from Photos tab (cover photo per item x platform)
-  trends: [],             // from Market Trends tab (curated resale categories, daily auto-refresh)
   itemActions: [],        // from Item Actions tab (price drops/offers sent/ignored, logged from pricing actions)
   featuredActions: new Set(),
   loadedAt: '',
   expandedItems: new Set(),
-  editingAcquireId: null,
 };
 
 const ZOOM_MIN = 0.7, ZOOM_MAX = 1.6, ZOOM_STEP = 0.1, ZOOM_BASE = 380;
@@ -1768,253 +1766,13 @@ async function addMetricEntry() {
 }
 document.getElementById('addMetricBtn').addEventListener('click', addMetricEntry);
 
-// ---------------------------------------------------------------------
-// Acquire — full CRUD watchlist, same online/offline dual-path as
-// routine-hub's Inbox.
-// ---------------------------------------------------------------------
-async function loadAcquire() {
-  document.getElementById('acquireSetupNote').style.display = connected() ? 'none' : 'block';
-  if (connected()) {
-    try { state.acquire = (await apiGet('acquire')) || []; }
-    catch { state.acquire = []; document.getElementById('acquireStatus').textContent = 'Could not reach your Sheet.'; }
-  } else {
-    state.acquire = localGet('sellHub.acquire.local', []);
-  }
-  renderAcquire();
-}
-
-async function loadTrendsData() {
-  if (!connected()) { state.trends = []; return; }
-  try { state.trends = (await apiGet('trends')) || []; }
-  catch { state.trends = []; }
-}
-
-const TREND_CATEGORY_ORDER = ['Outerwear', 'Shirts', 'Pants', 'Shoes', 'Accessories', 'Other'];
-const TREND_CATEGORY_ICON = { Outerwear: '🧥', Shirts: '👕', Pants: '👖', Shoes: '👟', Accessories: '👜', Other: '🏷️' };
-const TREND_CATEGORY_COLOR = { Outerwear: '#1f3a5c', Shirts: '#1f5c46', Pants: '#a1752e', Shoes: '#1f5c64', Accessories: '#5c3a63', Other: '#a2532f' };
-
-function trendCardHTML(c) {
-  return `
-    <div class="trend-card">
-      ${c.imageUrl ? `<img class="trend-photo" src="${escapeHtml(c.imageUrl)}" alt="" loading="lazy">` : ''}
-      <h4>${escapeHtml(c.term)}</h4>
-      ${c.platforms.map(p => `
-        <div class="prow"><span>${escapeHtml(p.platform)} avg sold</span><b>${fmtMoney(Number(p.avgSoldPrice))}</b></div>
-        <div class="prow"><span>${escapeHtml(p.platform)} sales found</span><b>${p.recentSalesFound}</b></div>
-        ${p.sellThrough ? `<div class="prow"><span>${escapeHtml(p.platform)} sell-through</span><b>${p.sellThrough}%</b></div>` : ''}
-      `).join('')}
-      <div class="trend-date">as of ${escapeHtml(c.platforms[0].lastChecked || '')}</div>
-    </div>
-  `;
-}
-
-function renderTrends() {
-  const container = document.getElementById('trendsCards');
-  if (!container) return;
-
-  // Trends come as one row per (term x platform) — group into one card per term.
-  const byTerm = new Map();
-  state.trends.forEach(t => {
-    if (!t.avgSoldPrice) return;
-    const entry = byTerm.get(t.searchTerm) || { term: t.searchTerm, platforms: [], imageUrl: '', category: '' };
-    entry.platforms.push(t);
-    if (t.imageUrl && !entry.imageUrl) entry.imageUrl = t.imageUrl;
-    if (t.category && !entry.category) entry.category = t.category;
-    byTerm.set(t.searchTerm, entry);
-  });
-  const cards = [...byTerm.values()];
-
-  if (!cards.length) {
-    container.innerHTML = '<div class="empty-state">No trend data yet — refreshes automatically once a day (see SETUP.md to turn it on).</div>';
-    return;
-  }
-
-  // Group into categories (Outerwear/Shirts/Pants/Shoes/Accessories/Other),
-  // most-sold-first within each, so sourcing targets read like a shopping
-  // list by department instead of one flat undifferentiated grid.
-  const byCategory = new Map();
-  cards.forEach(c => {
-    const cat = TREND_CATEGORY_ORDER.includes(c.category) ? c.category : 'Other';
-    if (!byCategory.has(cat)) byCategory.set(cat, []);
-    byCategory.get(cat).push(c);
-  });
-  byCategory.forEach(list => list.sort((a, b) =>
-    b.platforms.reduce((s, p) => s + Number(p.recentSalesFound || 0), 0) -
-    a.platforms.reduce((s, p) => s + Number(p.recentSalesFound || 0), 0)
-  ));
-
-  container.innerHTML = TREND_CATEGORY_ORDER.filter(cat => byCategory.has(cat)).map(cat => `
-    <div class="cat-section" style="--cat:${TREND_CATEGORY_COLOR[cat] || TREND_CATEGORY_COLOR.Other}">
-      <div class="cat-heading">
-        <span class="icon">${TREND_CATEGORY_ICON[cat] || '🏷️'}</span>
-        <h2>${escapeHtml(cat)}</h2>
-        <span class="count">${byCategory.get(cat).length}</span>
-      </div>
-      <div class="platform-cards">${byCategory.get(cat).map(trendCardHTML).join('')}</div>
-    </div>
-  `).join('');
-}
-
-function acquireCardHTML(a) {
-  const pri = PRIORITY_META[a.priority] || PRIORITY_META.Medium;
-  const editing = String(state.editingAcquireId) === String(a.id);
-  if (editing) {
-    return `
-      <div class="acquire-card" style="--pri:${pri.color}">
-        <div class="field"><label>Brand</label><input type="text" class="ae-brand" value="${escapeHtml(a.brand)}"></div>
-        <div class="field"><label>Item type</label><input type="text" class="ae-itemType" value="${escapeHtml(a.itemType)}"></div>
-        <div class="field-row">
-          <div class="field"><label>Size</label><input type="text" class="ae-size" value="${escapeHtml(a.size)}"></div>
-          <div class="field"><label>Color</label><input type="text" class="ae-color" value="${escapeHtml(a.color)}"></div>
-        </div>
-        <div class="field-row">
-          <div class="field"><label>Condition</label><input type="text" class="ae-condition" value="${escapeHtml(a.condition)}"></div>
-          <div class="field"><label>Target price</label><input type="text" class="ae-targetPrice" value="${escapeHtml(a.targetPrice)}"></div>
-        </div>
-        <div class="field-row">
-          <div class="field"><label>Best platform</label><select class="ae-bestPlatform">${platformOptionsHTML(a.bestPlatform)}</select></div>
-        </div>
-        <div class="field-row">
-          <div class="field"><label>Priority</label>
-            <select class="ae-priority">${['High', 'Medium', 'Low'].map(p => `<option value="${p}"${p === a.priority ? ' selected' : ''}>${p}</option>`).join('')}</select>
-          </div>
-          <div class="field"><label>Notes</label><input type="text" class="ae-notes" value="${escapeHtml(a.notes)}"></div>
-        </div>
-        <button class="btn ae-save" data-id="${a.id}">Save</button>
-        <button class="btn secondary ae-cancel">Cancel</button>
-        <div class="status-msg ae-status"></div>
-      </div>
-    `;
-  }
-  return `
-    <div class="acquire-card" style="--pri:${pri.color}">
-      ${a.imageUrl ? `<img class="acquire-photo" src="${escapeHtml(a.imageUrl)}" alt="" loading="lazy">` : ''}
-      <h3>${escapeHtml(a.brand)} — ${escapeHtml(a.itemType)}<span class="priority-tag">${escapeHtml(a.priority || 'Medium')}</span></h3>
-      <div class="meta">
-        ${a.size ? `<span><b>Size —</b> ${escapeHtml(a.size)}</span>` : ''}
-        ${a.color ? `<span><b>Color —</b> ${escapeHtml(a.color)}</span>` : ''}
-        ${a.condition ? `<span><b>Condition —</b> ${escapeHtml(a.condition)}</span>` : ''}
-        ${a.targetPrice ? `<span><b>Target price —</b> ${escapeHtml(a.targetPrice)}</span>` : ''}
-        ${a.bestPlatform ? `<span><b>Best platform —</b> ${escapeHtml((PLATFORM_META[a.bestPlatform] || { label: a.bestPlatform }).label)}</span>` : ''}
-      </div>
-      ${a.notes ? `<p class="notes">${escapeHtml(a.notes)}</p>` : ''}
-      ${a.ebayAvgPrice || a.poshmarkAvgPrice ? `
-        <div class="market-data">
-          ${a.ebayAvgPrice ? `<span><b>${fmtMoney(Number(a.ebayAvgPrice))}</b> eBay avg (${a.ebaySalesFound} sold${a.ebaySellThrough ? `, ${a.ebaySellThrough}% sell-through` : ''})</span>` : ''}
-          ${a.poshmarkAvgPrice ? `<span><b>${fmtMoney(Number(a.poshmarkAvgPrice))}</b> Poshmark avg (${a.poshmarkSalesFound} found)</span>` : ''}
-          <span class="market-data-date">as of ${escapeHtml(a.lastChecked || '')}</span>
-        </div>
-      ` : '<div class="market-data market-data-pending">No market data yet — Poshmark updates daily; eBay needs a manual refresh (ask Claude, or run it yourself via Terapeak in Seller Hub).</div>'}
-      <button class="icon-btn ae-edit-btn" title="Edit" data-id="${a.id}">✎</button>
-      <button class="icon-btn card-delete-btn ae-delete-btn" title="Delete" data-id="${a.id}">✕</button>
-    </div>
-  `;
-}
-
-function renderAcquire() {
-  const list = document.getElementById('acquireList');
-  if (!state.acquire.length) { list.innerHTML = '<div class="empty-state">Nothing on the watchlist yet.</div>'; return; }
-
-  const order = { High: 0, Medium: 1, Low: 2 };
-  const sorted = state.acquire.slice().sort((a, b) => (order[a.priority] ?? 1) - (order[b.priority] ?? 1));
-  list.innerHTML = sorted.map(acquireCardHTML).join('');
-
-  list.querySelectorAll('.ae-edit-btn').forEach(btn => btn.addEventListener('click', () => { state.editingAcquireId = btn.dataset.id; renderAcquire(); }));
-  list.querySelectorAll('.ae-delete-btn').forEach(btn => btn.addEventListener('click', () => deleteAcquireItem(btn.dataset.id)));
-  list.querySelectorAll('.ae-cancel').forEach(btn => btn.addEventListener('click', () => { state.editingAcquireId = null; renderAcquire(); }));
-  list.querySelectorAll('.ae-save').forEach(btn => btn.addEventListener('click', () => saveAcquireEdit(btn.dataset.id, btn.closest('.acquire-card'))));
-}
-
-async function saveAcquireEdit(id, card) {
-  const status = card.querySelector('.ae-status');
-  const body = {
-    id,
-    brand: card.querySelector('.ae-brand').value.trim(),
-    itemType: card.querySelector('.ae-itemType').value.trim(),
-    size: card.querySelector('.ae-size').value.trim(),
-    color: card.querySelector('.ae-color').value.trim(),
-    condition: card.querySelector('.ae-condition').value.trim(),
-    targetPrice: card.querySelector('.ae-targetPrice').value.trim(),
-    bestPlatform: card.querySelector('.ae-bestPlatform').value,
-    priority: card.querySelector('.ae-priority').value,
-    notes: card.querySelector('.ae-notes').value.trim(),
-  };
-  if (!body.brand || !body.itemType) { status.textContent = 'Fill in brand and item type.'; return; }
-  status.textContent = 'Saving...';
-
-  let saved = null;
-  if (connected()) {
-    try { saved = await apiPost('updateAcquireItem', body); }
-    catch { status.textContent = 'Could not save to your Sheet.'; return; }
-  }
-  const item = state.acquire.find(a => String(a.id) === String(id));
-  if (item) Object.assign(item, body, saved || {});
-  if (!connected()) localSet('sellHub.acquire.local', state.acquire);
-
-  state.editingAcquireId = null;
-  renderAcquire();
-}
-
-async function addAcquireItem() {
-  const status = document.getElementById('acquireStatus');
-  const body = {
-    brand: document.getElementById('acqBrand').value.trim(),
-    itemType: document.getElementById('acqItemType').value.trim(),
-    size: document.getElementById('acqSize').value.trim(),
-    color: document.getElementById('acqColor').value.trim(),
-    condition: document.getElementById('acqCondition').value.trim(),
-    targetPrice: document.getElementById('acqTargetPrice').value.trim(),
-    bestPlatform: document.getElementById('acqBestPlatform').value,
-    priority: document.getElementById('acqPriority').value,
-    notes: document.getElementById('acqNotes').value.trim(),
-  };
-  if (!body.brand || !body.itemType) { status.textContent = 'Fill in brand and item type.'; return; }
-  status.textContent = 'Saving...';
-
-  const today = todayStr();
-  const localEntry = { ...body, id: `acq-${Date.now()}`, dateAdded: today };
-
-  if (connected()) {
-    try {
-      const saved = await apiPost('addAcquireItem', body);
-      if (!saved || !saved.id) { status.textContent = 'Sheet did not confirm the save — is Code.gs redeployed?'; return; }
-      state.acquire.push({ ...body, ...saved });
-    } catch { status.textContent = 'Could not save to your Sheet.'; return; }
-  } else {
-    state.acquire.push(localEntry);
-    localSet('sellHub.acquire.local', state.acquire);
-  }
-
-  ['acqBrand', 'acqItemType', 'acqSize', 'acqColor', 'acqCondition', 'acqTargetPrice', 'acqNotes'].forEach(id => document.getElementById(id).value = '');
-  status.textContent = 'Added.';
-  setTimeout(() => status.textContent = '', 1500);
-  renderAcquire();
-}
-
-async function deleteAcquireItem(id) {
-  if (!confirm('Remove this from the watchlist?')) return;
-  state.acquire = state.acquire.filter(a => String(a.id) !== String(id));
-  renderAcquire();
-  if (connected()) {
-    try { await apiPost('deleteAcquireItem', { id }); }
-    catch { /* already removed locally; Sheet will drift until next successful call */ }
-  } else {
-    localSet('sellHub.acquire.local', state.acquire);
-  }
-}
-
-document.getElementById('acquireAddToggle').addEventListener('click', () => {
-  const panel = document.getElementById('acquireAddPanel');
-  const open = panel.style.display !== 'none';
-  panel.style.display = open ? 'none' : '';
-  document.getElementById('acquireAddToggle').textContent = open ? '+ Add to watchlist' : '− Close';
-});
-document.getElementById('addAcquireBtn').addEventListener('click', addAcquireItem);
+// Acquire (sourcing intelligence, hunt list CRUD) lives in js/acquire.js,
+// with its assumptions in js/acquire-config.js and its math in
+// js/acquire-model.js.
 
 // ---------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------
-document.getElementById('acqBestPlatform').innerHTML = platformOptionsHTML();
 
 state.listGroup = localGet('sellHub.listGroup', 'category');
 state.collapsedCats = new Set(localGet('sellHub.collapsedCats', []));
@@ -2030,8 +1788,6 @@ renderStats();
 state.featuredActions = new Set(localGet('sellHub.featuredActions', []));
 renderAction();
 populateMetricForm();
-loadAcquire();
-loadTrendsData().then(renderTrends);
 
 Promise.all([loadInventory(), loadDescriptionsData(), loadPostingQueueData(), loadMetricsData(), loadPhotosData(), loadItemActionsData()]).then(() => {
   state.loadedAt = new Date().toISOString();

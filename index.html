@@ -198,85 +198,65 @@
 
   <!-- ===================== ACQUIRE ===================== -->
   <section id="acquire" class="view">
-    <div class="section-head">
-      <h2 class="section-title">Acquire</h2>
-      <p class="section-intro">Sourcing intel for hitting the thrift store, yard sales, and bins — what's worth grabbing and what it's actually worth, plus your own personal watchlist of specific pieces to hunt for.</p>
+    <div class="section-head acq-head">
+      <div>
+        <h2 class="section-title">Acquire</h2>
+        <p class="acq-tagline">Know what to grab before you see it.</p>
+        <p class="section-intro">Market intelligence for thrift stores, bins, estate sales, yard sales, Marketplace and other sourcing trips.</p>
+      </div>
+      <div class="acq-freshness" id="acqFreshness" aria-live="polite"></div>
     </div>
 
     <div id="acquireSetupNote" class="setup-note" style="display:none">
-      Not connected to your Sheet yet, so this is local to this browser for now. Deploy <code>Code.gs</code> and paste the Web App URL into <code>js/config.js</code> — see <code>SETUP.md</code>.
+      Not connected to your Sheet yet, so the hunt list is local to this browser and there's no market data. Deploy <code>Code.gs</code> and paste the Web App URL into <code>js/config.js</code> — see <code>SETUP.md</code>.
     </div>
 
-    <h3 class="subhead">Trending to look for</h3>
-    <p class="section-intro" style="margin-top:0">General resale categories worth sourcing — not tied to what you already list — with real eBay and Poshmark sold-listing comps. Poshmark refreshes automatically once a day; eBay is pulled manually (see SETUP.md).</p>
-    <div id="trendsCards"></div>
+    <h3 class="subhead" id="acq-pulse">Sourcing pulse</h3>
+    <div class="acq-pulse" id="acqPulse"></div>
 
-    <h3 class="subhead">Your watchlist</h3>
+    <div class="acq-explorer-head">
+      <h3 class="subhead" id="acq-explorer">Opportunity explorer</h3>
+      <label class="acq-quick-toggle"><input type="checkbox" id="acqQuickSource"> <span>Quick Source</span></label>
+    </div>
+    <div class="acq-toolbar">
+      <input type="search" id="acqSearch" placeholder="Search opportunities..." aria-label="Search opportunities by item, brand, model or category" autocomplete="off">
+      <label class="sort-control">Sort
+        <select id="acqSort" aria-label="Sort opportunities"></select>
+      </label>
+      <button type="button" class="btn secondary acq-filter-toggle" id="acqFilterToggle" aria-expanded="false" aria-controls="acqFilters">Filters</button>
+    </div>
+    <div class="acq-cat-chips" id="acqCategoryChips" role="group" aria-label="Filter by category"></div>
+    <div class="acq-filters" id="acqFilters"></div>
+    <div class="acq-active-filters" id="acqActiveFilters" aria-live="polite"></div>
+    <div class="acq-results" id="acqResults"></div>
+
+    <h3 class="subhead" id="acq-categories">Explore by category</h3>
+    <div class="acq-categories" id="acqCategories"></div>
+
+    <h3 class="subhead" id="acq-hunt">My hunt list</h3>
+    <p class="status-msg" id="acqHuntStatus" role="status"></p>
     <div id="acquireList" class="card-grid"></div>
 
-    <button class="btn add-toggle-btn" id="acquireAddToggle">+ Add to watchlist</button>
-
+    <button type="button" class="btn add-toggle-btn" id="acquireAddToggle" aria-expanded="false" aria-controls="acquireAddPanel">+ Add to hunt list</button>
     <div class="panel" id="acquireAddPanel" style="display:none">
-      <h3>Add to watchlist</h3>
-      <div class="field-row">
-        <div class="field">
-          <label>Brand</label>
-          <input type="text" id="acqBrand" placeholder="e.g. Ralph Lauren">
-        </div>
-        <div class="field">
-          <label>Item type</label>
-          <input type="text" id="acqItemType" placeholder="e.g. Denim jacket">
-        </div>
-      </div>
-      <div class="field-row">
-        <div class="field">
-          <label>Target size <span class="optional">optional</span></label>
-          <input type="text" id="acqSize" placeholder="e.g. M / 34">
-        </div>
-        <div class="field">
-          <label>Target color <span class="optional">optional</span></label>
-          <input type="text" id="acqColor" placeholder="e.g. Black">
-        </div>
-      </div>
-      <div class="field-row">
-        <div class="field">
-          <label>Condition floor <span class="optional">optional</span></label>
-          <input type="text" id="acqCondition" placeholder="e.g. Good or better">
-        </div>
-        <div class="field">
-          <label>Target price <span class="optional">optional</span></label>
-          <input type="text" id="acqTargetPrice" placeholder="e.g. under $15">
-        </div>
-      </div>
-      <div class="field-row">
-        <div class="field">
-          <label>Best platform to resell</label>
-          <select id="acqBestPlatform"></select>
-        </div>
-        <div class="field">
-          <label>Priority</label>
-          <select id="acqPriority">
-            <option value="High">High</option>
-            <option value="Medium" selected>Medium</option>
-            <option value="Low">Low</option>
-          </select>
-        </div>
-      </div>
-      <div class="field-row">
-        <div class="field">
-          <label>Notes <span class="optional">optional</span></label>
-          <input type="text" id="acqNotes" placeholder="Where to look, why it resells well...">
-        </div>
-      </div>
-      <button class="btn" id="addAcquireBtn">Add to watchlist</button>
-      <div class="status-msg" id="acquireStatus"></div>
+      <h3>Add to hunt list</h3>
+      <div id="acqHuntForm"></div>
     </div>
+    <datalist id="acqSubcategoryList"></datalist>
   </section>
 
 </main>
 
+<div class="acq-drawer-backdrop" id="acqDrawerBackdrop" hidden></div>
+<aside class="acq-drawer" id="acqDrawer" role="dialog" aria-modal="true" aria-labelledby="acqDrawerTitle" hidden>
+  <div class="acq-drawer-body" id="acqDrawerBody"></div>
+</aside>
+
 <script src="js/config.js"></script>
 <script src="js/data.js"></script>
 <script src="js/app.js"></script>
+<script src="js/acquire-config.js"></script>
+<script src="js/acquire-model.js"></script>
+<script src="js/acquire.js"></script>
 </body>
 </html>
