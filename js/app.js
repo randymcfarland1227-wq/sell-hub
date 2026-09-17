@@ -635,7 +635,11 @@ function itemDetailHTML(item) {
     <div class="status-msg ms-status"></div>
   ` : '';
 
-  return `<div class="item-detail">${blocks}${soldForm}</div>`;
+  const removeRow = `
+    <div class="remove-item-row">
+      <button type="button" class="icon-btn remove-item-btn" data-id="${escapeHtml(item.itemId)}">Remove item…</button>
+    </div>`;
+  return `<div class="item-detail">${blocks}${soldForm}${removeRow}</div>`;
 }
 
 function wireItemCards(container, onChange) {
@@ -648,6 +652,9 @@ function wireItemCards(container, onChange) {
   });
   container.querySelectorAll('.ms-submit').forEach(btn => {
     btn.addEventListener('click', () => markSold(btn, onChange));
+  });
+  container.querySelectorAll('.remove-item-btn').forEach(btn => {
+    btn.addEventListener('click', () => openRemoveDialog(btn.dataset.id, btn));
   });
 }
 
@@ -685,6 +692,158 @@ async function markSold(btn, onChange) {
   } catch {
     status.textContent = 'Could not save to your Sheet.';
   }
+}
+
+// ---------------------------------------------------------------------
+// Removing items — "Save for later" moves an item out of the inventory into
+// the Saved for Later tab (restorable); "Delete for good" removes it and its
+// queue rows, descriptions, photos and stats. Sales and the action log stay.
+// ---------------------------------------------------------------------
+function refreshInventoryViews() {
+  renderWheel();
+  routeOverview();
+  renderListChips();
+  renderList();
+  renderStats();
+  renderAction();
+}
+
+function openRemoveDialog(itemId, opener) {
+  const dialog = document.getElementById('removeItemDialog');
+  const item = state.inventory.find(i => i.itemId === itemId);
+  if (!dialog || !item) return;
+  const title = [item.brand, item.item].filter(Boolean).join(' — ') || item.itemId;
+  const live = platformsStatusFor(item).done.map(d => d.meta.label);
+  const sold = isSold(item);
+  dialog.dataset.itemId = itemId;
+  dialog.innerHTML = `
+    <form method="dialog" class="remove-form">
+      <h3 id="removeItemTitle">Remove ${escapeHtml(title)}?</h3>
+      ${live.length ? `<p class="remove-warning">Still live on ${escapeHtml(live.join(', '))}. Removing it here won't end those listings — take them down on each site too.</p>` : ''}
+      ${sold ? '<p class="remove-note">This item is sold. Its sale stays in the Sales tab either way.</p>' : ''}
+      <div class="remove-step" data-step="choose">
+        <div class="remove-option">
+          <h4>Save for later</h4>
+          <p>Moves it out of the inventory into the "Saved for Later" tab of your Sheet, with everything needed to bring it back.</p>
+          <label class="remove-reason"><span>Why? <small>optional</small></span><input type="text" name="reason" maxlength="120" placeholder="e.g. keeping it for now"></label>
+          <button type="button" class="btn remove-save-btn">Save for later</button>
+        </div>
+        <div class="remove-option danger">
+          <h4>Delete for good</h4>
+          <p>Removes it from the Sheet, along with its posting queue rows, listing descriptions, photos and stats.</p>
+          <button type="button" class="btn secondary remove-delete-btn">Delete for good…</button>
+        </div>
+      </div>
+      <div class="remove-step" data-step="confirm" hidden>
+        <p class="remove-warning"><b>This can't be undone.</b> ${escapeHtml(title)} will be removed from your Sheet. Sales and the action log are kept.</p>
+        <div class="remove-actions">
+          <button type="button" class="btn danger remove-confirm-btn">Yes, delete permanently</button>
+          <button type="button" class="btn secondary remove-back-btn">Back</button>
+        </div>
+      </div>
+      <p class="status-msg remove-status" role="status"></p>
+      <button type="button" class="icon-btn remove-cancel-btn">Cancel</button>
+    </form>`;
+
+  const status = dialog.querySelector('.remove-status');
+  const setBusy = busy => dialog.querySelectorAll('button, input').forEach(el => { el.disabled = busy; });
+  const close = () => { dialog.close(); if (opener && document.contains(opener)) opener.focus(); };
+  const run = async mode => {
+    if (!connected()) { status.textContent = 'Connect your Sheet to remove items — see SETUP.md.'; return; }
+    const reason = (dialog.querySelector('input[name="reason"]') || {}).value || '';
+    setBusy(true);
+    status.textContent = (mode === 'delete' ? 'Deleting…' : 'Saving for later…') + ' this can take up to a minute.';
+    let res = null;
+    try { res = await apiPost('removeItem', { itemId, mode, reason: reason.trim() }); } catch { res = null; }
+    if (!res || !res.ok) {
+      // Google sometimes garbles the reply after the write lands — check before calling it a failure.
+      const landed = await removalLanded(itemId);
+      if (!landed) {
+        setBusy(false);
+        status.textContent = (res && res.error) || "Couldn't confirm with your Sheet. Nothing is shown as removed — reload to check.";
+        return;
+      }
+    }
+    state.inventory = state.inventory.filter(i => i.itemId !== itemId);
+    if (mode === 'delete') state.postingQueue = state.postingQueue.filter(r => r.itemId !== itemId);
+    else state.postingQueue.forEach(r => { if (r.itemId === itemId) r.status = 'Saved for later'; });
+    close();
+    refreshInventoryViews();
+    if (mode === 'saveForLater') loadSavedItems();
+  };
+
+  dialog.querySelector('.remove-save-btn').addEventListener('click', () => run('saveForLater'));
+  dialog.querySelector('.remove-delete-btn').addEventListener('click', () => {
+    dialog.querySelector('[data-step="choose"]').hidden = true;
+    dialog.querySelector('[data-step="confirm"]').hidden = false;
+    dialog.querySelector('.remove-back-btn').focus();
+  });
+  dialog.querySelector('.remove-back-btn').addEventListener('click', () => {
+    dialog.querySelector('[data-step="confirm"]').hidden = true;
+    dialog.querySelector('[data-step="choose"]').hidden = false;
+    dialog.querySelector('.remove-delete-btn').focus();
+  });
+  dialog.querySelector('.remove-confirm-btn').addEventListener('click', () => run('delete'));
+  dialog.querySelector('.remove-cancel-btn').addEventListener('click', close);
+  dialog.showModal();
+  dialog.querySelector('.remove-save-btn').focus();
+}
+
+async function removalLanded(itemId) {
+  try {
+    const inventory = await apiGetWithRetry('inventory', { timeoutMs: 45000, attempts: 1 });
+    return Array.isArray(inventory) && !inventory.some(i => i.itemId === itemId);
+  } catch { return false; }
+}
+
+state.savedItems = [];
+async function loadSavedItems() {
+  if (!connected()) return;
+  try { state.savedItems = (await apiGetWithRetry('savedItems')) || []; }
+  catch { state.savedItems = []; }
+  renderSavedItems();
+}
+
+function renderSavedItems() {
+  const list = document.getElementById('savedList');
+  const count = document.getElementById('savedCount');
+  if (!list) return;
+  count.textContent = state.savedItems.length ? `(${state.savedItems.length})` : '';
+  if (!state.savedItems.length) {
+    list.innerHTML = '<div class="empty-state">Nothing saved for later. Use "Remove item…" on an inventory card to move something here.</div>';
+    return;
+  }
+  list.innerHTML = `<div class="saved-grid">${state.savedItems.map(s => `
+    <div class="saved-card">
+      <h4>${escapeHtml([s.brand, s.item].filter(Boolean).join(' — ') || s.itemId)}</h4>
+      <div class="meta">
+        <span><b>Saved —</b> ${escapeHtml(String(s.dateSaved || '').slice(0, 10))}</span>
+        ${s.reason ? `<span><b>Why —</b> ${escapeHtml(s.reason)}</span>` : ''}
+        ${s.listPrice ? `<span><b>List price —</b> ${escapeHtml(String(s.listPrice))}</span>` : ''}
+        ${s.liveWhenSaved ? `<span class="saved-live"><b>Was live on —</b> ${escapeHtml(s.liveWhenSaved)}</span>` : ''}
+      </div>
+      <button type="button" class="btn secondary restore-item-btn" data-id="${escapeHtml(s.itemId)}">Restore to inventory</button>
+      <p class="status-msg restore-status" role="status"></p>
+    </div>`).join('')}</div>`;
+  list.querySelectorAll('.restore-item-btn').forEach(btn => btn.addEventListener('click', () => restoreSavedItem(btn)));
+}
+
+async function restoreSavedItem(btn) {
+  const status = btn.parentElement.querySelector('.restore-status');
+  const itemId = btn.dataset.id;
+  btn.disabled = true;
+  status.textContent = 'Restoring… this can take up to a minute.';
+  let res = null;
+  try { res = await apiPost('restoreItem', { itemId }); } catch { res = null; }
+  await Promise.all([loadInventory(), loadPostingQueueData()]);
+  const back = state.inventory.some(i => i.itemId === itemId);
+  if (!back) {
+    btn.disabled = false;
+    status.textContent = (res && res.error) || "Couldn't confirm the restore — reload to check.";
+    return;
+  }
+  refreshInventoryViews();
+  loadSavedItems();
 }
 
 function renderCategoryCards(cat) {
@@ -2144,6 +2303,7 @@ renderAction();
 populateMetricForm();
 
 loadSalesData().then(renderStats);
+loadSavedItems();
 Promise.all([loadInventory(), loadDescriptionsData(), loadPostingQueueData(), loadMetricsData(), loadPhotosData(), loadItemActionsData()]).then(() => {
   state.loadedAt = new Date().toISOString();
   renderWheel();

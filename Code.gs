@@ -74,8 +74,10 @@ function doGet(e) {
   if (action === 'sourcingIntel') return jsonOut(getSourcingIntel());
   if (action === 'acquireBundle') return jsonOut(getAcquireBundle());
   if (action === 'salesBundle') return jsonOut(getSalesBundle());
+  if (action === 'savedItems') return jsonOut(getSavedItems());
   if (action === 'itemActions') return jsonOut(getItemActions());
   if (action === 'debugHeaders') return jsonOut(debugHeaders());
+  if (action === 'debugFormulas') return jsonOut(debugFormulas(e.parameter.sheet, Number(e.parameter.start) || 1, Number(e.parameter.n) || 5));
   if (action === 'debugRows') return jsonOut(debugRows(e.parameter.sheet, Number(e.parameter.start) || 1, Number(e.parameter.n) || 20));
   return jsonOut({ error: 'unknown action' });
 }
@@ -88,6 +90,16 @@ function debugRestoreRow(sheetName, rowNum, values) {
   if (!sheet) return { ok: false, error: 'not found' };
   sheet.getRange(rowNum, 1, 1, values.length).setValues([values]);
   return { ok: true };
+}
+
+// Read-only: formulas (not values) for a row range, to see how a tab is built
+// before writing row-level changes to it.
+function debugFormulas(sheetName, startRow, n) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+  if (!sheet) return { error: 'not found' };
+  var lastCol = sheet.getLastColumn();
+  var range = sheet.getRange(startRow, 1, n, lastCol);
+  return { formulas: range.getFormulas(), lastRow: sheet.getLastRow(), lastCol: lastCol, frozen: sheet.getFrozenRows() };
 }
 
 // Dumps a raw row range (1-indexed, sheet row numbers) from any named sheet
@@ -141,6 +153,8 @@ function doPost(e) {
   if (action === 'upsertSourcingIntel') return jsonOut(upsertSourcingIntel(body));
   if (action === 'upsertSales') return jsonOut(upsertSales(body));
   if (action === 'setBalances') return jsonOut(setBalances(body));
+  if (action === 'removeItem') return jsonOut(removeItem(body));
+  if (action === 'restoreItem') return jsonOut(restoreItem(body));
   if (action === 'runMaintenance') return jsonOut(runMaintenance(body.task));
   if (action === 'debugPoshmark') return jsonOut(debugPoshmark(body.query));
   if (action === 'dropListingPrice') return jsonOut(dropListingPrice(body));
@@ -1579,6 +1593,235 @@ function upsertMarketObservations(observations) {
 
 function setMarketObservations(body) {
   return upsertMarketObservations(body.observations || [body]);
+}
+
+// ---------------------------------------------------------------------
+// Removing items — "delete for good" or "save for later".
+//
+// Listing Hub mirrors the source tabs with formulas that point at fixed
+// source rows, and its "Source row" column is a stored number the site uses
+// to find an item's row. Deleting a source row would shift every item below
+// it and send edits to the wrong item, so a removed item's source row is
+// cleared (left blank) instead, and only its Listing Hub row is deleted —
+// nothing refers to hub rows by position.
+//
+// Save for later copies the item, including every cell of both rows
+// (formulas kept as formulas), into the Saved for Later tab, so restoreItem
+// can put it back exactly where it was.
+// ---------------------------------------------------------------------
+
+var SAVED_SHEET_NAME = 'Saved for Later';
+var SAVED_HEADERS = [
+  'Item ID', 'Date Saved', 'Reason', 'Category', 'Brand', 'Size', 'Item', 'Condition', 'Est. value',
+  'List price', 'Floor price', 'Platforms', 'Live Listings When Saved', 'Source Tab', 'Source Row',
+  'Original Source Row (JSON)', 'Original Hub Row (JSON)', 'Queue Statuses (JSON)',
+];
+
+function getSavedSheet() { return getOrCreateSheet(SAVED_SHEET_NAME, SAVED_HEADERS); }
+
+function getSavedItems() {
+  return readRecords(getSavedSheet()).filter(function (r) { return r['Item ID']; }).map(function (r) {
+    return {
+      itemId: r['Item ID'], dateSaved: r['Date Saved'], reason: r['Reason'], category: r['Category'], brand: r['Brand'],
+      size: r['Size'], item: r['Item'], condition: r['Condition'], estValue: r['Est. value'], listPrice: r['List price'],
+      floorPrice: r['Floor price'], platforms: r['Platforms'], liveWhenSaved: r['Live Listings When Saved'],
+      sourceTab: r['Source Tab'],
+    };
+  });
+}
+
+// Cell snapshot that survives JSON: formulas stay formulas, dates stay dates.
+function snapshotRow(range) {
+  var values = range.getValues()[0];
+  var formulas = range.getFormulas()[0];
+  return values.map(function (v, i) {
+    if (formulas[i]) return ['f', formulas[i]];
+    if (Object.prototype.toString.call(v) === '[object Date]') return ['d', v.getTime()];
+    return ['v', v];
+  });
+}
+function snapshotToCells(snapshot) {
+  return snapshot.map(function (c) { return c[0] === 'd' ? new Date(c[1]) : c[1]; });
+}
+
+function tableRowsForItem(sheetName, anchors, itemId) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+  if (!sheet) return { sheet: null, rows: [] };
+  var t = readTable(sheet, anchors);
+  var col = colIndex(t.colMap, 'Item ID');
+  if (col === -1) return { sheet: sheet, rows: [], colMap: t.colMap };
+  var rows = [];
+  t.rows.forEach(function (r, i) {
+    if (String(r[col]).trim() === String(itemId)) rows.push({ row: t.headerSheetRow + 1 + i, values: r });
+  });
+  return { sheet: sheet, rows: rows, colMap: t.colMap };
+}
+
+function locateItem(itemId) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var hub = findHubRow(itemId);
+  if (hub.error) return hub;
+  var hubLastCol = hub.sheet.getLastColumn();
+  var hubRange = hub.sheet.getRange(hub.row, 1, 1, hubLastCol);
+  var hubValues = hubRange.getValues()[0];
+  var sourceTab = String(hubValues[colIndex(hub.colMap, 'Source tab')] || '');
+  var sourceRow = Number(hubValues[colIndex(hub.colMap, 'Source row')]);
+  var sourceSheet = ss.getSheetByName(sourceTab);
+  if (!sourceSheet || !sourceRow) return { error: 'Could not find the source row for ' + itemId + '.' };
+  var sourceHeader = findHeaderRow(sourceSheet, ['Status']);
+  if (!sourceHeader) return { error: 'Could not find the header row in ' + sourceTab + '.' };
+  var sourceLastCol = sourceSheet.getLastColumn();
+  var sourceRange = sourceSheet.getRange(sourceRow, 1, 1, sourceLastCol);
+  // Sanity check before touching anything: the hub row's Item must be the
+  // source row's Item, or the stored row number has drifted.
+  var hubItem = String(hubValues[colIndex(hub.colMap, 'Item')] || '').trim();
+  var sourceItemCol = colIndex(sourceHeader.colMap, 'Item');
+  var sourceItem = sourceItemCol === -1 ? '' : String(sourceRange.getValues()[0][sourceItemCol] || '').trim();
+  if (!hubItem || hubItem !== sourceItem) {
+    return { error: 'Listing Hub and ' + sourceTab + ' row ' + sourceRow + ' disagree about ' + itemId + ' ("' + hubItem + '" vs "' + sourceItem + '"). Nothing was changed.' };
+  }
+  var field = function (name) { var i = colIndex(hub.colMap, name); return i === -1 ? '' : hubValues[i]; };
+  return {
+    hub: hub, hubRange: hubRange, sourceSheet: sourceSheet, sourceTab: sourceTab, sourceRow: sourceRow,
+    sourceRange: sourceRange, field: field,
+  };
+}
+
+function removeItem(body) {
+  var itemId = String(body.itemId || '').trim();
+  var mode = body.mode;
+  if (!itemId || (mode !== 'delete' && mode !== 'saveForLater')) return { ok: false, error: 'Missing itemId, or mode is not delete/saveForLater.' };
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    var loc = locateItem(itemId);
+    if (loc.error) return { ok: false, error: loc.error };
+
+    var queue = tableRowsForItem(POSTING_QUEUE_SHEET, ['Listing ID'], itemId);
+    var qStatus = colIndex(queue.colMap || {}, 'Status');
+    var qUrl = colIndex(queue.colMap || {}, 'Listing URL');
+    var qPlatform = colIndex(queue.colMap || {}, 'Platform');
+    var qListing = colIndex(queue.colMap || {}, 'Listing ID');
+    var live = queue.rows.filter(function (r) {
+      return qStatus !== -1 && String(r.values[qStatus]) === 'Active' && qUrl !== -1 && String(r.values[qUrl] || '').trim();
+    }).map(function (r) { return r.values[qPlatform]; });
+
+    var related = mode === 'delete' ? {
+      queue: queue,
+      descriptions: tableRowsForItem(DESCRIPTIONS_SHEET, ['Item ID', 'Listing ID'], itemId),
+      photos: tableRowsForItem(PHOTOS_SHEET_NAME, ['Item ID'], itemId),
+      metrics: tableRowsForItem(METRICS_SHEET_NAME, ['Item ID'], itemId),
+    } : null;
+
+    var summary = {
+      itemId: itemId, mode: mode, sourceTab: loc.sourceTab, sourceRow: loc.sourceRow, hubRow: loc.hub.row,
+      item: loc.field('Item'), liveListings: live, queueRows: queue.rows.length,
+    };
+    if (related) {
+      summary.descriptionRows = related.descriptions.rows.length;
+      summary.photoRows = related.photos.rows.length;
+      summary.metricRows = related.metrics.rows.length;
+    }
+    if (body.dryRun) return { ok: true, dryRun: true, summary: summary };
+
+    if (mode === 'saveForLater') {
+      var statuses = {};
+      queue.rows.forEach(function (r) { statuses[r.values[qListing]] = r.values[qStatus]; });
+      upsertRecords(getSavedSheet(), SAVED_HEADERS, [{
+        'Item ID': itemId, 'Date Saved': todayIso(), 'Reason': body.reason || '',
+        'Category': loc.field('Category'), 'Brand': loc.field('Brand'), 'Size': loc.field('Size'), 'Item': loc.field('Item'),
+        'Condition': loc.field('Condition'), 'Est. value': loc.field('Est. value'), 'List price': loc.field('List price'),
+        'Floor price': loc.field('Floor price'), 'Platforms': loc.field('Platforms'),
+        'Live Listings When Saved': live.join(', '), 'Source Tab': loc.sourceTab, 'Source Row': loc.sourceRow,
+        'Original Source Row (JSON)': JSON.stringify(snapshotRow(loc.sourceRange)),
+        'Original Hub Row (JSON)': JSON.stringify({ row: loc.hub.row, cells: snapshotRow(loc.hubRange) }),
+        'Queue Statuses (JSON)': JSON.stringify(statuses),
+      }], function (get) { return String(get('Item ID') || ''); });
+    }
+
+    loc.sourceRange.clearContent();
+    loc.hub.sheet.deleteRow(loc.hub.row);
+
+    if (mode === 'saveForLater') {
+      queue.rows.forEach(function (r) { if (qStatus !== -1) queue.sheet.getRange(r.row, qStatus + 1).setValue('Saved for later'); });
+    } else {
+      // Bottom-up so earlier deletions don't shift the rows still to delete.
+      ['queue', 'descriptions', 'photos', 'metrics'].forEach(function (key) {
+        var set = related[key];
+        set.rows.map(function (r) { return r.row; }).sort(function (a, b) { return b - a; })
+          .forEach(function (row) { set.sheet.deleteRow(row); });
+      });
+    }
+
+    logItemAction(itemId, mode === 'delete' ? 'Deleted Item' : 'Saved for Later',
+      [loc.field('Item'), body.reason || ''].filter(String).join(' — '));
+    return { ok: true, summary: summary };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Puts a Saved for Later item back: its source row (if that row is still
+// blank), a Listing Hub row with its formulas, and its posting-queue statuses.
+function restoreItem(body) {
+  var itemId = String(body.itemId || '').trim();
+  if (!itemId) return { ok: false, error: 'Missing itemId.' };
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    var saved = getSavedSheet();
+    var t = readTable(saved, ['Item ID']);
+    var idx = -1;
+    t.rows.forEach(function (r, i) { if (String(val(r, t.colMap, 'Item ID')) === itemId) idx = i; });
+    if (idx === -1) return { ok: false, error: itemId + ' is not in Saved for Later.' };
+    var rec = t.rows[idx];
+    if (!findHubRow(itemId).error) return { ok: false, error: itemId + ' is already in the inventory.' };
+
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sourceSheet = ss.getSheetByName(String(val(rec, t.colMap, 'Source Tab')));
+    var sourceRow = Number(val(rec, t.colMap, 'Source Row'));
+    var sourceCells = snapshotToCells(JSON.parse(val(rec, t.colMap, 'Original Source Row (JSON)')));
+    var hubSnap = JSON.parse(val(rec, t.colMap, 'Original Hub Row (JSON)'));
+    if (!sourceSheet || !sourceRow) return { ok: false, error: 'The saved record is missing its source tab or row.' };
+    var target = sourceSheet.getRange(sourceRow, 1, 1, sourceCells.length);
+    var occupied = target.getValues()[0].some(function (v) { return v !== '' && v !== null; });
+    if (occupied) return { ok: false, error: sourceSheet.getName() + ' row ' + sourceRow + ' has been reused, so it cannot be restored there. Nothing was changed.' };
+
+    // New hub row goes after the last row that has an Item ID. Formulas that
+    // refer to their own hub row (A5, V5…) move with it; references into the
+    // source tabs ('Tab'!A5) and absolute ranges ($B$2:$B$166) stay as saved.
+    var hubSheet = ss.getSheetByName(LISTING_HUB_SHEET);
+    var hubTable = readTable(hubSheet, ['Item ID']);
+    var idCol = colIndex(hubTable.colMap, 'Item ID');
+    var lastWithId = hubTable.headerSheetRow;
+    hubTable.rows.forEach(function (r, i) { if (String(r[idCol]).trim()) lastWithId = hubTable.headerSheetRow + 1 + i; });
+    var newHubRow = lastWithId + 1;
+    if (newHubRow <= hubSheet.getLastRow()) hubSheet.insertRowAfter(lastWithId);
+    var oldHubRow = Number(hubSnap.row);
+    var selfRef = new RegExp("(^|[^!$A-Za-z0-9_'])(\\$?[A-Z]{1,3})" + oldHubRow + "(?![0-9])", 'g');
+    var hubCells = snapshotToCells(hubSnap.cells).map(function (c, i) {
+      return hubSnap.cells[i][0] === 'f' ? String(c).replace(selfRef, function (m, pre, col) { return pre + col + newHubRow; }) : c;
+    });
+
+    target.setValues([sourceCells]);
+    hubSheet.getRange(newHubRow, 1, 1, hubCells.length).setValues([hubCells]);
+
+    var statuses = JSON.parse(val(rec, t.colMap, 'Queue Statuses (JSON)') || '{}');
+    var queue = tableRowsForItem(POSTING_QUEUE_SHEET, ['Listing ID'], itemId);
+    var qStatus = colIndex(queue.colMap || {}, 'Status');
+    var qListing = colIndex(queue.colMap || {}, 'Listing ID');
+    queue.rows.forEach(function (r) {
+      var prev = statuses[r.values[qListing]];
+      if (qStatus !== -1 && prev !== undefined && String(r.values[qStatus]) === 'Saved for later') queue.sheet.getRange(r.row, qStatus + 1).setValue(prev);
+    });
+
+    saved.deleteRow(t.headerSheetRow + 1 + idx);
+    logItemAction(itemId, 'Restored from Saved for Later', '');
+    return { ok: true, hubRow: newHubRow, sourceRow: sourceRow };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // ---------------------------------------------------------------------

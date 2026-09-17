@@ -90,3 +90,12 @@ Two Sheet tabs, both created automatically:
 - **Platform Balances** — one snapshot per day per site of **available** cash (ready to withdraw) and **pending / on hold**. Update it from Stats → "Update available cash", or ask Claude to read eBay's financial summary and Poshmark's My Balance.
 
 A sold item with no Sales row shows under "Not recorded by site" instead of disappearing from the totals.
+
+## 6. Removing items (Inventory tab)
+
+Open an inventory card and choose **Remove item…**:
+
+- **Save for later** moves the item into the **Saved for Later** tab (created automatically) with an optional reason. It keeps a full copy of the item's source row and Listing Hub row — formulas included — plus its posting-queue statuses, so **Restore to inventory** (bottom of the Inventory tab) puts it back exactly as it was. Its queue rows are marked "Saved for later" meanwhile.
+- **Delete for good** removes the item plus its posting queue rows, listing descriptions, photos and stats. Sales and the Item Actions log are kept. There's a second confirmation step.
+
+Either way the item's row in its source tab is **cleared, not deleted**: Listing Hub finds each item by a stored source row number, so deleting a row would shift every item below it. Removing an item never ends its live listings — the dialog warns when it's still live somewhere.

@@ -111,6 +111,12 @@
       <div id="catSections"></div>
     </div>
 
+    <details class="saved-section" id="savedSection">
+      <summary><span class="saved-title">Saved for later</span> <span class="saved-count" id="savedCount"></span></summary>
+      <p class="section-intro saved-intro">Things you have but aren't posting right now. They live in the "Saved for Later" tab of your Sheet, out of the inventory, with everything needed to bring them back.</p>
+      <div id="savedList"></div>
+    </details>
+
   </section>
 
   <!-- ===================== STATS ===================== -->
@@ -291,6 +297,8 @@
   </section>
 
 </main>
+
+<dialog class="remove-dialog" id="removeItemDialog" aria-labelledby="removeItemTitle"></dialog>
 
 <div class="acq-drawer-backdrop" id="acqDrawerBackdrop" hidden></div>
 <aside class="acq-drawer" id="acqDrawer" role="dialog" aria-modal="true" aria-labelledby="acqDrawerTitle" hidden>
