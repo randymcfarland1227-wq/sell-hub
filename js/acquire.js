@@ -4,8 +4,10 @@
 // file only decides how to show them.
 
 const acqState = {
-  data: { watchlist: [], trends: [], history: [], intel: [] },
+  data: { watchlist: [], trends: [], history: [], intel: [], platformTrends: [] },
   opps: [],
+  lanes: [],
+  expandedLanes: new Set(),
   loading: true,
   error: '',
   filters: { q: '', category: '', budget: '', profit: '', sellThrough: '', risk: '', conditionReq: '', location: '', preset: '' },
@@ -15,6 +17,7 @@ const acqState = {
   drawerMode: null,
   lastFocus: null,
   editingHuntId: null,
+  researchTerm: '',
   showAll: false,
 };
 const ACQ_PAGE_SIZE = 24;
@@ -88,7 +91,7 @@ async function loadAcquireData() {
   if (setup) setup.style.display = connected() ? 'none' : 'block';
 
   if (!connected()) {
-    acqState.data = { watchlist: localGet('sellHub.acquire.local', []), trends: [], history: [], intel: [] };
+    acqState.data = { watchlist: localGet('sellHub.acquire.local', []), trends: [], history: [], intel: [], platformTrends: [] };
   } else {
     const onRetry = () => {
       const el = document.getElementById('acqFreshness');
@@ -97,12 +100,12 @@ async function loadAcquireData() {
     try {
       const bundle = await apiGetWithRetry('acquireBundle', { onRetry });
       if (!bundle || bundle.error || !Array.isArray(bundle.trends)) throw new Error('bundle unavailable');
-      acqState.data = { watchlist: bundle.watchlist || [], trends: bundle.trends || [], history: bundle.history || [], intel: bundle.intel || [] };
+      acqState.data = { watchlist: bundle.watchlist || [], trends: bundle.trends || [], history: bundle.history || [], intel: bundle.intel || [], platformTrends: bundle.platformTrends || [] };
     } catch {
       // Older backend without the bundle: fall back to the original two calls.
       try {
         const [watchlist, trends] = await Promise.all([apiGetWithRetry('acquire'), apiGetWithRetry('trends')]);
-        acqState.data = { watchlist: watchlist || [], trends: trends || [], history: [], intel: [] };
+        acqState.data = { watchlist: watchlist || [], trends: trends || [], history: [], intel: [], platformTrends: [] };
       } catch {
         acqState.error = "Couldn't reach your Sheet, so market data isn't loaded. Reload the page to try again.";
       }
@@ -117,6 +120,7 @@ async function loadAcquireData() {
 function rebuildOpportunities() {
   acqState.data.watchlist = state.acquire;
   acqState.opps = buildOpportunities(acqState.data, ACQUIRE_CONFIG, ACQUIRE_TAXONOMY, new Date());
+  acqState.lanes = buildLanes(acqState.opps, ACQUIRE_CONFIG);
 }
 
 function acqOpp(id) { return acqState.opps.find(o => o.id === id) || null; }
@@ -176,6 +180,90 @@ function renderAcquirePulse() {
 // ---------------------------------------------------------------------------
 // Explorer
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Lanes — three shelves above the explorer. The explorer still holds every
+// researched target; these answer "what should I actually be hunting?" without
+// making Randy filter for it. Each shelf states its own bar, so a short shelf
+// reads as "the data doesn't support more" rather than "something is broken".
+// ---------------------------------------------------------------------------
+function laneCriteriaText(lane) {
+  const min = lane.min || {};
+  const bits = [];
+  if (min.score !== undefined) bits.push(`score ${min.score}+`);
+  if (min.profit !== undefined) bits.push(`${acqMoney(min.profit)}+ profit`);
+  if (min.roi !== undefined) bits.push(`${Math.round(min.roi * 100)}%+ return`);
+  if (min.sellThrough !== undefined) bits.push(`${Math.round(min.sellThrough * 100)}%+ sell-through`);
+  if (min.sales !== undefined) bits.push(`${acqCount(min.sales)}+ recent sales`);
+  if (min.confidence !== undefined) bits.push('medium+ confidence');
+  if (lane.maxRisk) bits.push(`risk ${lane.maxRisk.toLowerCase()} or below`);
+  if (lane.shippingEase !== undefined) bits.push('ships easily');
+  if (lane.requireBuyable) bits.push('max buy beats the usual cost');
+  return bits.join(' · ');
+}
+
+function trendingTermsHTML(groups) {
+  if (!groups.length) return '';
+  return groups.map(group => `
+    <div class="acq-trending">
+      <h5>${escapeHtml(group.platform)} — what shoppers are searching for</h5>
+      <p class="acq-trending-sub">${escapeHtml(group.source || 'Platform trending searches')}${group.date ? ` · pulled ${escapeHtml(acqShortDate(group.date))}` : ''}</p>
+      <ul class="trend-terms">
+        ${group.terms.map(t => `
+          <li>
+            ${t.opportunity
+              ? `<button type="button" class="trend-term" data-open="${escapeHtml(t.opportunity.id)}">${escapeHtml(t.term)}</button>`
+              : t.url
+                ? `<a class="trend-term" href="${escapeHtml(t.url)}" target="_blank" rel="noopener">${escapeHtml(t.term)}</a>`
+                : `<span class="trend-term">${escapeHtml(t.term)}</span>`}
+            ${t.searchDelta ? `<span class="trend-delta">${escapeHtml(t.searchDelta)}</span>` : ''}
+            ${t.opportunity ? '' : `<button type="button" class="trend-research" data-research="" data-term="${escapeHtml(t.term)}">Research it</button>`}
+          </li>`).join('')}
+      </ul>
+    </div>`).join('');
+}
+
+function emergingEmptyHTML(meta) {
+  const since = meta.since ? ` since ${acqShortDate(meta.since)}` : '';
+  return `
+    <p class="lane-empty">
+      No rising prices to report yet. Price direction only counts once two snapshots of the same
+      target sit at least ${meta.needsDays} days apart — right now there ${meta.days === 1 ? 'is' : 'are'}
+      ${meta.days} day${meta.days === 1 ? '' : 's'} of history across ${acqCount(meta.tracking)} targets${since}.
+      Keep running the market refresh and this fills itself in.
+    </p>`;
+}
+
+function renderAcquireLanes() {
+  const el = document.getElementById('acqLanes');
+  if (!el) return;
+  if (acqState.loading) { el.innerHTML = '<div class="empty-state">Loading market data…</div>'; return; }
+  if (acqState.error) { el.innerHTML = ''; return; }
+
+  const trending = summarizePlatformTrends(acqState.data.platformTrends, acqState.opps);
+  el.innerHTML = acqState.lanes.map(lane => {
+    const expanded = acqState.expandedLanes.has(lane.id);
+    const shown = expanded ? lane.items : lane.items.slice(0, ACQUIRE_CONFIG.laneSize);
+    const body = shown.length
+      ? `<div class="opp-grid lane-grid">${shown.map(oppCardHTML).join('')}</div>`
+      : lane.id === 'emerging' ? emergingEmptyHTML(lane.meta) : `<p class="lane-empty">${escapeHtml(lane.empty)}</p>`;
+    const criteria = laneCriteriaText(lane);
+    return `
+      <section class="acq-lane lane-${lane.id}">
+        <div class="lane-head">
+          <h4><span aria-hidden="true">${lane.icon}</span> ${escapeHtml(lane.title)} <span class="lane-count">${lane.total}</span></h4>
+          <p class="lane-blurb">${escapeHtml(lane.blurb)}</p>
+          ${criteria ? `<p class="lane-criteria">Bar to get here: ${escapeHtml(criteria)}</p>` : ''}
+        </div>
+        ${body}
+        ${lane.id === 'emerging' ? trendingTermsHTML(trending) : ''}
+        ${lane.items.length > shown.length || (expanded && lane.items.length > ACQUIRE_CONFIG.laneSize)
+          ? `<div class="lane-foot"><button type="button" class="btn secondary" data-lane="${lane.id}">${expanded ? 'Show fewer' : `See all ${lane.total}`}</button></div>`
+          : ''}
+      </section>`;
+  }).join('');
+}
+
 function renderAcquireControls() {
   const sort = document.getElementById('acqSort');
   if (sort && !sort.options.length) {
@@ -622,7 +710,7 @@ function researchFormHTML(categoryId) {
     <h3 id="acqDrawerTitle">Add research target</h3>
     <p class="muted">Something worth pricing out. It shows up as "awaiting data" until the next market refresh pulls comps for it.</p>
     <form class="research-form" novalidate>
-      <label class="field"><span>Search term <b aria-hidden="true">*</b></span><input name="searchTerm" required placeholder="e.g. Canon AE-1 film camera"></label>
+      <label class="field"><span>Search term <b aria-hidden="true">*</b></span><input name="searchTerm" required value="${escapeHtml(acqState.researchTerm || '')}" placeholder="e.g. Canon AE-1 film camera"></label>
       <div class="field-row">
         <label class="field"><span>Category</span><select name="category">${ACQUIRE_TAXONOMY.map(g => `<option${group && group.id === g.id ? ' selected' : ''}>${escapeHtml(g.label)}</option>`).join('')}</select></label>
         <label class="field"><span>Subcategory</span><input name="subcategory" list="acqSubcategoryList"></label>
@@ -951,6 +1039,7 @@ function renderHuntAddForm() {
 function renderAcquireAll() {
   renderAcquireFreshness();
   renderAcquirePulse();
+  renderAcquireLanes();
   renderAcquireControls();
   renderAcquireExplorer();
   renderAcquireCategories();
@@ -1025,7 +1114,12 @@ function wireAcquire() {
     if (!t) return;
     if (t.dataset.hunt !== undefined) { ev.preventDefault(); ev.stopPropagation(); await toggleHunt(t.dataset.hunt, t); return; }
     if (t.dataset.open !== undefined) { ev.preventDefault(); openAcquireDrawer('opp', t.dataset.open); return; }
-    if (t.dataset.research !== undefined) { ev.preventDefault(); openAcquireDrawer('research', t.dataset.research); return; }
+    if (t.dataset.research !== undefined) {
+      ev.preventDefault();
+      acqState.researchTerm = t.dataset.term || '';
+      openAcquireDrawer('research', t.dataset.research);
+      return;
+    }
     if (t.dataset.preset !== undefined) {
       const preset = acqState.filters.preset === t.dataset.preset ? '' : t.dataset.preset;
       setAcquireFilter({ preset });
@@ -1045,6 +1139,12 @@ function wireAcquire() {
       return;
     }
     if (t.dataset.showAll !== undefined) { acqState.showAll = true; renderAcquireExplorer(); return; }
+    if (t.dataset.lane !== undefined) {
+      if (acqState.expandedLanes.has(t.dataset.lane)) acqState.expandedLanes.delete(t.dataset.lane);
+      else acqState.expandedLanes.add(t.dataset.lane);
+      renderAcquireLanes();
+      return;
+    }
     if (t.classList.contains('ae-edit-btn')) { acqState.editingHuntId = t.dataset.id; renderHuntList(); return; }
     if (t.classList.contains('ae-delete-btn')) { await deleteHuntEntry(t.dataset.id); return; }
     if (t.classList.contains('ae-cancel')) { acqState.editingHuntId = null; renderHuntList(); return; }

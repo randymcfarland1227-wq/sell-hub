@@ -74,6 +74,55 @@ const ACQUIRE_CONFIG = {
     { min: 0,  id: 'pass',      label: 'Usually pass', icon: '❌' },
   ],
 
+
+  // Shelves at the top of the tab. The explorer holds everything researched;
+  // these three answer the three questions that actually come up in a store:
+  // what's worth real money, what turns over fast, and what's heating up.
+  // Every threshold here is a claim about the data, so nothing lands on a
+  // shelf without the numbers behind it.
+  lanes: [
+    {
+      id: 'strong',
+      title: 'Strong buys',
+      icon: '🔥',
+      blurb: 'Best money per dollar spent, with enough sold data to trust the number.',
+      empty: 'Nothing clears the bar right now. That usually means the market data needs a refresh, not that there is nothing out there.',
+      min: {
+        score: 70,           // Strong band or better
+        profit: 15,          // at least this much expected profit per flip
+        roi: 0.8,            // and it roughly doubles what you put in
+      },
+      requireBuyable: true,  // max buy has to beat what these usually cost
+      sort: 'score',
+    },
+    {
+      id: 'quick',
+      title: 'Reliable quick sales',
+      icon: '⚡',
+      blurb: 'Smaller wins that move fast and rarely sit — low risk, easy to ship, proven demand.',
+      empty: 'Nothing has both a high sell-through and a real margin in the current data.',
+      min: {
+        sellThrough: 0.55,
+        sales: 50,           // a real, repeatedly-sold item, not a one-off
+        profit: 8,
+        confidence: 0.55,    // Medium confidence or better
+      },
+      maxRisk: 'Medium',
+      shippingEase: 0.6,     // small/medium parcels only
+      requireBuyable: true,
+      sort: 'velocity',
+    },
+    {
+      id: 'emerging',
+      title: 'Emerging trends',
+      icon: '📈',
+      blurb: 'Prices or demand moving up, plus what shoppers are searching for more of this week.',
+      empty: 'No rising prices yet — direction needs a few days of market snapshots to be real.',
+      sort: 'trend',
+    },
+  ],
+  laneSize: 6,
+
   // Thresholds for the status flags and Sourcing Pulse counts.
   flags: {
     fastSellThrough: 0.55,    // "Fast mover"

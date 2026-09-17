@@ -667,3 +667,114 @@ function calculateUserEdge(opp, userHistory) {
     note: 'Track what you paid for items to see your own profit and edge here.',
   };
 }
+
+// ---------------------------------------------------------------------------
+// Lanes — the curated shelves at the top of the tab. Each one is a filter over
+// the same opportunities the explorer holds, with its own reason for existing.
+// An opportunity can appear on more than one shelf: something can be both the
+// best money and the fastest sale, and pretending otherwise would hide it.
+// ---------------------------------------------------------------------------
+const RISK_ORDER = { Low: 1, Medium: 2, High: 3 };
+
+function laneBuyable(opp) {
+  const d = opp.derived;
+  if (d.maxBuy === null || !d.cost) return false;
+  return d.maxBuy >= d.cost.low;
+}
+
+function laneQualifies(opp, lane, config) {
+  const d = opp.derived;
+  if (!d.hasMarketData) return false;
+  const min = lane.min || {};
+  if (min.score !== undefined && d.score < min.score) return false;
+  if (min.profit !== undefined && (!d.profit || d.profit.mid < min.profit)) return false;
+  if (min.roi !== undefined && (d.roi === null || d.roi < min.roi)) return false;
+  if (min.sellThrough !== undefined && (d.sellThrough === null || d.sellThrough < min.sellThrough)) return false;
+  if (min.sales !== undefined && (d.sales === null || d.sales < min.sales)) return false;
+  if (min.confidence !== undefined && (!d.confidence || d.confidence.score < min.confidence)) return false;
+  if (lane.requireBuyable && !laneBuyable(opp)) return false;
+  if (lane.maxRisk) {
+    const risk = d.risk ? RISK_ORDER[d.risk] : null;
+    if (risk === null || risk > RISK_ORDER[lane.maxRisk]) return false;
+  }
+  if (lane.shippingEase !== undefined) {
+    const cls = config.shippingClasses[String(opp.intel.shippingClass || '').toLowerCase()];
+    if (!cls || cls.ease === null || cls.ease < lane.shippingEase) return false;
+  }
+  return true;
+}
+
+function laneSort(list, how) {
+  const by = {
+    score: (a, b) => b.derived.score - a.derived.score,
+    // Fewest days of supply first — that's what "moves fast" actually means.
+    velocity: (a, b) => {
+      const da = a.derived.velocity.daysOfSupply, db = b.derived.velocity.daysOfSupply;
+      if (da === null && db === null) return (b.derived.sellThrough || 0) - (a.derived.sellThrough || 0);
+      if (da === null) return 1;
+      if (db === null) return -1;
+      return da - db;
+    },
+    trend: (a, b) => (b.derived.trend.change || 0) - (a.derived.trend.change || 0),
+  };
+  return list.slice().sort(by[how] || by.score);
+}
+
+// "Emerging" is only ever claimed from real movement between two dated
+// snapshots. When there aren't enough snapshots yet the lane says so and shows
+// what it is tracking instead of inventing a direction.
+function buildEmergingLane(opps, config) {
+  const rising = opps.filter(o => o.derived.hasMarketData && o.derived.trend.direction === 'rising');
+  const tracked = opps.filter(o => o.derived.hasMarketData);
+  const dates = new Set();
+  tracked.forEach(o => o.history.forEach(h => { const d = String(h.date || '').slice(0, 10); if (d) dates.add(d); }));
+  const sorted = [...dates].sort();
+  return {
+    items: laneSort(rising, 'trend'),
+    tracking: tracked.length,
+    since: sorted[0] || null,
+    days: sorted.length,
+    needsDays: config.trend.minDays,
+  };
+}
+
+function buildLanes(opps, config) {
+  return config.lanes.map(lane => {
+    if (lane.id === 'emerging') {
+      const e = buildEmergingLane(opps, config);
+      return { ...lane, items: e.items, total: e.items.length, meta: e };
+    }
+    const matching = laneSort(opps.filter(o => laneQualifies(o, lane, config)), lane.sort);
+    return { ...lane, items: matching, total: matching.length, meta: null };
+  });
+}
+
+// Platform Trends rows (Depop's "Popular this week" so far): the newest pull
+// per platform, with a term matched to a researched opportunity where one
+// exists so a trending search can jump straight into the comps.
+function summarizePlatformTrends(rows, opps) {
+  if (!rows || !rows.length) return [];
+  const byPlatform = new Map();
+  rows.forEach(row => {
+    if (!row.term) return;
+    const key = String(row.platform || 'Other');
+    const date = String(row.date || '').slice(0, 10);
+    const entry = byPlatform.get(key);
+    if (!entry || date > entry.date) byPlatform.set(key, { platform: key, date, rows: [row] });
+    else if (date === entry.date) entry.rows.push(row);
+  });
+  return [...byPlatform.values()].map(group => ({
+    platform: group.platform,
+    date: group.date,
+    source: group.rows[0].source || '',
+    terms: group.rows
+      .slice()
+      .sort((a, b) => (a.rank || 99) - (b.rank || 99))
+      .map(row => {
+        const slug = opportunityIdFor(row.term);
+        const match = opps.find(o => o.id === slug) ||
+          opps.find(o => o.searchTerm.toLowerCase() === row.term.toLowerCase()) || null;
+        return { ...row, opportunity: match };
+      }),
+  })).sort((a, b) => a.platform.localeCompare(b.platform));
+}

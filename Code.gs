@@ -24,6 +24,9 @@
  *   GET  ?action=trends        -> [{searchTerm, platform, avgSoldPrice, recentSalesFound, sellThrough, lastChecked}]
  *   GET  ?action=itemActions   -> [{date, itemId, action, detail}] — log of price drops/offers sent/ignored recommendations
  *   POST {action:'addMetricEntry', listingId, itemId, platform, impressions, views, watchers, clicks, price}
+ *   POST {action:'addMetricEntries', date, rows:[...]}   — the same, in bulk
+ *   GET  ?action=localDeals / POST {action:'setLocalDeal', itemId, platform, status, buyer, when, where, note}
+ *   GET  ?action=platformTrends / POST {action:'setPlatformTrends', date, platform, rows:[{term, searches, searchDelta, url}]}
  *   POST {action:'addAcquireItem', brand, itemType, size, color, condition, targetPrice, bestPlatform, priority, notes} -> the new row
  *   POST {action:'updateAcquireItem', id, brand, itemType, size, color, condition, targetPrice, bestPlatform, priority, notes}
  *   POST {action:'deleteAcquireItem', id}
@@ -74,6 +77,8 @@ function doGet(e) {
   if (action === 'sourcingIntel') return jsonOut(getSourcingIntel());
   if (action === 'acquireBundle') return jsonOut(getAcquireBundle());
   if (action === 'salesBundle') return jsonOut(getSalesBundle());
+  if (action === 'localDeals') return jsonOut(getLocalDeals());
+  if (action === 'platformTrends') return jsonOut(getPlatformTrends());
   if (action === 'savedItems') return jsonOut(getSavedItems());
   if (action === 'itemActions') return jsonOut(getItemActions());
   if (action === 'debugHeaders') return jsonOut(debugHeaders());
@@ -142,6 +147,9 @@ function doPost(e) {
   var action = body.action;
 
   if (action === 'addMetricEntry') return jsonOut(addMetricEntry(body));
+  if (action === 'addMetricEntries') return jsonOut(addMetricEntries(body));
+  if (action === 'setLocalDeal') return jsonOut(setLocalDeal(body));
+  if (action === 'setPlatformTrends') return jsonOut(setPlatformTrends(body));
   if (action === 'addAcquireItem') return jsonOut(addAcquireItem(body));
   if (action === 'updateAcquireItem') return jsonOut(updateAcquireItem(body));
   if (action === 'deleteAcquireItem') return jsonOut(deleteAcquireItem(body.id));
@@ -1976,6 +1984,7 @@ function getAcquireBundle() {
     trends: getTrends(),
     history: getMarketHistory(),
     intel: getSourcingIntel(),
+    platformTrends: getPlatformTrends(),
     generatedAt: new Date().toISOString(),
   };
 }
@@ -2132,4 +2141,152 @@ function setupMarketDataTrigger() {
   });
   ScriptApp.newTrigger('refreshMarketData').timeBased().everyDays(1).create();
   refreshMarketData(); // run once immediately so there's data right away, not just after tomorrow's trigger
+}
+
+// ---------------------------------------------------------------------
+// Local Deals — the in-person side of selling (Facebook Marketplace and
+// anything else handed over face to face). A listing being "Pending" or
+// having a meetup booked isn't a listing status and isn't a sale yet, so
+// it lives in its own tab rather than being squeezed into the posting
+// queue. One row per item x platform; setting the status to "" clears it.
+// ---------------------------------------------------------------------
+var LOCAL_DEALS_SHEET_NAME = 'Local Deals';
+var LOCAL_DEALS_HEADERS = ['Item ID', 'Platform', 'Status', 'Buyer', 'When', 'Where', 'Note', 'Updated'];
+
+function getLocalDealsSheet() { return getOrCreateSheet(LOCAL_DEALS_SHEET_NAME, LOCAL_DEALS_HEADERS); }
+
+function getLocalDeals() {
+  return readRecords(getLocalDealsSheet())
+    .filter(function (r) { return String(r['Item ID'] || '').trim(); })
+    .map(function (r) {
+      return {
+        itemId: String(r['Item ID'] || '').trim(),
+        platform: String(r['Platform'] || '').trim(),
+        status: String(r['Status'] || '').trim(),
+        buyer: String(r['Buyer'] || '').trim(),
+        when: String(r['When'] || '').trim(),
+        where: String(r['Where'] || '').trim(),
+        note: String(r['Note'] || '').trim(),
+        updated: String(r['Updated'] || '').trim(),
+      };
+    });
+}
+
+// Upsert by Item ID + Platform. A blank status deletes the row, so
+// "nothing going on with this one" leaves no stale meetup behind.
+function setLocalDeal(body) {
+  var itemId = String(body.itemId || '').trim();
+  var platform = String(body.platform || '').trim();
+  if (!itemId || !platform) return { ok: false, error: 'Missing itemId or platform.' };
+
+  var sheet = getLocalDealsSheet();
+  var lastCol = sheet.getLastColumn();
+  var headerRow = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  var colOf = {};
+  headerRow.forEach(function (h, c) { if (String(h).trim()) colOf[String(h).trim().toLowerCase()] = c; });
+  var lastRow = sheet.getLastRow();
+  var values = lastRow > 1 ? sheet.getRange(2, 1, lastRow - 1, lastCol).getValues() : [];
+  var target = -1;
+  for (var i = 0; i < values.length; i++) {
+    if (String(values[i][colOf['item id']] || '').trim() === itemId &&
+        String(values[i][colOf['platform']] || '').trim().toLowerCase() === platform.toLowerCase()) { target = i; break; }
+  }
+
+  var status = String(body.status || '').trim();
+  if (!status) {
+    if (target === -1) return { ok: true, cleared: 0 };
+    sheet.deleteRow(target + 2);
+    return { ok: true, cleared: 1 };
+  }
+
+  var row = target === -1 ? new Array(lastCol).fill('') : values[target];
+  var set = function (name, value) { var c = colOf[name]; if (c !== undefined) row[c] = value; };
+  set('item id', itemId);
+  set('platform', platform);
+  set('status', status);
+  set('buyer', String(body.buyer || ''));
+  set('when', String(body.when || ''));
+  set('where', String(body.where || ''));
+  set('note', String(body.note || ''));
+  set('updated', todayIso());
+  var rowIndex = target === -1 ? sheet.getLastRow() + 1 : target + 2;
+  // "Fri Sep 18, 9:00 AM" is a note to a human, not a date — without a plain-text
+  // format Sheets parses it and the time is lost.
+  if (colOf['when'] !== undefined) {
+    sheet.getRange(rowIndex, colOf['when'] + 1).setNumberFormat('@');
+    SpreadsheetApp.flush(); // the format has to land before the value, or Sheets parses it first
+  }
+  sheet.getRange(rowIndex, 1, 1, lastCol).setValues([row]);
+  return { ok: true, saved: 1, row: rowIndex };
+}
+
+// ---------------------------------------------------------------------
+// Platform Trends — what a selling platform itself says is being searched
+// for right now (Depop's "Popular this week" is the first source). This is
+// demand the market data can't see: search interest, not completed sales.
+// One row per date x platform x term, so repeat pulls are idempotent and
+// the week-over-week shape is kept.
+// ---------------------------------------------------------------------
+var PLATFORM_TRENDS_SHEET_NAME = 'Platform Trends';
+var PLATFORM_TRENDS_HEADERS = ['Date', 'Platform', 'Term', 'Searches', 'Search Delta', 'Rank', 'URL', 'Source'];
+
+function getPlatformTrendsSheet() { return getOrCreateSheet(PLATFORM_TRENDS_SHEET_NAME, PLATFORM_TRENDS_HEADERS); }
+
+function getPlatformTrends() {
+  return readRecords(getPlatformTrendsSheet())
+    .filter(function (r) { return String(r['Term'] || '').trim(); })
+    .map(function (r) {
+      return {
+        date: String(r['Date'] || '').trim(),
+        platform: String(r['Platform'] || '').trim(),
+        term: String(r['Term'] || '').trim(),
+        searches: r['Searches'] === '' ? null : Number(r['Searches']),
+        searchDelta: String(r['Search Delta'] || '').trim(),
+        rank: r['Rank'] === '' ? null : Number(r['Rank']),
+        url: String(r['URL'] || '').trim(),
+        source: String(r['Source'] || '').trim(),
+      };
+    });
+}
+
+function setPlatformTrends(body) {
+  var rows = body.rows || [];
+  if (!rows.length) return { ok: false, error: 'No rows given.' };
+  var date = String(body.date || todayIso());
+  var records = rows.map(function (r, i) {
+    return {
+      'Date': String(r.date || date),
+      'Platform': String(r.platform || body.platform || ''),
+      'Term': String(r.term || ''),
+      'Searches': r.searches === undefined || r.searches === null || r.searches === '' ? '' : Number(r.searches),
+      'Search Delta': String(r.searchDelta || ''),
+      'Rank': r.rank === undefined || r.rank === null || r.rank === '' ? (i + 1) : Number(r.rank),
+      'URL': String(r.url || ''),
+      'Source': String(r.source || body.source || ''),
+    };
+  }).filter(function (r) { return r['Term'] && r['Platform']; });
+  var res = upsertRecords(getPlatformTrendsSheet(), PLATFORM_TRENDS_HEADERS, records, function (get) {
+    var term = String(get('Term') || '').trim().toLowerCase();
+    if (!term) return '';
+    return [String(get('Date') || '').slice(0, 10), String(get('Platform') || '').trim().toLowerCase(), term].join('|');
+  });
+  return { ok: true, updated: res.updated, added: res.added };
+}
+
+// Several metric rows in one request. The daily stats pull writes ~100 rows;
+// one POST per row spends most of its time on round trips.
+function addMetricEntries(body) {
+  var rows = body.rows || [];
+  if (!rows.length) return { ok: false, error: 'No rows given.' };
+  var date = String(body.date || '').trim() || Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  var sheet = getMetricsSheet();
+  var values = rows.map(function (r) {
+    return [
+      String(r.date || date), r.listingId || '', r.itemId || '', r.platform || '',
+      r.impressions || 0, r.views || 0, r.watchers || 0, r.clicks || 0,
+      r.price === undefined || r.price === null ? '' : r.price, r.source || body.source || 'manual',
+    ];
+  });
+  sheet.getRange(sheet.getLastRow() + 1, 1, values.length, values[0].length).setValues(values);
+  return { ok: true, added: values.length, date: date };
 }

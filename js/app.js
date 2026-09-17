@@ -18,6 +18,8 @@ const state = {
   balances: [],           // from Platform Balances tab (available / pending cash per site, by date)
   photos: [],             // from Photos tab (cover photo per item x platform)
   itemActions: [],        // from Item Actions tab (price drops/offers sent/ignored, logged from pricing actions)
+  localDeals: [],         // from Local Deals tab (meetups/pending on face-to-face sales)
+  editingLocalDeal: null, // "<itemId>|<platform label>" of the local deal being edited
   featuredActions: new Set(),
   loadedAt: '',
   expandedItems: new Set(),
@@ -285,6 +287,12 @@ async function loadItemActionsData() {
   try { state.itemActions = (await apiGetWithRetry('itemActions', { timeoutMs: 45000 })) || []; }
   catch { state.itemActions = []; }
 }
+async function loadLocalDealsData() {
+  if (!connected()) { state.localDeals = []; return; }
+  try { state.localDeals = (await apiGetWithRetry('localDeals', { timeoutMs: 45000 })) || []; }
+  catch { state.localDeals = []; }
+}
+
 // Item Actions rows are appended in chronological order, so the last match
 // for an item is its most recent logged action.
 function latestActionFor(itemId) {
@@ -575,6 +583,18 @@ function photoPendingLabel(item) {
   return ['photograph', 'identify', 'blank', ''].includes(status) ? 'Needs photos' : 'Photo pending';
 }
 
+// A booked meetup or a pending hand-off belongs on the item itself, not
+// only on the Actions board.
+function localDealBadgesHTML(itemId) {
+  const deals = localDealsForItem(itemId);
+  if (!deals.length) return '';
+  return `<div class="ld-badges">${deals.map(d => {
+    const meta = localDealStatusMeta(d.status);
+    const when = d.when ? ` — ${d.when}` : '';
+    return `<span class="ld-badge" style="--plat:${meta.color}"><span aria-hidden="true">${meta.icon}</span> ${escapeHtml(meta.label + when)}</span>`;
+  }).join('')}</div>`;
+}
+
 function itemCardHTML(item, cat) {
   const sold = isSold(item);
   const expanded = state.expandedItems.has(item.itemId);
@@ -592,6 +612,7 @@ function itemCardHTML(item, cat) {
         <span class="status-badge ${statusClass(item.sourceStatus)}">${escapeHtml(item.sourceStatus || '—')}</span>
       </div>
       ${actionBadgesHTML(item.itemId)}
+      ${localDealBadgesHTML(item.itemId)}
       ${siteStatusChipsHTML(item)}
       <div class="meta">
         ${item.size ? `<span><b>Size —</b> ${escapeHtml(item.size)}</span>` : ''}
@@ -983,6 +1004,7 @@ function renderList() {
 function renderStats() {
   document.getElementById('statsSetupNote').style.display = connected() ? 'none' : 'block';
   renderOverallTiles();
+  renderSoldShare();
   renderSalesBySite();
   renderPlatformCards();
 }
@@ -1174,6 +1196,76 @@ async function saveBalance() {
   renderSalesBySite();
 }
 
+
+// ---------------------------------------------------------------------
+// Where the sales come from — one pie of sold listings per site. Built
+// from the Sales tab (one row per sale), which is the only place that
+// knows which site a sale actually happened on; an item marked sold with
+// no Sales row yet is counted as unassigned rather than guessed at.
+// ---------------------------------------------------------------------
+function soldShareBySite() {
+  const sites = new Map();
+  state.sales.forEach(sale => {
+    const meta = platformMeta(sale.platform);
+    if (!sites.has(meta.id)) sites.set(meta.id, { meta, count: 0, salePrice: 0, net: 0 });
+    const site = sites.get(meta.id);
+    site.count++;
+    site.salePrice += saleNumber(sale.salePrice) || 0;
+    site.net += saleNumber(sale.netCash) || 0;
+  });
+  const rows = [...sites.values()].sort((a, b) => b.count - a.count || a.meta.label.localeCompare(b.meta.label));
+  const total = rows.reduce((n, r) => n + r.count, 0);
+  rows.forEach(r => { r.share = total ? r.count / total : 0; });
+  const soldItems = state.inventory.filter(isSold).length;
+  const logged = new Set(state.sales.map(sl => String(sl.itemId))).size;
+  return { rows, total, unlogged: Math.max(0, soldItems - logged) };
+}
+
+// Plain SVG donut — no chart library, same as the rest of the site's visuals.
+function donutHTML(rows, total) {
+  const R = 60, C = 2 * Math.PI * R;
+  let offset = 0;
+  const arcs = rows.map(r => {
+    const len = r.share * C;
+    const seg = `<circle class="donut-seg" r="${R}" cx="80" cy="80" fill="none"
+      stroke="${r.meta.color}" stroke-width="28"
+      stroke-dasharray="${len.toFixed(2)} ${(C - len).toFixed(2)}"
+      stroke-dashoffset="${(-offset).toFixed(2)}"
+      transform="rotate(-90 80 80)"><title>${escapeHtml(r.meta.label)}: ${r.count} of ${total} (${Math.round(r.share * 100)}%)</title></circle>`;
+    offset += len;
+    return seg;
+  }).join('');
+  return `
+    <svg class="donut" viewBox="0 0 160 160" role="img" aria-label="Sold listings by site: ${escapeHtml(rows.map(r => `${r.meta.label} ${r.count}`).join(', '))}">
+      <circle r="${R}" cx="80" cy="80" fill="none" stroke="var(--border)" stroke-width="28"></circle>
+      ${arcs}
+      <text class="donut-num" x="80" y="76" text-anchor="middle">${total}</text>
+      <text class="donut-lbl" x="80" y="94" text-anchor="middle">sold</text>
+    </svg>`;
+}
+
+function renderSoldShare() {
+  const el = document.getElementById('soldShare');
+  if (!el) return;
+  const { rows, total, unlogged } = soldShareBySite();
+  if (!total) {
+    el.innerHTML = '<div class="empty-state">No sales logged yet — once one lands, this shows how your sales split across sites.</div>';
+    return;
+  }
+  el.innerHTML = `
+    ${donutHTML(rows, total)}
+    <ul class="donut-legend">
+      ${rows.map(r => `
+        <li>
+          <span class="dot" style="background:${r.meta.color}"></span>
+          <span class="dl-site">${escapeHtml(r.meta.label)}</span>
+          <span class="dl-pct">${Math.round(r.share * 100)}%</span>
+          <span class="dl-sub">${r.count} sold · ${fmtMoney(r.salePrice)} in · ${fmtMoney(r.net)} kept</span>
+        </li>`).join('')}
+      ${unlogged ? `<li class="dl-note">${unlogged} sold item${unlogged > 1 ? 's aren\'t' : " isn't"} logged in Sales yet, so ${unlogged > 1 ? 'they are' : 'it is'} not counted here.</li>` : ''}
+    </ul>`;
+}
+
 function renderOverallTiles() {
   const items = state.inventory;
   const listed = items.filter(it => !isSold(it)).length;
@@ -1343,8 +1435,225 @@ function renderSoldElsewhere() {
   }));
 }
 
+// ---------------------------------------------------------------------
+// Local deals — the face-to-face half of selling. A Marketplace listing
+// can be "someone's coming Friday at 9" or "marked pending" long before
+// it's a sale, and neither is a listing status. Those live in the Local
+// Deals tab, one row per item x platform, and show up here as their own
+// board so nothing agreed in a chat thread gets forgotten.
+// ---------------------------------------------------------------------
+const LOCAL_DEAL_STATUSES = [
+  { id: 'interest', label: 'Interest', icon: '💬', color: '#a1752e', blurb: 'People are asking — nothing agreed yet.' },
+  { id: 'meeting',  label: 'Meeting set', icon: '🤝', color: '#1f3a5c', blurb: 'A time and place are set.' },
+  { id: 'pending',  label: 'Pending', icon: '⏳', color: '#7a2038', blurb: 'Deal agreed, waiting on hand-off.' },
+];
+// Platforms where a sale normally happens in person. Everything else ships,
+// so it has no meetup to track.
+const LOCAL_PLATFORM_IDS = ['facebook'];
+
+function localDealStatusMeta(status) {
+  const key = String(status || '').trim().toLowerCase();
+  return LOCAL_DEAL_STATUSES.find(s => s.id === key || s.label.toLowerCase() === key)
+    || { id: 'other', label: status || 'Set', icon: '•', color: '#56657a', blurb: '' };
+}
+function localDealsForItem(itemId) {
+  return state.localDeals.filter(d => String(d.itemId) === String(itemId) && d.status);
+}
+function localDealFor(itemId, platformLabel) {
+  return localDealsForItem(itemId).find(d => platformId(d.platform) === platformId(platformLabel)) || null;
+}
+// Sorted so what's booked soonest reads first; items with no time sink below.
+function openLocalDeals() {
+  const order = { meeting: 0, pending: 1, interest: 2 };
+  return state.localDeals
+    .filter(d => d.status && state.inventory.some(it => String(it.itemId) === String(d.itemId) && !isSold(it)))
+    .slice()
+    .sort((a, b) => {
+      const oa = order[localDealStatusMeta(a.status).id] ?? 3;
+      const ob = order[localDealStatusMeta(b.status).id] ?? 3;
+      return oa - ob || String(a.when || '~').localeCompare(String(b.when || '~'));
+    });
+}
+function localDealKey(deal) { return `${deal.itemId}|${deal.platform}`; }
+// Short sub-label for the summary tile: whatever is actually booked beats a
+// count of people who have only messaged.
+function localDealsDueLabel() {
+  const deals = openLocalDeals();
+  const meetings = deals.filter(d => localDealStatusMeta(d.status).id === 'meeting');
+  if (meetings.length) return meetings[0].when ? `next ${meetings[0].when}` : `${meetings.length} meeting${meetings.length > 1 ? 's' : ''} set`;
+  const pending = deals.filter(d => localDealStatusMeta(d.status).id === 'pending').length;
+  return pending ? `${pending} pending` : '';
+}
+
+function localDealFormHTML(deal) {
+  const meta = localDealStatusMeta(deal.status);
+  return `
+    <form class="ld-form" data-id="${escapeHtml(deal.itemId)}" data-platform="${escapeHtml(deal.platform)}">
+      <div class="field-row">
+        <div class="field">
+          <label>Status</label>
+          <select class="ld-status">
+            ${LOCAL_DEAL_STATUSES.map(s => `<option value="${s.label}"${s.label === meta.label ? ' selected' : ''}>${s.icon} ${escapeHtml(s.label)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field">
+          <label>When <span class="optional">optional</span></label>
+          <input type="text" class="ld-when" value="${escapeHtml(deal.when || '')}" placeholder="e.g. Fri Sep 18, 9:00 AM">
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>Who <span class="optional">optional</span></label>
+          <input type="text" class="ld-buyer" value="${escapeHtml(deal.buyer || '')}" placeholder="buyer's name">
+        </div>
+        <div class="field">
+          <label>Where <span class="optional">optional</span></label>
+          <input type="text" class="ld-where" value="${escapeHtml(deal.where || '')}" placeholder="e.g. my driveway">
+        </div>
+      </div>
+      <div class="field">
+        <label>Note <span class="optional">optional</span></label>
+        <input type="text" class="ld-note" maxlength="200" value="${escapeHtml(deal.note || '')}" placeholder="anything you need to remember">
+      </div>
+      <div class="ld-form-actions">
+        <button type="submit" class="btn secondary">Save</button>
+        <button type="button" class="icon-btn ld-cancel">Cancel</button>
+        ${deal.itemId ? '<button type="button" class="icon-btn ld-clear">Clear this deal</button>' : ''}
+      </div>
+      <div class="status-msg ld-status-msg" role="status"></div>
+    </form>`;
+}
+
+function renderLocalDeals() {
+  const container = document.getElementById('localDealsList');
+  if (!container) return;
+  const deals = openLocalDeals();
+  const editingNew = state.editingLocalDeal && state.editingLocalDeal.startsWith('new|');
+
+  if (!deals.length && !editingNew) {
+    container.innerHTML = `
+      <div class="empty-state">Nothing in person on the go. <button type="button" class="btn secondary ld-add-btn">＋ Track a meetup or pending sale</button></div>`;
+  } else {
+    const cards = deals.map(deal => {
+      const item = state.inventory.find(it => String(it.itemId) === String(deal.itemId));
+      const title = item ? ([item.brand, item.item].filter(Boolean).join(' — ') || item.itemId) : deal.itemId;
+      const meta = localDealStatusMeta(deal.status);
+      const pmeta = platformMeta(deal.platform);
+      const editing = state.editingLocalDeal === localDealKey(deal);
+      return `
+        <div class="card ld-card ld-${meta.id}" style="--cat:${meta.color}">
+          <div class="card-top">
+            <h3>${escapeHtml(title)}</h3>
+            <div class="card-top-actions">${actionStarHTML(`deal:${deal.itemId}`, `${title} — ${meta.label}`)}<span class="ld-chip" style="--plat:${meta.color}"><span aria-hidden="true">${meta.icon}</span> ${escapeHtml(meta.label)}</span></div>
+          </div>
+          <div class="meta">
+            <span><b>Where —</b> ${escapeHtml(pmeta.label)}</span>
+            ${item ? `<span><b>Price —</b> ${priceLineHTML(item)}</span>` : ''}
+            ${deal.when ? `<span><b>When —</b> ${escapeHtml(deal.when)}</span>` : ''}
+            ${deal.buyer ? `<span><b>Who —</b> ${escapeHtml(deal.buyer)}</span>` : ''}
+            ${deal.where ? `<span><b>Meeting at —</b> ${escapeHtml(deal.where)}</span>` : ''}
+          </div>
+          ${deal.note ? `<p class="ld-note-text">${escapeHtml(deal.note)}</p>` : ''}
+          ${editing ? localDealFormHTML(deal) : `
+            <div class="ld-actions">
+              <button type="button" class="btn secondary ld-edit" data-key="${escapeHtml(localDealKey(deal))}">Update</button>
+              <button type="button" class="icon-btn ld-clear-btn" data-id="${escapeHtml(deal.itemId)}" data-platform="${escapeHtml(deal.platform)}">Deal's off — clear</button>
+            </div>`}
+        </div>`;
+    }).join('');
+    const newForm = editingNew ? `
+      <div class="card ld-card ld-new" style="--cat:#1f3a5c">
+        <div class="card-top"><h3>Track a meetup or pending sale</h3></div>
+        <form class="ld-form ld-new-form">
+          <div class="field">
+            <label>Item</label>
+            <select class="ld-item">${localDealItemOptionsHTML()}</select>
+          </div>
+          ${localDealFormHTML({ itemId: '', platform: '', status: 'Meeting set' }).replace(/^\s*<form[^>]*>|<\/form>\s*$/g, '')}
+        </form>
+      </div>` : '';
+    container.innerHTML = cards + newForm + (editingNew ? '' : `
+      <div class="ld-add-row"><button type="button" class="btn secondary ld-add-btn">＋ Track a meetup or pending sale</button></div>`);
+  }
+
+  wireActionStars(container);
+  container.querySelectorAll('.ld-add-btn').forEach(btn => btn.addEventListener('click', () => {
+    state.editingLocalDeal = 'new|';
+    renderLocalDeals();
+  }));
+  container.querySelectorAll('.ld-edit').forEach(btn => btn.addEventListener('click', () => {
+    state.editingLocalDeal = btn.dataset.key;
+    renderLocalDeals();
+  }));
+  container.querySelectorAll('.ld-cancel').forEach(btn => btn.addEventListener('click', () => {
+    state.editingLocalDeal = null;
+    renderLocalDeals();
+  }));
+  container.querySelectorAll('.ld-clear-btn, .ld-clear').forEach(btn => btn.addEventListener('click', () => {
+    const form = btn.closest('.ld-form');
+    const id = btn.dataset.id || (form && form.dataset.id);
+    const platform = btn.dataset.platform || (form && form.dataset.platform);
+    if (id && platform) saveLocalDeal({ itemId: id, platform, status: '' }, btn);
+  }));
+  container.querySelectorAll('.ld-form').forEach(form => form.addEventListener('submit', event => {
+    event.preventDefault();
+    const isNew = form.classList.contains('ld-new-form');
+    const chosen = isNew ? form.querySelector('.ld-item').value : '';
+    const itemId = isNew ? chosen.split('|')[0] : form.dataset.id;
+    const platform = isNew ? chosen.split('|')[1] : form.dataset.platform;
+    if (!itemId || !platform) return;
+    saveLocalDeal({
+      itemId, platform,
+      status: form.querySelector('.ld-status').value,
+      when: form.querySelector('.ld-when').value.trim(),
+      buyer: form.querySelector('.ld-buyer').value.trim(),
+      where: form.querySelector('.ld-where').value.trim(),
+      note: form.querySelector('.ld-note').value.trim(),
+    }, form.querySelector('button[type="submit"]'));
+  }));
+}
+
+// Every item x local platform pair that could have a meetup, minus the ones
+// already on the board.
+function localDealItemOptionsHTML() {
+  const options = [];
+  state.inventory.filter(it => !isSold(it)).forEach(it => {
+    splitPlatforms(it.platform).forEach(p => {
+      const meta = platformMeta(p);
+      if (!LOCAL_PLATFORM_IDS.includes(meta.id)) return;
+      if (localDealFor(it.itemId, meta.label)) return;
+      const title = [it.brand, it.item].filter(Boolean).join(' — ') || it.itemId;
+      options.push(`<option value="${escapeHtml(it.itemId)}|${escapeHtml(meta.label)}">${escapeHtml(title)} — ${escapeHtml(meta.label)}</option>`);
+    });
+  });
+  return options.length ? options.join('') : '<option value="">Nothing listed locally right now</option>';
+}
+
+async function saveLocalDeal(body, btn) {
+  const statusEl = btn && btn.closest('.card') ? btn.closest('.card').querySelector('.ld-status-msg') : null;
+  if (!connected()) { if (statusEl) statusEl.textContent = 'Connect your Sheet to save deals — see SETUP.md.'; return; }
+  if (btn) btn.disabled = true;
+  if (statusEl) statusEl.textContent = 'Saving...';
+  try {
+    await apiPost('setLocalDeal', { ...body, platform: platformMeta(body.platform).label });
+  } catch {
+    if (statusEl) statusEl.textContent = 'Could not save to your Sheet.';
+    if (btn) btn.disabled = false;
+    return;
+  }
+  const label = platformMeta(body.platform).label;
+  state.localDeals = state.localDeals.filter(d => !(String(d.itemId) === String(body.itemId) && platformId(d.platform) === platformId(label)));
+  if (body.status) state.localDeals.push({ ...body, platform: label, updated: todayStr() });
+  state.editingLocalDeal = null;
+  renderLocalDeals();
+  renderActionSummary();
+  renderList();
+}
+
+
 function renderAction() {
   renderToShip();
+  renderLocalDeals();
   renderSoldElsewhere();
   renderStillToList();
   renderPricingActions();
@@ -1366,6 +1675,7 @@ function renderActionSummary() {
   const visibility = (counts['Boost visibility'] || 0) + (counts['Refresh listing'] || 0);
   const tiles = [
     { num: toShip, lbl: 'To ship', target: 'sec-ship' },
+    { num: openLocalDeals().length, lbl: 'Local deals', target: 'sec-local', sub: localDealsDueLabel() },
     { num: soldElsewhereTasks().length, lbl: 'Listings to end', target: 'sec-end' },
     { num: toList, lbl: 'Posts to make', target: 'sec-list', sub: toListHeld ? `${toListHeld} on hold` : '' },
     { num: counts['Send an offer'] || 0, lbl: 'Offers to send', target: pricingGroupId('Send an offer') },
@@ -1469,6 +1779,20 @@ function postingNoteHTML(item, groupId) {
       </div>
     </div>`;
 }
+
+// Price holds — "I know it's slow, the price stays." Logged to Item Actions
+// as "Price Hold" (with the reason) and cleared with "Price Released", so the
+// Sheet keeps the history and the latest of the two wins. A hold only silences
+// suggestions that would lower the price; offers and visibility still surface,
+// since neither costs anything off the asking price.
+function priceHoldFor(itemId) {
+  const hold = latestActionOfType(itemId, 'Price Hold');
+  if (!hold) return null;
+  const released = latestActionOfType(itemId, 'Price Released');
+  if (released && released.date >= hold.date && state.itemActions.indexOf(released) > state.itemActions.indexOf(hold)) return null;
+  return hold;
+}
+const PRICE_HOLD_LABELS = ['Try a price drop', 'Refresh listing'];
 
 function stillToListRows() {
   return state.inventory
@@ -1862,6 +2186,14 @@ function pricingActionFor(item) {
   }
   const today = todayStr();
 
+  const hold = priceHoldFor(item.itemId);
+  if (hold && PRICE_HOLD_LABELS.includes(natural.label)) {
+    const out = { ...natural, severity: 'held', label: 'Hold', held: true, holdReason: hold.detail || '',
+      reason: hold.detail ? `Price held since ${hold.date}: ${hold.detail}` : `You put this price on hold on ${hold.date}.` };
+    delete out.suggestedPrice;
+    return out;
+  }
+
   // Dismissals are deliberately short-lived: ignoring a suggestion today
   // just means "not today," not "never again."
   const ignored = latestActionOfType(item.itemId, 'Ignored');
@@ -2135,14 +2467,17 @@ function renderPricingActions() {
 
   const cardHTML = ({ item, action }) => {
     const isCompleted = action.severity === 'complete';
+    const held = !!priceHoldFor(item.itemId);
     const showOfferBtn = action.severity === 'opportunity';
     const showPriceControls = action.severity === 'urgent' || (action.severity === 'attention' && action.label === 'Refresh listing');
     const showIgnore = ['urgent', 'attention', 'opportunity'].includes(action.severity);
+    // Only offer the hold where a suggestion could push the price down.
+    const showHold = held || PRICE_HOLD_LABELS.includes(action.label);
     return `
     <div class="card pricing-card pa-${action.severity}" data-item-id="${escapeHtml(item.itemId)}">
       <div class="card-top">
         <h3>${escapeHtml([item.brand, item.item].filter(Boolean).join(' — ') || item.itemId)}</h3>
-        <div class="card-top-actions">${actionStarHTML(item.itemId, [item.brand, item.item].filter(Boolean).join(' ') || item.itemId)}<span class="pa-badge pa-${action.severity}">${escapeHtml(action.label)}${action.manual ? ' · set by you' : ''}</span></div>
+        <div class="card-top-actions">${actionStarHTML(item.itemId, [item.brand, item.item].filter(Boolean).join(' ') || item.itemId)}<span class="pa-badge pa-${action.severity}">${escapeHtml(action.label)}${action.manual ? ' · set by you' : ''}</span>${held ? '<span class="pa-badge pa-price-held" title="Price drops stay off this one until you release it">🔒 Price held</span>' : ''}</div>
       </div>
       <div class="meta">
         <span><b>List price —</b> ${priceLineHTML(item)}${item.floorPrice ? ` (floor ${escapeHtml(item.floorPrice)})` : ''}</span>
@@ -2162,6 +2497,7 @@ function renderPricingActions() {
             </span>
           ` : ''}
           ${showIgnore ? `<button class="icon-btn pa-ignore-btn" data-id="${escapeHtml(item.itemId)}" data-label="${escapeHtml(action.label)}">Ignore</button>` : ''}
+          ${showHold ? `<button class="icon-btn pa-hold-btn${held ? ' on' : ''}" data-id="${escapeHtml(item.itemId)}" data-held="${held}">${held ? 'Release price' : 'Hold this price'}</button>` : ''}
           <button class="btn secondary pa-complete-btn" data-id="${escapeHtml(item.itemId)}" data-completed="${isCompleted}" data-label="${escapeHtml(action.label)}">${isCompleted ? 'Reopen' : 'Mark complete'}</button>
           ${editToggleHTML(item)}
           <button class="icon-btn pa-delete-btn" data-id="${escapeHtml(item.itemId)}" data-label="${escapeHtml(action.label)}" aria-label="Delete action">Delete</button>
@@ -2196,6 +2532,9 @@ function renderPricingActions() {
   container.querySelectorAll('.pa-ignore-btn').forEach(btn => {
     btn.addEventListener('click', () => ignoreAction(btn.dataset.id, btn.dataset.label));
   });
+  container.querySelectorAll('.pa-hold-btn').forEach(btn => {
+    btn.addEventListener('click', () => togglePriceHold(btn.dataset.id, btn.dataset.held === 'true', btn));
+  });
   container.querySelectorAll('.pa-complete-btn').forEach(btn => {
     btn.addEventListener('click', () => toggleActionComplete(btn.dataset.id, btn.dataset.completed === 'true', btn.dataset.label));
   });
@@ -2215,6 +2554,17 @@ function renderPricingActions() {
       dropPriceForAction(item, Number(input.value), btn);
     });
   });
+}
+
+async function togglePriceHold(itemId, held, btn) {
+  if (held) {
+    await recordItemAction(itemId, 'Price Released', 'Back to automatic pricing suggestions.');
+  } else {
+    const reason = (window.prompt('Why is this price staying put? (optional)', '') || '').trim();
+    await recordItemAction(itemId, 'Price Hold', reason || 'Holding this price for now.');
+  }
+  renderPricingActions();
+  renderActionSummary();
 }
 
 document.getElementById('showCompletedActions').addEventListener('change', event => {
@@ -2304,7 +2654,7 @@ populateMetricForm();
 
 loadSalesData().then(renderStats);
 loadSavedItems();
-Promise.all([loadInventory(), loadDescriptionsData(), loadPostingQueueData(), loadMetricsData(), loadPhotosData(), loadItemActionsData()]).then(() => {
+Promise.all([loadInventory(), loadDescriptionsData(), loadPostingQueueData(), loadMetricsData(), loadPhotosData(), loadItemActionsData(), loadLocalDealsData()]).then(() => {
   state.loadedAt = new Date().toISOString();
   renderWheel();
   routeOverview();

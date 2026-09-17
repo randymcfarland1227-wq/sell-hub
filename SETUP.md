@@ -68,11 +68,22 @@ Acquire is built from four Sheet tabs, each holding a different kind of informat
 | **Sourcing Intel** | One row per research target: search term, eBay/Poshmark queries, category, risks, shipping class, typical buy cost, inspection checklist, recognition clues | You (or Claude). Add a row here — any category — to add a research target; no code change needed. Set **Active** to `N` to hide one. |
 | **Market Trends** | The latest market snapshot per research target × platform: median, 25th–75th percentile sold range, sample size, sold count, active listings, sell-through, buyer-paid shipping | Poshmark refresh (automatic) and eBay pull (manual) |
 | **Market History** | The same numbers appended every day they're pulled, never overwritten | Same as above. Trend direction (↑ rising / ↓ cooling) appears once there's about a week of history. |
+| **Platform Trends** | What a selling platform itself says is being searched for right now — one row per day × platform × term, with the weekly change in searches | Pulled from the platform (Depop's "Popular this week" is the first source) |
 | **Acquire Watchlist** | Your Hunt List | The site |
 
 **Poshmark** — its public sold-listings search works from an automated script. Turn it on once: in the Apps Script editor, **Run → setupMarketDataTrigger** (authorize when prompted). It refreshes daily for every Sourcing Intel row with a *Poshmark Query* (fashion items — Poshmark has no useful comps for electronics or tools).
 
 **eBay** — its search blocks automated requests, so eBay numbers are pulled through a real browser session (`tools/ebay_comps_pull.js`, run from a tab on ebay.com) and written in with the `setMarketObservations` action. Ask Claude to refresh eBay comps whenever you want current numbers; the header on the Acquire tab shows how old each source is.
+
+**Where to look first** — the three shelves above the explorer are cut from the same research, each with its bar printed on it:
+
+- **Strong buys** — score 70+, at least $15 expected profit, roughly doubles your money, and a max buy that beats what the thing usually costs on a shelf.
+- **Reliable quick sales** — 55%+ sell-through, 50+ recent sales, medium-or-better confidence, low/medium risk, ships easily. Smaller wins that don't sit.
+- **Emerging trends** — targets whose price is actually rising in **Market History** (needs two snapshots at least 6 days apart, so it fills in as you keep pulling), plus the platform trending searches from **Platform Trends**. It never guesses a direction it can't measure: if there isn't enough history it says so and shows how many days it has.
+
+The thresholds are in `lanes` in `js/acquire-config.js`; the selection is `buildLanes()` in `js/acquire-model.js`.
+
+**Depop** has no seller stats at all on the web — no views, no likes, no impressions on a listing you own — so Depop rows in the Stats tab stay at zero. What Depop does publish is its "Popular this week" searches, and those go into **Platform Trends** and show up in the Emerging trends shelf.
 
 **How the numbers are made:** every fee, shipping estimate, minimum profit, risk reserve, score weight and threshold lives in `js/acquire-config.js`. The calculations (Opportunity Score, max buy, profit, confidence, trend) are in `js/acquire-model.js`. Change an assumption in the config and every card, filter and the deal calculator follow it. Missing data stays missing — the site shows "—" or "Not enough data" rather than a guess.
 
@@ -91,6 +102,8 @@ Two Sheet tabs, both created automatically:
 
 A sold item with no Sales row shows under "Not recorded by site" instead of disappearing from the totals.
 
+**Where the sales come from** (the pie at the top of Stats) is built from the Sales tab only — that's the one place that records which site a sale actually happened on. Sold items without a Sales row are counted as unlogged under the legend rather than guessed at.
+
 ## 6. Removing items (Inventory tab)
 
 Open an inventory card and choose **Remove item…**:
@@ -99,3 +112,13 @@ Open an inventory card and choose **Remove item…**:
 - **Delete for good** removes the item plus its posting queue rows, listing descriptions, photos and stats. Sales and the Item Actions log are kept. There's a second confirmation step.
 
 Either way the item's row in its source tab is **cleared, not deleted**: Listing Hub finds each item by a stored source row number, so deleting a row would shift every item below it. Removing an item never ends its live listings — the dialog warns when it's still live somewhere.
+
+## 7. Local deals (Actions tab)
+
+Face-to-face selling doesn't fit a listing status: "someone's coming Friday at 9" and "marked pending on Marketplace" are neither live nor sold. Those live in the **Local Deals** tab (created automatically), one row per item × platform, with a status of **Interest**, **Meeting set** or **Pending**, plus who, when, where and a note.
+
+Add or change one from Actions → Local deals; clearing a deal deletes the row so nothing stale is left behind. Booked meetups also show as a badge on the item's Inventory card, and the summary tile at the top of Actions shows the next one. Only platforms sold in person (Facebook Marketplace today, set by `LOCAL_PLATFORM_IDS` in `js/app.js`) are offered.
+
+## 8. Holding a price
+
+When you know a listing is priced right and just needs time — lots of interest, no rush — hit **Hold this price** on its pricing card. Suggestions that would lower the price ("Try a price drop", "Refresh listing") stop for that item and it moves to **On hold** with your reason; offers and visibility suggestions keep coming, since neither costs you anything off the asking price. **Release price** puts it back on automatic. Both are logged to Item Actions, so the Sheet keeps the history.
