@@ -80,6 +80,31 @@ function acqMaxBuyText(opp) {
 // ---------------------------------------------------------------------------
 // Data
 // ---------------------------------------------------------------------------
+// Apps Script occasionally never answers one of several requests fired at page
+// load (the same call made again returns in seconds), so Acquire's load gives
+// each attempt a deadline and tries again instead of spinning forever.
+const ACQ_LOAD_TIMEOUT_MS = 30000;
+const ACQ_LOAD_ATTEMPTS = 3;
+
+async function acqGetWithRetry(action, onRetry) {
+  let lastError;
+  for (let attempt = 1; attempt <= ACQ_LOAD_ATTEMPTS; attempt++) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), ACQ_LOAD_TIMEOUT_MS);
+    try {
+      const res = await fetch(`${APPS_SCRIPT_URL}?action=${action}`, { signal: ctrl.signal });
+      if (!res.ok) throw new Error('Request failed');
+      return await res.json();
+    } catch (err) {
+      lastError = err;
+      if (attempt < ACQ_LOAD_ATTEMPTS && onRetry) onRetry(attempt);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  throw lastError;
+}
+
 async function loadAcquireData() {
   acqState.loading = true;
   acqState.error = '';
@@ -90,17 +115,21 @@ async function loadAcquireData() {
   if (!connected()) {
     acqState.data = { watchlist: localGet('sellHub.acquire.local', []), trends: [], history: [], intel: [] };
   } else {
+    const onRetry = () => {
+      const el = document.getElementById('acqFreshness');
+      if (el) el.innerHTML = '<span class="fresh-chip">Still loading market data — retrying…</span>';
+    };
     try {
-      const bundle = await apiGet('acquireBundle');
+      const bundle = await acqGetWithRetry('acquireBundle', onRetry);
       if (!bundle || bundle.error || !Array.isArray(bundle.trends)) throw new Error('bundle unavailable');
       acqState.data = { watchlist: bundle.watchlist || [], trends: bundle.trends || [], history: bundle.history || [], intel: bundle.intel || [] };
     } catch {
       // Older backend without the bundle: fall back to the original two calls.
       try {
-        const [watchlist, trends] = await Promise.all([apiGet('acquire'), apiGet('trends')]);
+        const [watchlist, trends] = await Promise.all([acqGetWithRetry('acquire'), acqGetWithRetry('trends')]);
         acqState.data = { watchlist: watchlist || [], trends: trends || [], history: [], intel: [] };
       } catch {
-        acqState.error = "Couldn't reach your Sheet, so market data isn't loaded. Try again in a moment.";
+        acqState.error = "Couldn't reach your Sheet, so market data isn't loaded. Reload the page to try again.";
       }
     }
   }
