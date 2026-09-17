@@ -72,7 +72,7 @@ Acquire is built from four Sheet tabs, each holding a different kind of informat
 
 **Poshmark** — its public sold-listings search works from an automated script. Turn it on once: in the Apps Script editor, **Run → setupMarketDataTrigger** (authorize when prompted). It refreshes daily for every Sourcing Intel row with a *Poshmark Query* (fashion items — Poshmark has no useful comps for electronics or tools).
 
-**eBay** — its search blocks automated requests, so eBay numbers are pulled through a real browser session and written in with the `setMarketObservations` action. Ask Claude to refresh eBay comps whenever you want current numbers; the header on the Acquire tab shows how old each source is.
+**eBay** — its search blocks automated requests, so eBay numbers are pulled through a real browser session (`tools/ebay_comps_pull.js`, run from a tab on ebay.com) and written in with the `setMarketObservations` action. Ask Claude to refresh eBay comps whenever you want current numbers; the header on the Acquire tab shows how old each source is.
 
 **How the numbers are made:** every fee, shipping estimate, minimum profit, risk reserve, score weight and threshold lives in `js/acquire-config.js`. The calculations (Opportunity Score, max buy, profit, confidence, trend) are in `js/acquire-model.js`. Change an assumption in the config and every card, filter and the deal calculator follow it. Missing data stays missing — the site shows "—" or "Not enough data" rather than a guess.
 
