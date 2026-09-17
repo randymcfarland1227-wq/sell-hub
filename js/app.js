@@ -13,6 +13,7 @@ const state = {
   postingQueue: [],       // from Platform Posting Queue
   metrics: [],            // from Metrics tab (auto eBay + manual entries)
   acquire: [],            // from Acquire Watchlist tab
+  editingPostingNote: null, // "<itemId>|<site>" of the Still-to-list card whose note is being edited
   sales: [],              // from Sales tab (one row per sale: price, fees, label, net cash, site)
   balances: [],           // from Platform Balances tab (available / pending cash per site, by date)
   photos: [],             // from Photos tab (cover photo per item x platform)
@@ -250,27 +251,27 @@ window.addEventListener('message', event => {
 async function loadInventory() {
   document.getElementById('inventorySetupNote').style.display = connected() ? 'none' : 'block';
   if (!connected()) { state.inventory = []; return; }
-  try { state.inventory = ((await apiGet('inventory')) || []).filter(isRealItem); }
+  try { state.inventory = ((await apiGetWithRetry('inventory', { timeoutMs: 45000 })) || []).filter(isRealItem); }
   catch { state.inventory = []; }
 }
 async function loadDescriptionsData() {
   if (!connected()) { state.descriptions = []; return; }
-  try { state.descriptions = (await apiGet('descriptions')) || []; }
+  try { state.descriptions = (await apiGetWithRetry('descriptions', { timeoutMs: 45000 })) || []; }
   catch { state.descriptions = []; }
 }
 async function loadPostingQueueData() {
   if (!connected()) { state.postingQueue = []; return; }
-  try { state.postingQueue = (await apiGet('postingQueue')) || []; }
+  try { state.postingQueue = (await apiGetWithRetry('postingQueue', { timeoutMs: 45000 })) || []; }
   catch { state.postingQueue = []; }
 }
 async function loadMetricsData() {
   if (!connected()) { state.metrics = []; return; }
-  try { state.metrics = (await apiGet('metrics')) || []; }
+  try { state.metrics = (await apiGetWithRetry('metrics', { timeoutMs: 45000 })) || []; }
   catch { state.metrics = []; }
 }
 async function loadPhotosData() {
   if (!connected()) { state.photos = []; return; }
-  try { state.photos = (await apiGet('photos')) || []; }
+  try { state.photos = (await apiGetWithRetry('photos', { timeoutMs: 45000 })) || []; }
   catch { state.photos = []; }
 }
 function photoForItem(itemId) {
@@ -281,7 +282,7 @@ function photoForItem(itemId) {
 }
 async function loadItemActionsData() {
   if (!connected()) { state.itemActions = []; return; }
-  try { state.itemActions = (await apiGet('itemActions')) || []; }
+  try { state.itemActions = (await apiGetWithRetry('itemActions', { timeoutMs: 45000 })) || []; }
   catch { state.itemActions = []; }
 }
 // Item Actions rows are appended in chronological order, so the last match
@@ -353,6 +354,8 @@ function actionBadgesHTML(itemId) {
     const txt = parsed && parsed.from ? `Price dropped ${fmtMoney(parsed.from)}→${fmtMoney(parsed.to)}` : 'Price dropped';
     badges.push(`<span class="action-badge drop">${txt} ${escapeHtml(drop.date)}</span>`);
   }
+  const note = postingNoteFor(itemId);
+  if (note) badges.push(`<span class="action-badge hold">⏸ ${escapeHtml(note)}</span>`);
   return badges.length ? `<div class="action-badges">${badges.join('')}</div>` : '';
 }
 
@@ -1193,7 +1196,9 @@ function renderActionSummary() {
   const container = document.getElementById('actionSummary');
   if (!container) return;
   const toShip = state.inventory.filter(it => isSold(it) && !hasShipped(it.itemId)).length;
-  const toList = stillToListRows().reduce((n, r) => n + r.status.missing.length, 0);
+  const listRows = stillToListRows();
+  const toList = listRows.reduce((n, r) => n + r.status.missing.length, 0);
+  const toListHeld = listRows.filter(r => postingNoteFor(r.item.itemId)).reduce((n, r) => n + r.status.missing.length, 0);
   const counts = {};
   state.inventory.filter(it => !isSold(it)).forEach(it => {
     const a = pricingActionFor(it);
@@ -1203,12 +1208,12 @@ function renderActionSummary() {
   const tiles = [
     { num: toShip, lbl: 'To ship', target: 'sec-ship' },
     { num: soldElsewhereTasks().length, lbl: 'Listings to end', target: 'sec-end' },
-    { num: toList, lbl: 'Posts to make', target: 'sec-list' },
+    { num: toList, lbl: 'Posts to make', target: 'sec-list', sub: toListHeld ? `${toListHeld} on hold` : '' },
     { num: counts['Send an offer'] || 0, lbl: 'Offers to send', target: pricingGroupId('Send an offer') },
     { num: counts['Try a price drop'] || 0, lbl: 'Price drops', target: pricingGroupId('Try a price drop') },
     { num: visibility, lbl: 'Need visibility', target: pricingGroupId(counts['Boost visibility'] ? 'Boost visibility' : 'Refresh listing') },
   ];
-  container.innerHTML = tiles.map(t => `<button class="as-tile${t.num ? '' : ' as-zero'}" data-target="${t.target}"><span class="num">${t.num}</span><span class="lbl">${t.lbl}</span></button>`).join('');
+  container.innerHTML = tiles.map(t => `<button class="as-tile${t.num ? '' : ' as-zero'}" data-target="${t.target}"><span class="num">${t.num}</span><span class="lbl">${t.lbl}</span>${t.sub ? `<span class="sub">${t.sub}</span>` : ''}</button>`).join('');
   container.querySelectorAll('.as-tile').forEach(tile => tile.addEventListener('click', () => {
     const el = document.getElementById(tile.dataset.target);
     if (!el) return;
@@ -1271,6 +1276,41 @@ function platformsStatusFor(item) {
   });
   return { done: done, missing: missing, skipped: skipped, ended: ended };
 }
+// Posting notes — why an item can't be posted yet ("waiting on the charger",
+// "taking photos"). Logged to Item Actions as "Posting Note"; the latest one
+// wins and an empty note clears it, so the Sheet keeps the full history.
+const POSTING_NOTE_PRESETS = ['Waiting on ', 'Taking photos', 'Need supplies: ', 'Need to test it', 'Need to identify model / details'];
+function postingNoteFor(itemId) {
+  const latest = latestActionOfType(itemId, 'Posting Note');
+  return latest ? String(latest.detail || '').trim() : '';
+}
+function postingNoteHTML(item, groupId) {
+  const note = postingNoteFor(item.itemId);
+  const key = `${item.itemId}|${groupId}`;
+  if (state.editingPostingNote === key) {
+    return `
+      <form class="stl-note-editor" data-id="${escapeHtml(item.itemId)}">
+        <label class="stl-note-label" for="stlNote-${escapeHtml(key)}">What's holding this up?</label>
+        <input type="text" id="stlNote-${escapeHtml(key)}" class="stl-note-input" maxlength="160" value="${escapeHtml(note)}" placeholder="e.g. waiting on the charger">
+        <div class="stl-note-presets">${POSTING_NOTE_PRESETS.map(p => `<button type="button" class="stl-note-preset" data-preset="${escapeHtml(p)}">${escapeHtml(p.replace(/[: ]+$/, ''))}</button>`).join('')}</div>
+        <div class="stl-note-actions">
+          <button type="submit" class="btn secondary">Save note</button>
+          <button type="button" class="icon-btn stl-note-cancel">Cancel</button>
+        </div>
+      </form>`;
+  }
+  if (!note) return '';
+  return `
+    <div class="stl-hold">
+      <span class="stl-hold-tag">⏸ On hold</span>
+      <p>${escapeHtml(note)}</p>
+      <div class="stl-hold-actions">
+        <button type="button" class="icon-btn stl-note-edit" data-key="${escapeHtml(key)}">Edit</button>
+        <button type="button" class="icon-btn stl-note-clear" data-id="${escapeHtml(item.itemId)}">Ready — clear note</button>
+      </div>
+    </div>`;
+}
+
 function stillToListRows() {
   return state.inventory
     .filter(function (it) { return !isSold(it); })
@@ -1415,15 +1455,20 @@ function renderStillToList() {
   const groupHTML = Array.from(groups.values())
     .sort(function (a, b) { return platformRank(a.meta.id) - platformRank(b.meta.id) || a.meta.label.localeCompare(b.meta.label); })
     .map(function (g) {
-      const cards = g.rows.slice().sort(byName).map(function ({ item, status }) {
+      // Items that are on hold sink below the ones ready to post.
+      const onHold = g.rows.filter(function (r) { return postingNoteFor(r.item.itemId); }).length;
+      const cards = g.rows.slice().sort(function (a, b) {
+        return (postingNoteFor(a.item.itemId) ? 1 : 0) - (postingNoteFor(b.item.itemId) ? 1 : 0) || byName(a, b);
+      }).map(function ({ item, status }) {
         const live = status.done.map(function (d) { return d.meta.label; });
         const elsewhere = status.missing.filter(function (m) { return m.meta.id !== g.meta.id; }).map(function (m) { return m.meta.label; });
         return `
-          <div class="card stl-card" style="--cat:${g.meta.color}">
+          <div class="card stl-card${postingNoteFor(item.itemId) ? ' stl-on-hold' : ''}" style="--cat:${g.meta.color}">
             <div class="card-top">
               <h3>${escapeHtml(itemTitle(item))}</h3>
               <div class="card-top-actions">${actionStarHTML(postingTaskKey(item.itemId, g.meta.id), `${itemTitle(item)} on ${g.meta.label}`)}<span class="status-badge ${statusClass(item.sourceStatus)}">${escapeHtml(item.sourceStatus || '—')}</span></div>
             </div>
+            ${postingNoteHTML(item, g.meta.id)}
             <div class="meta">
               <span><b>List price —</b> ${priceLineHTML(item)}${item.floorPrice ? ` (floor ${escapeHtml(item.floorPrice)})` : ''}</span>
               ${live.length ? `<span><b>Live on —</b> ${escapeHtml(live.join(', '))}</span>` : ''}
@@ -1433,6 +1478,7 @@ function renderStillToList() {
               <button class="btn secondary stl-listed-btn" data-id="${escapeHtml(item.itemId)}" data-platform="${escapeHtml(g.meta.label)}">Mark listed on ${escapeHtml(g.meta.label)}</button>
               <button class="icon-btn stl-skip-btn" data-id="${escapeHtml(item.itemId)}" data-platform="${escapeHtml(g.meta.label)}">Not posting on ${escapeHtml(g.meta.label)}</button>
               ${editToggleHTML(item)}
+              ${postingNoteFor(item.itemId) || state.editingPostingNote === `${item.itemId}|${g.meta.id}` ? '' : `<button class="icon-btn stl-note-add" data-key="${escapeHtml(`${item.itemId}|${g.meta.id}`)}">+ Add note</button>`}
             </div>
             ${itemEditPanelHTML(item)}
             ${stlListingDetailsHTML(item, g.meta)}
@@ -1440,7 +1486,7 @@ function renderStillToList() {
       }).join('');
       return `
         <details class="action-group stl-group" id="stl-group-${escapeHtml(g.meta.id)}" style="--plat:${g.meta.color}" open>
-          <summary><span class="ag-title">${escapeHtml(g.meta.label)}</span><span class="ag-count">${g.rows.length}</span></summary>
+          <summary><span class="ag-title">${escapeHtml(g.meta.label)}</span><span class="ag-count">${g.rows.length}</span>${onHold ? `<span class="ag-hold">${onHold} on hold</span>` : ''}</summary>
           <div class="card-grid">${cards}</div>
         </details>`;
     }).join('');
@@ -1474,6 +1520,46 @@ function renderStillToList() {
     btn.addEventListener('click', async function () {
       await recordItemAction(btn.dataset.id, 'Not Posting', btn.dataset.platform);
       renderStillToList();
+    });
+  });
+  container.querySelectorAll('.stl-note-add, .stl-note-edit').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      state.editingPostingNote = btn.dataset.key;
+      renderStillToList();
+      const input = container.querySelector('.stl-note-editor .stl-note-input');
+      if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
+    });
+  });
+  container.querySelectorAll('.stl-note-editor').forEach(function (form) {
+    const input = form.querySelector('.stl-note-input');
+    form.querySelectorAll('.stl-note-preset').forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        input.value = chip.dataset.preset;
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
+      });
+    });
+    form.querySelector('.stl-note-cancel').addEventListener('click', function () {
+      state.editingPostingNote = null;
+      renderStillToList();
+    });
+    form.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape') { state.editingPostingNote = null; renderStillToList(); }
+    });
+    form.addEventListener('submit', async function (event) {
+      event.preventDefault();
+      const text = input.value.trim().replace(/[:\s]+$/, '');
+      state.editingPostingNote = null;
+      if (text !== postingNoteFor(form.dataset.id)) await recordItemAction(form.dataset.id, 'Posting Note', text);
+      renderStillToList();
+      renderActionSummary();
+    });
+  });
+  container.querySelectorAll('.stl-note-clear').forEach(function (btn) {
+    btn.addEventListener('click', async function () {
+      await recordItemAction(btn.dataset.id, 'Posting Note', '');
+      renderStillToList();
+      renderActionSummary();
     });
   });
   container.querySelectorAll('.stl-reopen-btn').forEach(function (btn) {

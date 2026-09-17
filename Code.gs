@@ -938,7 +938,28 @@ function updateItem(body) {
   }
   if (body.nextAction) log('Action Set', String(body.nextAction));
   if (body.reopen) log('Reopened', 'Action changed');
-  return { ok: true, logged: logged };
+
+  // Listing Hub mostly mirrors the source tabs by formula, but some of its cells
+  // were typed in (Platforms on a few rows), and the site reads the hub — so an
+  // edit saved only to the source tab never showed up. Bring a typed-in hub cell
+  // along; formula cells already follow the source and are left alone.
+  var hubSynced = [];
+  if (fields.length) {
+    var hubRow = findHubRow(itemId);
+    if (!hubRow.error) {
+      fields.forEach(function (f) {
+        if (f.sheet) return; // this field was already written to the hub itself
+        var hubCol = colIndex(hubRow.colMap, f.column);
+        if (hubCol === -1) return;
+        var cell = hubRow.sheet.getRange(hubRow.row, hubCol + 1);
+        if (String(cell.getFormula() || '')) return;
+        if (String(cell.getValue()) === String(f.value)) return;
+        cell.setValue(f.value);
+        hubSynced.push(f.column);
+      });
+    }
+  }
+  return { ok: true, logged: logged, hubSynced: hubSynced };
 }
 
 function getItemActionsSheet() {

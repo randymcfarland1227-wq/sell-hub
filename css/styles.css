@@ -684,6 +684,27 @@ details.cat-section:not([open]) { margin-bottom: 14px; }
 .platform-bar-fill { height: 100%; background: var(--plat); border-radius: 999px; }
 .platform-bar-label { font-size: 0.66rem; color: var(--text-faint); margin-top: 5px; text-transform: uppercase; letter-spacing: 0.03em; }
 
+/* ---------- Posting notes (Still to list) ---------- */
+
+.stl-on-hold { opacity: .92; }
+.stl-hold { margin: 0 0 10px; padding: 9px 11px; border-radius: var(--radius-sm); border-left: 3px solid var(--warn); background: var(--warn-bg); }
+.stl-hold-tag { font-size: .64rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--warn); }
+.stl-hold p { margin: 3px 0 5px; font-size: .86rem; font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
+.stl-hold-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.stl-hold-actions .icon-btn, .stl-note-add { font-size: .72rem; font-weight: 700; padding: 5px 9px; }
+.stl-note-add { color: var(--warn); }
+.stl-note-editor { margin: 0 0 10px; padding: 10px 11px; border-radius: var(--radius-sm); border: 1px dashed var(--warn); background: var(--bg-elevated); display: flex; flex-direction: column; gap: 7px; }
+.stl-note-label { font-size: .66rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--text-faint); }
+.stl-note-input { font: inherit; font-size: .9rem; padding: 9px 11px; min-height: 42px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-card); color: var(--text); }
+.stl-note-presets { display: flex; flex-wrap: wrap; gap: 5px; }
+.stl-note-preset { appearance: none; font: inherit; font-size: .72rem; font-weight: 600; cursor: pointer; padding: 4px 9px; border-radius: 999px; border: 1px solid var(--border); background: var(--bg-card); color: var(--text-muted); }
+.stl-note-preset:hover { border-color: var(--warn); color: var(--text); }
+.stl-note-actions { display: flex; gap: 6px; align-items: center; }
+.stl-note-actions .btn { padding: 7px 13px; font-size: .7rem; }
+.action-badge.hold { color: var(--warn); background: var(--warn-bg); }
+.ag-hold { font-size: .72rem; font-weight: 700; color: var(--warn); }
+.as-tile .sub { display: block; font-size: .64rem; font-weight: 700; color: var(--warn); margin-top: 2px; }
+
 /* ---------- Sales by site ---------- */
 
 .sales-cards { grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); }
