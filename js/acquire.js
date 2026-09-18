@@ -10,7 +10,7 @@ const acqState = {
   expandedLanes: new Set(),
   loading: true,
   error: '',
-  filters: { q: '', category: '', budget: '', profit: '', sellThrough: '', risk: '', conditionReq: '', location: '', preset: '' },
+  filters: { q: '', category: '', budget: '', profit: '', sellThrough: '', risk: '', conditionReq: '', location: '', frequency: '', preset: '' },
   sort: 'score',
   quick: false,
   drawerId: null,
@@ -190,6 +190,7 @@ function renderAcquirePulse() {
 function laneCriteriaText(lane) {
   const min = lane.min || {};
   const bits = [];
+  if (lane.frequency) bits.push(`${lane.frequency.map(f => f.toLowerCase()).join('/')} finds only`);
   if (min.score !== undefined) bits.push(`score ${min.score}+`);
   if (min.profit !== undefined) bits.push(`${acqMoney(min.profit)}+ profit`);
   if (min.roi !== undefined) bits.push(`${Math.round(min.roi * 100)}%+ return`);
@@ -296,6 +297,7 @@ function renderAcquireControls() {
       select('risk', 'Risk', ['Low', 'Medium', 'High'].map(r => ({ value: r, label: r }))),
       select('conditionReq', 'Condition requirement', C.conditionRequirements.map(r => ({ value: r, label: r }))),
       select('location', 'Sourcing location', C.locations.map(l => ({ value: l, label: l }))),
+      select('frequency', 'How often you\'ll see it', C.frequencies.map(f => ({ value: f, label: ACQUIRE_CONFIG.thriftFrequency[f].label }))),
     ].join('');
     filters.dataset.built = '1';
   }
@@ -323,7 +325,15 @@ function activeFilterDescriptions() {
   if (f.risk) out.push({ key: 'risk', label: `${f.risk} risk` });
   if (f.conditionReq) out.push({ key: 'conditionReq', label: f.conditionReq });
   if (f.location) out.push({ key: 'location', label: f.location });
+  if (f.frequency) out.push({ key: 'frequency', label: (ACQUIRE_CONFIG.thriftFrequency[f.frequency] || {}).label || f.frequency });
   return out;
+}
+
+function acqFrequencyPillHTML(opp) {
+  const key = String(opp.intel.thriftFrequency || '');
+  const meta = ACQUIRE_CONFIG.thriftFrequency[key];
+  if (!meta) return '';
+  return `<span class="freq-pill freq-${key.toLowerCase()}" title="${escapeHtml(meta.blurb)}"><span aria-hidden="true">${meta.icon}</span> ${escapeHtml(meta.label)}</span>`;
 }
 
 function oppCardHTML(opp) {
@@ -352,6 +362,7 @@ function oppCardHTML(opp) {
           </div>
         </div>
         <div class="opp-status">
+          ${acqFrequencyPillHTML(opp)}
           <span class="status-pill status-${d.status.id}"><span aria-hidden="true">${d.status.icon}</span> ${escapeHtml(d.status.label)}</span>
           ${flags.map(f => `<span class="flag-pill flag-${f.id}"><span aria-hidden="true">${f.icon}</span> ${escapeHtml(f.label)}</span>`).join('')}
         </div>
@@ -1134,7 +1145,7 @@ function wireAcquire() {
       return;
     }
     if (t.dataset.clear !== undefined) {
-      if (t.dataset.clear === 'all') setAcquireFilter({ q: '', category: '', budget: '', profit: '', sellThrough: '', risk: '', conditionReq: '', location: '', preset: '' });
+      if (t.dataset.clear === 'all') setAcquireFilter({ q: '', category: '', budget: '', profit: '', sellThrough: '', risk: '', conditionReq: '', location: '', frequency: '', preset: '' });
       else setAcquireFilter({ [t.dataset.clear]: '' });
       return;
     }

@@ -8,8 +8,12 @@ const ACQUIRE_CONFIG = {
   // Seller-side fees per platform. `rate` applies to the sale price; `fixed` is
   // a per-order charge; `flatUnder` covers Poshmark's flat fee below $15.
   // sellerPaysShipping: whether the profit model subtracts a shipping cost.
+  // creditBuyerShipping: sold comps report what buyers paid for shipping on
+  // top of the price (free-shipping sales count as $0); that money offsets the
+  // label, less the platform's cut of it. Randy's own eBay sales bear this out
+  // — buyers paid $5–7 shipping on most of them.
   platforms: {
-    ebay:     { label: 'eBay',     rate: 0.1325, fixed: 0.40, sellerPaysShipping: true },
+    ebay:     { label: 'eBay',     rate: 0.1325, fixed: 0.40, sellerPaysShipping: true, creditBuyerShipping: true },
     poshmark: { label: 'Poshmark', rate: 0.20,   fixed: 0, flatUnder: { limit: 15, fee: 2.95 }, sellerPaysShipping: false, maxShippingClass: 'medium' },
     mercari:  { label: 'Mercari',  rate: 0.10,   fixed: 0.50, sellerPaysShipping: true },
     facebook: { label: 'Facebook Marketplace', rate: 0, fixed: 0, sellerPaysShipping: false, localOnly: true },
@@ -81,6 +85,23 @@ const ACQUIRE_CONFIG = {
   // Every threshold here is a claim about the data, so nothing lands on a
   // shelf without the numbers behind it.
   lanes: [
+    {
+      id: 'everyday',
+      title: 'Everyday thrift finds',
+      icon: '🛒',
+      blurb: 'Things that turn up on a normal thrift, bins or yard-sale run — and still at least double your money.',
+      empty: 'None of the common finds clear the bar in the current data.',
+      frequency: ['Common'],
+      min: {
+        profit: 10,          // worth the listing time
+        roi: 1.0,            // doubles what you paid at the usual shelf price
+        sellThrough: 0.18,   // common items have huge supply; below this they sit for months
+        sales: 500,
+        confidence: 0.55,
+      },
+      requireBuyable: true,
+      sort: 'profit',
+    },
     {
       id: 'strong',
       title: 'Strong buys',
@@ -170,6 +191,14 @@ const ACQUIRE_CONFIG = {
     sellThrough: [0.25, 0.5, 0.75],
     locations: ['Bins', 'Thrift store', 'Yard sale', 'Estate sale', 'Marketplace', 'Flea market'],
     conditionRequirements: ['Works untested', 'Testing recommended', 'Must test', 'Authentication concern'],
+    frequencies: ['Common', 'Occasional', 'Rare'],
+  },
+  // How often a target turns up on a sourcing run (Sourcing Intel → Thrift
+  // Frequency). An estimate, like typical cost.
+  thriftFrequency: {
+    Common:     { label: 'Common find', icon: '🛒', blurb: 'Turns up on most thrift/bins runs' },
+    Occasional: { label: 'Occasional',  icon: '🔎', blurb: 'You will see one every few trips' },
+    Rare:       { label: 'Rare find',   icon: '💎', blurb: 'Worth knowing, but do not plan a trip around it' },
   },
 
   sorts: [

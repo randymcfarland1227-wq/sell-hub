@@ -78,7 +78,7 @@ function calculateFees(salePrice, platformId, config) {
 }
 
 // Seller-paid shipping estimate for this item on this platform.
-function estimateShipping(shippingClass, platformId, config) {
+function estimateShipping(shippingClass, platformId, config, buyerPaid) {
   const p = config.platforms[platformId];
   const cls = config.shippingClasses[String(shippingClass || '').toLowerCase()];
   if (!p) return { cost: null, known: false, viable: true, note: 'No fee model for this platform' };
@@ -91,7 +91,16 @@ function estimateShipping(shippingClass, platformId, config) {
   if (!p.sellerPaysShipping) return { cost: 0, known: true, viable: true, note: p.localOnly ? 'Local pickup' : 'Buyer pays shipping' };
   if (!cls) return { cost: null, known: false, viable: true, note: 'Shipping class unknown — not included' };
   if (cls.cost === null) return { cost: null, known: true, viable: false, note: 'Local pickup only' };
-  return { cost: cls.cost, known: true, viable: true, note: `${cls.label} estimate` };
+  // Buyer-paid shipping from the comps (an average that already includes the
+  // free-shipping sales at $0) comes back to the seller, minus the fee on it.
+  const credit = p.creditBuyerShipping && buyerPaid !== null && buyerPaid !== undefined && buyerPaid > 0
+    ? roundMoney(buyerPaid * (1 - (p.rate || 0))) : 0;
+  if (credit > 0) {
+    const net = roundMoney(Math.max(0, cls.cost - credit));
+    return { cost: net, label: cls.cost, credit, known: true, viable: true,
+      note: `${cls.label} label ≈ $${cls.cost}, less ≈ $${credit.toFixed(2)} buyers typically pay` };
+  }
+  return { cost: cls.cost, label: cls.cost, credit: 0, known: true, viable: true, note: `${cls.label} estimate` };
 }
 
 // Expected and conservative sale prices from one platform's observation.
@@ -329,7 +338,7 @@ function matchHuntEntry(opp, watchlist) {
 // Evaluates one platform as a place to sell this item.
 function platformEconomics(obs, intel, config) {
   const prices = calculateSalePrices(obs, config);
-  const ship = estimateShipping(intel.shippingClass, obs.platformId, config);
+  const ship = estimateShipping(intel.shippingClass, obs.platformId, config, obs.avgShipping);
   const feesConservative = calculateFees(prices.conservative, obs.platformId, config);
   const feesExpected = calculateFees(prices.expected, obs.platformId, config);
   const shippingCost = ship.cost === null ? 0 : ship.cost;
@@ -592,6 +601,7 @@ function filterOpportunities(opps, f, config) {
     if (f.risk && d.risk !== f.risk) return false;
     if (f.conditionReq && o.intel.conditionRequirement !== f.conditionReq) return false;
     if (f.location && !d.locations.some(l => l.toLowerCase() === String(f.location).toLowerCase())) return false;
+    if (f.frequency && String(o.intel.thriftFrequency || '') !== f.frequency) return false;
     if (f.preset && PULSE_PRESETS[f.preset] && !PULSE_PRESETS[f.preset].test(o, config)) return false;
     return true;
   });
@@ -685,6 +695,7 @@ function laneBuyable(opp) {
 function laneQualifies(opp, lane, config) {
   const d = opp.derived;
   if (!d.hasMarketData) return false;
+  if (lane.frequency && !lane.frequency.includes(String(opp.intel.thriftFrequency || ''))) return false;
   const min = lane.min || {};
   if (min.score !== undefined && d.score < min.score) return false;
   if (min.profit !== undefined && (!d.profit || d.profit.mid < min.profit)) return false;
@@ -716,6 +727,7 @@ function laneSort(list, how) {
       return da - db;
     },
     trend: (a, b) => (b.derived.trend.change || 0) - (a.derived.trend.change || 0),
+    profit: (a, b) => (b.derived.profit ? b.derived.profit.mid : -Infinity) - (a.derived.profit ? a.derived.profit.mid : -Infinity),
   };
   return list.slice().sort(by[how] || by.score);
 }

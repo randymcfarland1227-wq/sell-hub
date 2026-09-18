@@ -75,8 +75,9 @@ Acquire is built from four Sheet tabs, each holding a different kind of informat
 
 **eBay** — its search blocks automated requests, so eBay numbers are pulled through a real browser session (`tools/ebay_comps_pull.js`, run from a tab on ebay.com) and written in with the `setMarketObservations` action. Ask Claude to refresh eBay comps whenever you want current numbers; the header on the Acquire tab shows how old each source is.
 
-**Where to look first** — the three shelves above the explorer are cut from the same research, each with its bar printed on it:
+**Where to look first** — the shelves above the explorer are cut from the same research, each with its bar printed on it:
 
+- **Everyday thrift finds** — only targets rated *Common* in Sourcing Intel's **Thrift Frequency** column (Common / Occasional / Rare — how often it really turns up on a thrift, bins or yard-sale run; an estimate like Typical Cost). They still need $10+ expected profit, to double your money at the usual shelf price, 18%+ sell-through and 500+ recent sales. Every card shows its frequency, and the explorer has a "How often you'll see it" filter.
 - **Strong buys** — score 70+, at least $15 expected profit, roughly doubles your money, and a max buy that beats what the thing usually costs on a shelf.
 - **Reliable quick sales** — 55%+ sell-through, 50+ recent sales, medium-or-better confidence, low/medium risk, ships easily. Smaller wins that don't sit.
 - **Emerging trends** — targets whose price is actually rising in **Market History** (needs two snapshots at least 6 days apart, so it fills in as you keep pulling), plus the platform trending searches from **Platform Trends**. It never guesses a direction it can't measure: if there isn't enough history it says so and shows how many days it has.
@@ -84,6 +85,8 @@ Acquire is built from four Sheet tabs, each holding a different kind of informat
 The thresholds are in `lanes` in `js/acquire-config.js`; the selection is `buildLanes()` in `js/acquire-model.js`.
 
 **Depop** has no seller stats at all on the web — no views, no likes, no impressions on a listing you own — so Depop rows in the Stats tab stay at zero. What Depop does publish is its "Popular this week" searches, and those go into **Platform Trends** and show up in the Emerging trends shelf.
+
+**Shipping in the profit math:** on eBay the model charges the label for the item's shipping class, then credits back the average shipping buyers paid in the sold comps (free-shipping sales count as $0), less eBay's cut of it. Your own eBay sales show buyers covering most of the label.
 
 **How the numbers are made:** every fee, shipping estimate, minimum profit, risk reserve, score weight and threshold lives in `js/acquire-config.js`. The calculations (Opportunity Score, max buy, profit, confidence, trend) are in `js/acquire-model.js`. Change an assumption in the config and every card, filter and the deal calculator follow it. Missing data stays missing — the site shows "—" or "Not enough data" rather than a guess.
 
@@ -101,6 +104,8 @@ Two Sheet tabs, both created automatically:
 - **Platform Balances** — one snapshot per day per site of **available** cash (ready to withdraw) and **pending / on hold**. Update it from Stats → "Update available cash", or ask Claude to read eBay's financial summary and Poshmark's My Balance.
 
 A sold item with no Sales row shows under "Not recorded by site" instead of disappearing from the totals.
+
+**Cash flow** (below the site cards) is your own plan for each sale's money, stored in three columns on the sale's row in the Sales tab (*Cash Status*, *Cash Status Date*, *Cash Note*). **Not planned** (blank) = you haven't counted on it yet; **Accounted** = you've budgeted around it but it's still on the site or pending; **Cashed out** = withdrawn and used. Set it per sale with the buttons; the sale figures and every other total stay exactly as they are.
 
 **Where the sales come from** (the pie at the top of Stats) is built from the Sales tab only — that's the one place that records which site a sale actually happened on. Sold items without a Sales row are counted as unlogged under the legend rather than guessed at.
 

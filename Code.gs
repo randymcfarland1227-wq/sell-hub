@@ -1186,6 +1186,7 @@ var SOURCING_INTEL_HEADERS = [
   'Keywords', 'Shipping Class', 'Testing Risk', 'Counterfeit Risk', 'Shipping Difficulty', 'Fragility', 'Return Risk',
   'Knowledge Level', 'Condition Requirement', 'Typical Cost Low', 'Typical Cost High', 'Sourcing Locations',
   'Inspection Notes', 'Recognition Notes', 'Platform Notes', 'Active', 'Last Updated',
+  'Thrift Frequency',
 ];
 
 // Category display order for the Acquire tab's "Trending to look for"
@@ -1515,6 +1516,7 @@ function getSourcingIntel() {
       sourcingLocations: r['Sourcing Locations'], inspectionNotes: r['Inspection Notes'],
       recognitionNotes: r['Recognition Notes'], platformNotes: r['Platform Notes'],
       active: r['Active'], lastUpdated: r['Last Updated'],
+      thriftFrequency: r['Thrift Frequency'],
     };
   });
 }
@@ -1529,6 +1531,9 @@ var INTEL_FIELD_HEADERS = {
   typicalCostLow: 'Typical Cost Low', typicalCostHigh: 'Typical Cost High', sourcingLocations: 'Sourcing Locations',
   inspectionNotes: 'Inspection Notes', recognitionNotes: 'Recognition Notes', platformNotes: 'Platform Notes',
   active: 'Active',
+  // How often it actually turns up on a thrift/bins/yard-sale run: Common,
+  // Occasional or Rare. A sourcing estimate, like Typical Cost.
+  thriftFrequency: 'Thrift Frequency',
 };
 
 function upsertSourcingIntel(body) {
@@ -1843,12 +1848,17 @@ var SALES_SHEET_NAME = 'Sales';
 var SALES_HEADERS = [
   'Sale ID', 'Date Sold', 'Item ID', 'Item', 'Platform', 'Sale Price', 'Shipping Charged', 'Order Total',
   'Platform Fees', 'Shipping Label', 'Net Cash', 'Funds Status', 'Order ID', 'Source', 'Notes', 'Last Updated',
+  'Cash Status', 'Cash Status Date', 'Cash Note',
 ];
 var SALES_FIELD_HEADERS = {
   saleId: 'Sale ID', dateSold: 'Date Sold', itemId: 'Item ID', item: 'Item', platform: 'Platform',
   salePrice: 'Sale Price', shippingCharged: 'Shipping Charged', orderTotal: 'Order Total', platformFees: 'Platform Fees',
   shippingLabel: 'Shipping Label', netCash: 'Net Cash', fundsStatus: 'Funds Status', orderId: 'Order ID',
   source: 'Source', notes: 'Notes',
+  // Cash flow, set by Randy rather than read off a site: blank = not planned
+  // for yet, "Accounted" = budgeted around but still on the site, "Cashed out"
+  // = withdrawn and used.
+  cashStatus: 'Cash Status', cashStatusDate: 'Cash Status Date', cashNote: 'Cash Note',
 };
 
 var BALANCES_SHEET_NAME = 'Platform Balances';

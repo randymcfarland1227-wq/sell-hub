@@ -1470,3 +1470,37 @@ body.acq-drawer-open { overflow: hidden; }
   .sold-share { gap: 14px; justify-content: center; }
 }
 .pa-badge.pa-price-held { background: var(--warn-bg); color: var(--warn); margin-left: 6px; }
+
+/* ---------- Cash flow (Stats) ---------- */
+.cash-tile { border-top: 3px solid var(--cash); }
+.cf-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.cf-row {
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-md);
+  padding: 10px 12px; display: grid; gap: 6px;
+}
+.cf-main { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.cf-main b { font-size: 0.92rem; }
+.cf-money { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cf-meta { color: var(--text-muted); font-size: 0.78rem; }
+.cf-site { font-weight: 600; color: var(--plat); }
+.cf-note { color: var(--text-faint); font-size: 0.76rem; }
+.cf-seg { display: flex; flex-wrap: wrap; gap: 6px; }
+.cf-btn {
+  font: inherit; font-size: 0.78rem; font-weight: 600; padding: 5px 11px; border-radius: 999px; cursor: pointer;
+  background: transparent; color: var(--text-muted); border: 1px solid var(--border);
+}
+.cf-btn.on { color: #fff; background: var(--cash); border-color: var(--cash); }
+.cf-btn:disabled { opacity: 0.6; cursor: wait; }
+.cf-chip {
+  display: inline-block; margin-left: 4px; padding: 0 7px; border-radius: 999px; font-size: 0.7rem; font-weight: 600;
+  color: var(--cash); border: 1px solid color-mix(in srgb, var(--cash) 45%, transparent);
+}
+
+/* ---------- Thrift frequency pill + everyday lane ---------- */
+.freq-pill {
+  display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px;
+  font-size: 0.72rem; font-weight: 600; border: 1px solid var(--border); color: var(--text-muted); background: var(--bg-elevated);
+}
+.freq-pill.freq-common { color: var(--good); background: var(--good-bg); border-color: color-mix(in srgb, var(--good) 35%, transparent); }
+.freq-pill.freq-rare { color: var(--warn); background: var(--warn-bg); border-color: color-mix(in srgb, var(--warn) 35%, transparent); }
+.lane-everyday { border-left: 4px solid #7a4fd0; }

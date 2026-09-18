@@ -1006,6 +1006,7 @@ function renderStats() {
   renderOverallTiles();
   renderSoldShare();
   renderSalesBySite();
+  renderCashFlow();
   renderPlatformCards();
 }
 
@@ -1123,9 +1124,9 @@ function renderSalesBySite() {
     const netVal = saleNumber(sale.netCash);
     return `
       <li>
-        <b title="${escapeHtml(sale.item || sale.itemId)}">${escapeHtml(sale.item || sale.itemId)}</b>
+        <b title="${escapeHtml(saleItemName(sale))}">${escapeHtml(saleItemName(sale))}</b>
         <span class="sl-money">${money2(saleNumber(sale.salePrice))} → ${netVal === null ? '<span title="Net not recorded">—</span>' : money2(netVal)}</span>
-        <small${sale.notes ? ' class="flag"' : ''}>${escapeHtml([String(sale.dateSold || '').slice(0, 10), sale.fundsStatus, sale.notes].filter(Boolean).join(' · '))}</small>
+        <small${sale.notes ? ' class="flag"' : ''}>${escapeHtml([String(sale.dateSold || '').slice(0, 10), sale.fundsStatus, sale.notes].filter(Boolean).join(' · '))} <span class="cf-chip" style="--cash:${cashStatusOf(sale).color}">${escapeHtml(cashStatusOf(sale).label)}</span></small>
       </li>`;
   };
 
@@ -1264,6 +1265,118 @@ function renderSoldShare() {
         </li>`).join('')}
       ${unlogged ? `<li class="dl-note">${unlogged} sold item${unlogged > 1 ? 's aren\'t' : " isn't"} logged in Sales yet, so ${unlogged > 1 ? 'they are' : 'it is'} not counted here.</li>` : ''}
     </ul>`;
+}
+
+// ---------------------------------------------------------------------
+// Cash flow — Randy's own plan for each sale's money, separate from what
+// the sites report. Stored on the sale's row in the Sales tab (Cash Status,
+// Cash Status Date, Cash Note), so the sale figures themselves never move.
+//   ''          -> Not planned: money exists (pending or available) but
+//                  nothing is counting on it yet
+//   Accounted   -> planned around, still on the site / pending
+//   Cashed out  -> withdrawn from the site and used
+// ---------------------------------------------------------------------
+const CASH_STATUSES = [
+  { id: '',           label: 'Not planned', short: 'Not planned', color: '#a1752e' },
+  { id: 'Accounted',  label: 'Accounted',   short: 'Accounted',   color: '#1f3a5c' },
+  { id: 'Cashed out', label: 'Cashed out',  short: 'Cashed out',  color: '#16836a' },
+];
+function cashStatusOf(sale) {
+  const v = String(sale.cashStatus || '').trim().toLowerCase();
+  return CASH_STATUSES.find(c => c.id.toLowerCase() === v) || CASH_STATUSES[0];
+}
+// A sale's money is still clearing when the site says so — useful next to
+// "Accounted", since that's exactly the money you've planned on but can't
+// withdraw yet.
+function saleStillClearing(sale) {
+  return /pending|hold|awaiting/i.test(String(sale.fundsStatus || ''));
+}
+// Sales logged from the site's mark-sold form can lack an item name; fall
+// back to the inventory so the list never shows a bare Item ID.
+function saleItemName(sale) {
+  if (sale.item) return sale.item;
+  const it = state.inventory.find(i => String(i.itemId) === String(sale.itemId));
+  return it ? ([it.brand, it.item].filter(Boolean).join(' — ') || sale.itemId) : sale.itemId;
+}
+function saleCashAmount(sale) {
+  const net = saleNumber(sale.netCash);
+  return net !== null ? net : (saleNumber(sale.salePrice) || 0);
+}
+
+function renderCashFlow() {
+  const tilesEl = document.getElementById('cashFlowTiles');
+  const listEl = document.getElementById('cashFlowList');
+  if (!tilesEl || !listEl) return;
+  if (!state.sales.length) {
+    tilesEl.innerHTML = '';
+    listEl.innerHTML = '<div class="empty-state">No sales recorded yet.</div>';
+    return;
+  }
+  const groups = CASH_STATUSES.map(c => ({ ...c, sales: state.sales.filter(sl => cashStatusOf(sl).id === c.id) }));
+  groups.forEach(g => { g.total = g.sales.reduce((n, sl) => n + saleCashAmount(sl), 0); });
+  const clearingAccounted = groups[1].sales.filter(saleStillClearing).reduce((n, sl) => n + saleCashAmount(sl), 0);
+
+  tilesEl.innerHTML = groups.map(g => {
+    const sub = g.id === 'Accounted' && clearingAccounted
+      ? `${money2(clearingAccounted)} of it still clearing`
+      : `${g.sales.length} sale${g.sales.length === 1 ? '' : 's'}`;
+    return `<div class="stat-tile cash-tile" style="--cash:${g.color}"><div class="num">${money2(g.total)}</div><div class="lbl">${g.label}</div><div class="sub">${escapeHtml(sub)}</div></div>`;
+  }).join('');
+
+  const row = sale => {
+    const cur = cashStatusOf(sale);
+    const meta = platformMeta(sale.platform);
+    const when = sale.cashStatus && sale.cashStatusDate ? ` · ${String(sale.cashStatusDate).slice(0, 10)}` : '';
+    return `
+      <li class="cf-row" data-sale="${escapeHtml(sale.saleId)}">
+        <div class="cf-main">
+          <b>${escapeHtml(saleItemName(sale))}</b>
+          <span class="cf-money">${money2(saleCashAmount(sale))}</span>
+        </div>
+        <small class="cf-meta"><span class="cf-site" style="--plat:${meta.color}">${escapeHtml(meta.label)}</span> ${escapeHtml([String(sale.dateSold || '').slice(0, 10), sale.fundsStatus].filter(Boolean).join(' · '))}${escapeHtml(when)}</small>
+        <div class="cf-seg" role="group" aria-label="Cash status for ${escapeHtml(saleItemName(sale))}">
+          ${CASH_STATUSES.map(c => `<button type="button" class="cf-btn${c.id === cur.id ? ' on' : ''}" style="--cash:${c.color}" data-status="${escapeHtml(c.id)}" aria-pressed="${c.id === cur.id}">${escapeHtml(c.short)}</button>`).join('')}
+        </div>
+        ${sale.cashNote ? `<small class="cf-note">${escapeHtml(sale.cashNote)}</small>` : ''}
+      </li>`;
+  };
+  listEl.innerHTML = groups.filter(g => g.sales.length).map(g => `
+    <details class="action-group cf-group" style="--plat:${g.color}"${g.id === 'Cashed out' ? '' : ' open'}>
+      <summary><span class="ag-title">${escapeHtml(g.label)}</span><span class="ag-count">${g.sales.length}</span><span class="ag-blurb">${money2(g.total)}</span></summary>
+      <ul class="cf-list">${g.sales.slice().sort((a, b) => String(b.dateSold).localeCompare(String(a.dateSold))).map(row).join('')}</ul>
+    </details>`).join('');
+
+  listEl.querySelectorAll('.cf-btn').forEach(btn => btn.addEventListener('click', () => {
+    const li = btn.closest('.cf-row');
+    setSaleCashStatus(li.dataset.sale, btn.dataset.status, btn);
+  }));
+}
+
+async function setSaleCashStatus(saleId, status, btn) {
+  const sale = state.sales.find(sl => String(sl.saleId) === String(saleId));
+  if (!sale || cashStatusOf(sale).id === status) return;
+  if (!connected()) return;
+  const li = btn.closest('.cf-row');
+  li.querySelectorAll('.cf-btn').forEach(b => { b.disabled = true; });
+  const cashStatusDate = status ? todayStr() : '';
+  try {
+    await apiPost('upsertSales', { rows: [{ saleId, platform: sale.platform, cashStatus: status, cashStatusDate }] });
+  } catch {
+    // Apps Script sometimes garbles its reply after the write has landed;
+    // re-read before calling it a failure.
+    await loadSalesData();
+    const fresh = state.sales.find(sl => String(sl.saleId) === String(saleId));
+    if (!fresh || cashStatusOf(fresh).id !== status) {
+      li.querySelectorAll('.cf-btn').forEach(b => { b.disabled = false; });
+      li.insertAdjacentHTML('beforeend', '<small class="cf-note">Could not save to your Sheet — try again.</small>');
+      return;
+    }
+    renderStats();
+    return;
+  }
+  sale.cashStatus = status;
+  sale.cashStatusDate = cashStatusDate;
+  renderStats();
 }
 
 function renderOverallTiles() {
