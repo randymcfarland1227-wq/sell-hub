@@ -933,7 +933,7 @@ function itemSortStats(item, latestByPlatform) {
   platforms.forEach(p => {
     const m = platformMeta(p);
     const snap = latestByPlatform.get(item.itemId + '|' + m.id);
-    views += Number(snap && (snap.views || snap.impressions)) || 0;
+    views += snapshotViews(snap, m.id);
     clicks += Number(snap && snap.clicks) || 0;
   });
   return { views, clicks, ctr: views ? clicks / views : 0, price: parseMoney(item.listPrice) };
@@ -1451,6 +1451,19 @@ function renderPlatformCards() {
 // suppression logic, so "Sold" and "Shipped" live in the same log as
 // "Price Drop"/"Offer Sent"/"Ignored".
 // ---------------------------------------------------------------------
+// Which site an item sold on. The Sales tab records it directly; the
+// inventory's Buyer field only sometimes names the platform.
+function soldOnPlatformId(item) {
+  const sale = state.sales.find(sl => String(sl.itemId) === String(item.itemId));
+  return (sale && platformId(sale.platform)) || platformId(item.buyer);
+}
+// A local sale (Marketplace, paid at the hand-off) has nothing to ship.
+function soldInPerson(item) {
+  const sale = state.sales.find(sl => String(sl.itemId) === String(item.itemId));
+  if (sale && /in person/i.test(String(sale.fundsStatus || ''))) return true;
+  const where = soldOnPlatformId(item);
+  return !!where && LOCAL_PLATFORM_IDS.includes(where);
+}
 function hasShipped(itemId) {
   return state.itemActions.some(a => String(a.itemId) === String(itemId) && a.action === 'Shipped');
 }
@@ -1465,7 +1478,7 @@ async function markShipped(itemId) {
 function renderToShip() {
   const container = document.getElementById('toShipList');
   if (!container) return;
-  const items = state.inventory.filter(it => isSold(it) && !hasShipped(it.itemId));
+  const items = state.inventory.filter(it => isSold(it) && !hasShipped(it.itemId) && !soldInPerson(it));
   if (!items.length) { container.innerHTML = '<div class="empty-state">Nothing waiting to ship.</div>'; return; }
 
   const sorted = items.slice().sort((a, b) => (soldDateFor(a.itemId) || '').localeCompare(soldDateFor(b.itemId) || ''));
@@ -1495,7 +1508,7 @@ function renderToShip() {
 function soldElsewhereTasks() {
   const tasks = [];
   state.inventory.filter(isSold).forEach(item => {
-    const soldOn = platformId(item.buyer);
+    const soldOn = soldOnPlatformId(item);
     platformsStatusFor(item).done.forEach(row => {
       if (row.meta.id === soldOn) return;
       tasks.push({ item, meta: row.meta, entry: row.entry, soldOn });
@@ -1776,7 +1789,7 @@ function renderAction() {
 function renderActionSummary() {
   const container = document.getElementById('actionSummary');
   if (!container) return;
-  const toShip = state.inventory.filter(it => isSold(it) && !hasShipped(it.itemId)).length;
+  const toShip = state.inventory.filter(it => isSold(it) && !hasShipped(it.itemId) && !soldInPerson(it)).length;
   const listRows = stillToListRows();
   const toList = listRows.reduce((n, r) => n + r.status.missing.length, 0);
   const toListHeld = listRows.filter(r => postingNoteFor(r.item.itemId)).reduce((n, r) => n + r.status.missing.length, 0);
@@ -2191,6 +2204,13 @@ function suggestedDropPrice(listPrice, floorPrice) {
 // The "natural" recommendation from the raw numbers alone — actual
 // suppression based on what's already been done about it lives in
 // pricingActionFor below.
+// Views in a metrics snapshot. Facebook only reports "clicks on listing"
+// (opens of the listing), which is its equivalent of a view — without this
+// every Marketplace item reads as "No views yet".
+function snapshotViews(snap, platformIdValue) {
+  if (!snap) return 0;
+  return Number(snap.views || snap.impressions || (platformIdValue === 'facebook' ? snap.clicks : 0)) || 0;
+}
 function naturalPricingAction(item) {
   const latestByPlatform = latestMetricsByItemPlatform();
   const platforms = splitPlatforms(item.platform);
@@ -2201,7 +2221,7 @@ function naturalPricingAction(item) {
     const snap = latestByPlatform.get(item.itemId + '|' + m.id);
     if (snap) hasAnyData = true;
     const pWatchers = Number(snap && snap.watchers) || 0;
-    views += Number(snap && (snap.views || snap.impressions)) || 0;
+    views += snapshotViews(snap, m.id);
     clicks += Number(snap && snap.clicks) || 0;
     watchers += pWatchers;
     perPlatform.push({ meta: m, watchers: pWatchers });
@@ -2765,7 +2785,9 @@ state.featuredActions = new Set(localGet('sellHub.featuredActions', []));
 renderAction();
 populateMetricForm();
 
-loadSalesData().then(renderStats);
+// The Sales tab decides where an item sold (and whether it was handed over in
+// person), so Actions re-renders once it arrives too.
+loadSalesData().then(() => { renderStats(); renderAction(); });
 loadSavedItems();
 Promise.all([loadInventory(), loadDescriptionsData(), loadPostingQueueData(), loadMetricsData(), loadPhotosData(), loadItemActionsData(), loadLocalDealsData()]).then(() => {
   state.loadedAt = new Date().toISOString();
