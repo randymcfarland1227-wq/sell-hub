@@ -28,16 +28,18 @@
     </div>
   </div>
   <div class="wrap tabs-scroll">
-    <nav class="tabs">
-      <button data-view="action" class="active">Actions</button>
-      <button data-view="inventory">Inventory</button>
-      <button data-view="stats">Stats</button>
-      <button data-view="acquire">Acquire</button>
+    <nav class="tabs" role="tablist" aria-label="Sections">
+      <button data-view="action" class="active" role="tab" aria-selected="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 11l3 3 8-8"/><path d="M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9"/></svg><span>Actions</span></button>
+      <button data-view="inventory" role="tab" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg><span>Inventory</span></button>
+      <button data-view="stats" role="tab" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span>Stats</span></button>
+      <button data-view="acquire" role="tab" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg><span>Acquire</span></button>
     </nav>
   </div>
 </header>
 
 <main class="wrap">
+
+  <section class="pulse-bar" id="pulseBar" aria-label="Headline numbers" aria-live="polite"></section>
 
   <!-- ===================== INVENTORY ===================== -->
   <section id="inventory" class="view">
@@ -123,7 +125,7 @@
   <section id="stats" class="view">
     <div class="section-head">
       <h2 class="section-title">Stats</h2>
-      <p class="section-intro">Overall inventory totals plus performance per platform. eBay can sync automatically once you've wired up API credentials (see <code>SETUP.md</code>) — everything else, and eBay until then, is a quick manual log below.</p>
+      <p class="section-intro">Inventory totals, where your sales come from, the cash each site is holding, and how every platform's listings are performing.</p>
     </div>
 
     <div id="statsSetupNote" class="setup-note" style="display:none">
@@ -177,7 +179,7 @@
     <div class="stat-tiles cash-tiles" id="cashFlowTiles"></div>
     <div id="cashFlowList"></div>
 
-    <h3 class="subhead">By platform</h3>
+    <h3 class="subhead" id="sec-platforms">By platform</h3>
     <div class="platform-cards" id="platformCards"></div>
 
     <button class="btn add-toggle-btn" id="metricAddToggle">+ Log a stat update</button>

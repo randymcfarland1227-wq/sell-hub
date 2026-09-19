@@ -377,15 +377,21 @@ function latestActionStateFor(itemId) {
 // ---------------------------------------------------------------------
 // Tabs
 // ---------------------------------------------------------------------
-document.querySelectorAll('nav.tabs button').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('nav.tabs button').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-    btn.classList.add('active');
-    document.getElementById(btn.dataset.view).classList.add('active');
-    // The wheel sizes itself from its container, which measures 0 while hidden.
-    if (btn.dataset.view === 'inventory') applyZoom();
+function showView(view) {
+  const btn = document.querySelector(`nav.tabs button[data-view="${view}"]`);
+  if (!btn) return;
+  const changed = !btn.classList.contains('active');
+  document.querySelectorAll('nav.tabs button').forEach(b => {
+    b.classList.toggle('active', b === btn);
+    b.setAttribute('aria-selected', String(b === btn));
   });
+  document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === view));
+  // The wheel sizes itself from its container, which measures 0 while hidden.
+  if (view === 'inventory') applyZoom();
+  if (changed) window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+document.querySelectorAll('nav.tabs button').forEach(btn => {
+  btn.addEventListener('click', () => showView(btn.dataset.view));
 });
 
 document.getElementById('todayLabel').textContent = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
@@ -1003,6 +1009,7 @@ function renderList() {
 // ---------------------------------------------------------------------
 function renderStats() {
   document.getElementById('statsSetupNote').style.display = connected() ? 'none' : 'block';
+  renderPulseBar();
   renderOverallTiles();
   renderSoldShare();
   renderSalesBySite();
@@ -1379,7 +1386,98 @@ async function setSaleCashStatus(saleId, status, btn) {
   renderStats();
 }
 
+// ---------------------------------------------------------------------
+// Pulse bar — the headline numbers, on every tab, right under the header:
+// how many listings are live, how they're being seen, what's sold and what
+// cash is sitting where. Deltas compare the latest stats pull with the one
+// before it, so "+22" means "since the last time the numbers were pulled".
+// ---------------------------------------------------------------------
+// Headline totals from each unsold listing's latest snapshot, and the change
+// from that same listing's previous snapshot. Comparing per listing keeps a
+// site that simply wasn't pulled today (Facebook, say) from reading as a drop.
+function pulseTotals() {
+  const unsold = new Set(state.inventory.filter(it => !isSold(it)).map(it => String(it.itemId)));
+  const byKey = new Map();
+  state.metrics.forEach(m => {
+    if (!unsold.has(String(m.itemId))) return;
+    const key = `${m.itemId}|${platformId(m.platform)}`;
+    if (!byKey.has(key)) byKey.set(key, []);
+    byKey.get(key).push(m);
+  });
+  const latestDate = state.metrics.map(m => String(m.date || '').slice(0, 10)).sort().pop() || null;
+  const now = { views: 0, clicks: 0, watchers: 0 }, delta = { views: 0, clicks: 0, watchers: 0 };
+  let compared = 0;
+  const val = (m, pid) => ({ views: snapshotViews(m, pid), clicks: pid === 'facebook' ? 0 : (Number(m.clicks) || 0), watchers: Number(m.watchers) || 0 });
+  byKey.forEach((rows, key) => {
+    const pid = key.split('|')[1];
+    rows.sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    const last = rows[rows.length - 1];
+    const v = val(last, pid);
+    Object.keys(now).forEach(k => { now[k] += v[k]; });
+    // Only listings pulled on the latest date, against their own previous pull.
+    const prevRow = [...rows].reverse().find(r => String(r.date).slice(0, 10) < String(last.date).slice(0, 10));
+    if (prevRow && String(last.date).slice(0, 10) === latestDate) {
+      const p = val(prevRow, pid);
+      Object.keys(delta).forEach(k => { delta[k] += v[k] - p[k]; });
+      compared++;
+    }
+  });
+  return { latestDate, now, delta: compared ? delta : null };
+}
+function pulseDelta(d) {
+  if (d === null || d === undefined) return '';
+  d = Math.round(d);
+  if (!d) return '<span class="pb-delta flat">no change</span>';
+  return `<span class="pb-delta ${d > 0 ? 'up' : 'down'}">${d > 0 ? '▲' : '▼'} ${Math.abs(d).toLocaleString()}</span>`;
+}
+function renderPulseBar() {
+  const el = document.getElementById('pulseBar');
+  if (!el) return;
+  if (connected() && !state.loadedAt) {
+    el.innerHTML = Array.from({ length: 6 }, () => '<div class="pb-tile skeleton"><span></span><span></span></div>').join('');
+    el.setAttribute('aria-busy', 'true');
+    return;
+  }
+  el.removeAttribute('aria-busy');
+  const { latestDate, now: latest, delta } = pulseTotals();
+  const hasStats = !!latestDate;
+  const live = state.inventory.filter(it => !isSold(it)).reduce((n, it) => n + platformsStatusFor(it).done.length, 0);
+  const itemsLive = state.inventory.filter(it => !isSold(it) && platformsStatusFor(it).done.length).length;
+  const soldCount = state.sales.length;
+  const kept = state.sales.reduce((n, sl) => n + (saleNumber(sl.netCash) || 0), 0);
+  const balances = latestBalancesBySite();
+  let available = 0, pending = 0;
+  balances.forEach(b => { available += saleNumber(b.available) || 0; pending += saleNumber(b.pending) || 0; });
+  const when = latestDate ? new Date(latestDate + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '';
+  const tiles = [
+    { num: live.toLocaleString(), lbl: 'Live listings', sub: `${itemsLive} items`, view: 'inventory' },
+    { num: hasStats ? latest.views.toLocaleString() : '—', lbl: 'Views', sub: delta ? pulseDelta(delta.views) : '', view: 'stats', target: 'sec-platforms' },
+    { num: hasStats ? latest.clicks.toLocaleString() : '—', lbl: 'Clicks', sub: delta ? pulseDelta(delta.clicks) : '', view: 'stats', target: 'sec-platforms' },
+    { num: hasStats ? latest.watchers.toLocaleString() : '—', lbl: 'Watchers & likes', sub: delta ? pulseDelta(delta.watchers) : '', view: 'action', target: pricingGroupId('Send an offer') },
+    { num: soldCount, lbl: 'Sold', sub: `${money2(kept)} kept`, view: 'stats', target: 'sec-sales' },
+    { num: money2(available), lbl: 'Cash on sites', sub: pending ? `+ ${money2(pending)} pending` : 'nothing pending', view: 'stats', target: 'sec-cashflow', negative: available < 0 },
+  ];
+  el.innerHTML = tiles.map(t => `
+    <button type="button" class="pb-tile${t.negative ? ' negative' : ''}" data-view-go="${t.view}"${t.target ? ` data-target="${t.target}"` : ''}>
+      <span class="pb-num">${t.num}</span>
+      <span class="pb-lbl">${t.lbl}</span>
+      ${t.sub ? `<span class="pb-sub">${t.sub}</span>` : ''}
+    </button>`).join('') + (when ? `<p class="pb-asof">Latest listing stats ${escapeHtml(when)} · changes compare each listing with its previous pull</p>` : '');
+  el.querySelectorAll('.pb-tile[data-view-go]').forEach(tile => tile.addEventListener('click', () => {
+    showView(tile.dataset.viewGo);
+    const target = tile.dataset.target && document.getElementById(tile.dataset.target);
+    if (target) {
+      if (target.tagName === 'DETAILS') target.open = true;
+      setTimeout(() => target.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
+    }
+  }));
+}
+
 function renderOverallTiles() {
+  if (connected() && !state.loadedAt) {
+    document.getElementById('overallTiles').innerHTML = Array.from({ length: 5 }, () => '<div class="stat-tile skeleton"><span></span><span></span></div>').join('');
+    return;
+  }
   const items = state.inventory;
   const listed = items.filter(it => !isSold(it)).length;
   const sold = items.filter(isSold).length;
@@ -1789,6 +1887,12 @@ function renderAction() {
 function renderActionSummary() {
   const container = document.getElementById('actionSummary');
   if (!container) return;
+  // Before the Sheet answers, every count is 0 — show that it's loading
+  // instead of a row of zeros that reads as "nothing to do".
+  if (connected() && !state.loadedAt) {
+    container.innerHTML = Array.from({ length: 7 }, () => '<div class="as-tile skeleton"><span></span><span></span></div>').join('');
+    return;
+  }
   const toShip = state.inventory.filter(it => isSold(it) && !hasShipped(it.itemId) && !soldInPerson(it)).length;
   const listRows = stillToListRows();
   const toList = listRows.reduce((n, r) => n + r.status.missing.length, 0);
