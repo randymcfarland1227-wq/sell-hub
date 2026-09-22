@@ -1190,12 +1190,13 @@ body.acq-drawer-open { overflow: hidden; }
   .acq-toolbar input[type="search"] { flex-basis: 100%; min-height: 44px; }
   .acq-toolbar .sort-control { flex: 1; }
   .acq-filter-toggle { display: inline-block; min-height: 44px; padding: 8px 14px; }
-  .acq-jump { margin: 4px -18px 14px; padding: 8px 18px; }
-  .acq-jump-btn { min-height: 38px; }
+  .acq-section-nav { margin: 4px -4px 12px; }
+  .acq-section-switch { width: 100%; overflow-x: auto; scrollbar-width: thin; }
+  .acq-section-switch button { min-height: 38px; flex: 0 0 auto; }
   .acq-cat-chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 -18px 10px; padding: 0 18px; }
   .acq-cat-chips::-webkit-scrollbar { display: none; }
   .acq-chip { min-height: 38px; }
-  .acq-carousel { margin: 0 -6px; padding-left: 6px; padding-right: 6px; }
+  .acq-rail-btn { width: 40px; height: 40px; font-size: 1.35rem; }
   .acq-filters:not(.open) { display: none; }
   .acq-filters { grid-template-columns: 1fr 1fr; }
   .acq-filter select { min-height: 42px; }
@@ -1432,6 +1433,7 @@ body.acq-drawer-open { overflow: hidden; }
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow);
   padding: 16px 16px 14px;
+  overflow: visible;
 }
 .lane-head h4 { margin: 0 0 2px; font-size: 1.05rem; display: flex; align-items: center; gap: 8px; }
 .lane-count {
@@ -1451,53 +1453,87 @@ body.acq-drawer-open { overflow: hidden; }
 .lane-quick { border-left: 4px solid var(--primary); }
 .lane-emerging { border-left: 4px solid var(--warn); }
 
-/* Horizontal carousels (lanes + Media run) */
+/* Horizontal carousels with edge scroll controls */
+.acq-rail {
+  position: relative;
+  display: block;
+}
 .acq-carousel {
   display: flex;
   gap: 12px;
   overflow-x: auto;
   scroll-snap-type: x mandatory;
-  scrollbar-width: thin;
-  padding-bottom: 8px;
+  scrollbar-width: auto;
+  padding: 4px 36px 10px;
   -webkit-overflow-scrolling: touch;
 }
 .acq-carousel .opp-card {
-  flex: 0 0 min(300px, 85vw);
+  flex: 0 0 280px;
+  width: 280px;
+  max-width: 78vw;
   scroll-snap-align: start;
   min-width: 0;
 }
 .acq-carousel.dense .opp-card {
-  flex: 0 0 min(260px, 78vw);
+  flex: 0 0 260px;
+  width: 260px;
+  max-width: 78vw;
 }
 .acq-carousel .empty-state { flex: 1 1 auto; min-width: min(100%, 320px); }
+.acq-rail-btn {
+  appearance: none;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  border: 1.5px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text);
+  font: inherit;
+  font-size: 1.45rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+.acq-rail-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 10%, var(--bg-card));
+}
+.acq-rail-btn:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+.acq-rail-btn[data-rail="-1"] { left: 0; }
+.acq-rail-btn[data-rail="1"] { right: 0; }
 
-/* Sticky jump bar under the main app header */
-.acq-jump {
+/* Section jump switch — same language as Inventory .mode-switch */
+.acq-section-nav {
   position: sticky;
   top: var(--header-h, 0px);
   z-index: 6;
-  display: flex;
-  flex-wrap: nowrap;
-  gap: 7px;
-  overflow-x: auto;
-  scrollbar-width: none;
-  margin: 8px 0 18px;
+  margin: 0 0 16px;
   padding: 8px 0;
-  background: var(--bg-elevated);
-  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: saturate(140%) blur(8px);
+  -webkit-backdrop-filter: saturate(140%) blur(8px);
+  box-shadow: 0 1px 0 var(--border), 0 10px 24px -22px rgba(8, 17, 31, 0.45);
 }
-.acq-jump::-webkit-scrollbar { display: none; }
-.acq-jump-btn {
-  appearance: none; font: inherit; cursor: pointer; flex: 0 0 auto;
-  display: inline-flex; align-items: center;
-  padding: 7px 12px; border-radius: 999px; border: 1.5px solid var(--border);
-  background: var(--bg-card); color: var(--text-muted); font-size: .8rem; font-weight: 600;
+.acq-section-switch {
+  display: inline-flex;
+  flex-wrap: wrap;
+  max-width: 100%;
+  margin-bottom: 0;
+}
+.acq-section-switch button {
   white-space: nowrap;
 }
-.acq-jump-btn:hover { border-color: color-mix(in srgb, var(--primary) 45%, var(--border)); color: var(--text); }
-.acq-jump-btn:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
 #acq-lanes, #acq-media, #acq-categories, #acq-explorer, #acq-hunt {
-  scroll-margin-top: calc(var(--header-h, 0px) + 56px);
+  scroll-margin-top: calc(var(--header-h, 0px) + 64px);
 }
 
 .acq-trending { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--border); }

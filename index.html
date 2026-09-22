@@ -284,16 +284,18 @@
       Not connected to your Sheet yet, so the hunt list is local to this browser and there's no market data. Deploy <code>Code.gs</code> and paste the Web App URL into <code>js/config.js</code> — see <code>SETUP.md</code>.
     </div>
 
+    <div class="acq-section-nav" id="acqJump" role="navigation" aria-label="Acquire sections">
+      <div class="mode-switch acq-section-switch" role="group">
+        <button type="button" class="active" data-scroll="acq-lanes">Shelves</button>
+        <button type="button" data-scroll="acq-media">Media</button>
+        <button type="button" data-scroll="acq-categories">Categories</button>
+        <button type="button" data-scroll="acq-explorer">Explorer</button>
+        <button type="button" data-scroll="acq-hunt">Hunt list</button>
+      </div>
+    </div>
+
     <h3 class="subhead" id="acq-pulse">Sourcing pulse</h3>
     <div class="acq-pulse" id="acqPulse"></div>
-
-    <nav class="acq-jump" id="acqJump" aria-label="Jump to Acquire section">
-      <button type="button" class="acq-jump-btn" data-scroll="acq-lanes">Shelves</button>
-      <button type="button" class="acq-jump-btn" data-scroll="acq-media">Media run</button>
-      <button type="button" class="acq-jump-btn" data-scroll="acq-categories">By category</button>
-      <button type="button" class="acq-jump-btn" data-scroll="acq-explorer">Explorer</button>
-      <button type="button" class="acq-jump-btn" data-scroll="acq-hunt">Hunt list</button>
-    </nav>
 
     <h3 class="subhead" id="acq-lanes">Where to look first</h3>
     <p class="section-intro" style="margin-top:0">Shelves and a Media run you scan sideways — best money, fastest turns, what's heating up, and the bins most thrift trips actually have. Everything researched is still in the explorer below.</p>
@@ -301,7 +303,11 @@
 
     <h3 class="subhead" id="acq-media">Media run</h3>
     <p class="section-intro">Books, CDs, DVDs, Blu-rays, vinyl and VHS — the bins and shelves most thrift trips actually have.</p>
-    <div class="acq-carousel" id="acqMediaShelf"></div>
+    <div class="acq-rail">
+      <button type="button" class="acq-rail-btn" data-rail="-1" aria-label="Scroll left">‹</button>
+      <div class="acq-carousel" id="acqMediaShelf"></div>
+      <button type="button" class="acq-rail-btn" data-rail="1" aria-label="Scroll right">›</button>
+    </div>
 
     <div class="acq-explorer-head">
       <h3 class="subhead" id="acq-explorer">Opportunity explorer</h3>
