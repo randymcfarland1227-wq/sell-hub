@@ -23,6 +23,7 @@ const state = {
   featuredActions: new Set(),
   loadedAt: '',
   expandedItems: new Set(),
+  picked: new Set(),      // items ticked for the Selected items panel / bundling
 };
 
 const ZOOM_MIN = 0.7, ZOOM_MAX = 1.6, ZOOM_STEP = 0.1, ZOOM_BASE = 380;
@@ -614,6 +615,7 @@ function itemCardHTML(item, cat) {
         <span>${photoPendingLabel(item)}</span>
       </div>
       <div class="card-top">
+        <label class="pick-box" title="Select this item"><input type="checkbox" data-pick="${escapeHtml(item.itemId)}"${state.picked.has(String(item.itemId)) ? ' checked' : ''}><span></span></label>
         <h3>${escapeHtml(title)}</h3>
         <span class="status-badge ${statusClass(item.sourceStatus)}">${escapeHtml(item.sourceStatus || '—')}</span>
       </div>
@@ -670,6 +672,19 @@ function itemDetailHTML(item) {
 }
 
 function wireItemCards(container, onChange) {
+  container.querySelectorAll('input[data-pick]').forEach(box => box.addEventListener('change', () => {
+    const id = String(box.dataset.pick);
+    if (box.checked) state.picked.add(id); else state.picked.delete(id);
+    persistPicked();
+    renderPickPanel();
+  }));
+  container.querySelectorAll('.size-pick-all').forEach(btn => btn.addEventListener('click', ev => {
+    ev.preventDefault();
+    String(btn.dataset.ids || '').split(',').filter(Boolean).forEach(id => state.picked.add(id));
+    persistPicked();
+    onChange();
+    renderPickPanel();
+  }));
   container.querySelectorAll('.card-expand-toggle').forEach(btn => {
     btn.addEventListener('click', () => {
       const id = btn.dataset.id;
@@ -731,6 +746,7 @@ function refreshInventoryViews() {
   routeOverview();
   renderListChips();
   renderList();
+  renderPickPanel();
   renderStats();
   renderAction();
 }
@@ -945,6 +961,143 @@ function itemSortStats(item, latestByPlatform) {
   return { views, clicks, ctr: views ? clicks / views : 0, price: parseMoney(item.listPrice) };
 }
 
+// ---------------------------------------------------------------------
+// Sizes — the Size view groups inventory the way you'd actually shop it:
+// shoes by men's/women's/youth number, tops by letter, bottoms by waist.
+// The sheet's Size column is free text (and holds things like "Queen" or
+// "32 oz" for non-apparel), so anything unrecognised lands in "No size".
+// ---------------------------------------------------------------------
+const LETTER_SIZES = { xs: 'XS', s: 'S', sm: 'S', small: 'S', m: 'M', med: 'M', medium: 'M', l: 'L', lg: 'L', large: 'L', xl: 'XL', xxl: '2XL', '2xl': '2XL', xxxl: '3XL', '3xl': '3XL' };
+function sizeBucket(item) {
+  const raw = String(item.size || '').trim();
+  if (!raw) return { group: 'No size', label: 'No size', order: 9, sort: 0 };
+  const low = raw.toLowerCase();
+  const shoe = low.match(/(men|women|youth|kid|big boy|us)\D{0,4}(\d+(?:\.\d)?)/);
+  if (shoe) {
+    const who = /women/.test(shoe[1]) ? "Women's" : /youth|kid|boy/.test(shoe[1]) ? 'Youth' : "Men's";
+    return { group: `Shoes — ${who}`, label: `${who} ${shoe[2]}`, order: who === "Men's" ? 0 : who === "Women's" ? 1 : 2, sort: Number(shoe[2]) };
+  }
+  const waist = low.match(/^(\d{2})\s*[\/x]\s*(\d{2}|\?)$/) || low.match(/^(\d{2})$/);
+  if (waist && Number(waist[1]) >= 24 && Number(waist[1]) <= 48) {
+    return { group: 'Bottoms — waist', label: `W${waist[1]}${waist[2] && waist[2] !== '?' ? ` / L${waist[2]}` : ''}`, order: 4, sort: Number(waist[1]) };
+  }
+  const lead = low.match(/^(xxxl|xxl|3xl|2xl|xl|xs|small|sm|s|medium|med|m|large|lg|l)\b/);
+  const letter = lead ? LETTER_SIZES[lead[1]] : null;
+  if (letter) {
+    const order = ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL'].indexOf(letter);
+    return { group: 'Tops & outerwear', label: letter, order: 3, sort: order };
+  }
+  const womens = low.match(/^(\d{1,2})$/);
+  if (womens && Number(womens[1]) <= 20) return { group: "Women's numeric", label: `Size ${womens[1]}`, order: 5, sort: Number(womens[1]) };
+  if (/one size/.test(low)) return { group: 'One size', label: 'One size', order: 6, sort: 0 };
+  // Non-apparel ("Queen", "32 oz", "5-DVD lot") all share one row.
+  return { group: 'No size', label: 'No size', order: 9, sort: 0 };
+}
+
+function renderSizeView(container, latestByPlatform, compareItems) {
+  let items = state.inventory.filter(it => state.listActiveCats.has(categoryMeta(it.category).id));
+  if (!state.listShowSold) items = items.filter(it => !isSold(it));
+  const buckets = new Map();
+  items.forEach(it => {
+    const b = sizeBucket(it);
+    const key = `${b.order}|${b.group}|${String(Math.round(b.sort * 10)).padStart(5, '0')}|${b.label}`;
+    if (!buckets.has(key)) buckets.set(key, { ...b, items: [] });
+    buckets.get(key).items.push(it);
+  });
+  if (!buckets.size) { container.innerHTML = '<div class="empty-state">No inventory matches these filters.</div>'; return; }
+  const groups = new Map();
+  [...buckets.entries()].sort((a, b) => a[0].localeCompare(b[0])).forEach(([, b]) => {
+    if (!groups.has(b.group)) groups.set(b.group, []);
+    groups.get(b.group).push(b);
+  });
+  container.innerHTML = [...groups.entries()].map(([group, sizes]) => `
+    <section class="size-group">
+      <div class="size-group-head"><h2>${escapeHtml(group)}</h2><span class="count">${sizes.reduce((n, s) => n + s.items.length, 0)} items</span></div>
+      ${sizes.map(s => {
+        const sorted = s.items.map(it => ({ it, stats: itemSortStats(it, latestByPlatform) })).sort(compareItems).map(x => x.it);
+        return `
+        <details class="size-row" ${sorted.length <= 6 ? 'open' : ''}>
+          <summary><span class="size-tag">${escapeHtml(s.label)}</span><span class="size-count">${sorted.length}</span>
+            <span class="size-names">${escapeHtml(sorted.map(it => [it.brand, it.item].filter(Boolean).join(' ')).join(' · ').slice(0, 90))}</span>
+            <button type="button" class="btn secondary size-pick-all" data-ids="${escapeHtml(sorted.map(it => it.itemId).join(','))}">Select these ${sorted.length}</button>
+          </summary>
+          <div class="card-grid">${sorted.map(it => itemCardHTML(it, categoryMeta(it.category))).join('')}</div>
+        </details>`;
+      }).join('')}
+    </section>`).join('');
+}
+
+// ---------------------------------------------------------------------
+// Selected items — tick any cards and this panel shows only those, with
+// the numbers you need to price a bundle.
+// ---------------------------------------------------------------------
+function pickedItems() {
+  return state.inventory.filter(it => state.picked.has(String(it.itemId)));
+}
+function bundlePrice(total) {
+  if (!total) return 0;
+  const cut = Math.round(total * 0.85);
+  return Math.max(1, cut) - 0.01;
+}
+function renderPickPanel() {
+  const el = document.getElementById('pickPanel');
+  if (!el) return;
+  const items = pickedItems();
+  if (!items.length) { el.innerHTML = ''; el.hidden = true; return; }
+  el.hidden = false;
+  const latestByPlatform = latestMetricsByItemPlatform();
+  const total = items.reduce((n, it) => n + parseMoney(it.listPrice), 0);
+  const floor = items.reduce((n, it) => n + parseMoney(it.floorPrice), 0);
+  const rows = items.map(it => {
+    const b = sizeBucket(it);
+    const stats = itemSortStats(it, latestByPlatform);
+    const photo = photoForItem(it.itemId);
+    const sites = splitPlatforms(it.platform).map(p => platformMeta(p).label).join(', ');
+    return `
+      <li class="pick-row">
+        <span class="pick-thumb">${photo ? `<img src="${escapeHtml(photo)}" alt="" loading="lazy" onerror="this.remove()">` : ''}</span>
+        <span class="pick-main">
+          <b>${escapeHtml([it.brand, it.item].filter(Boolean).join(' — ') || it.itemId)}</b>
+          <small>${escapeHtml(b.label)} · ${escapeHtml(it.condition || '—')} · ${escapeHtml(sites || 'not listed')}</small>
+        </span>
+        <span class="pick-stats"><b>${fmtMoney(parseMoney(it.listPrice))}</b><small>${stats.views} views · ${stats.clicks} clicks</small></span>
+        <button type="button" class="icon-btn pick-drop" data-id="${escapeHtml(it.itemId)}" aria-label="Remove from selection">✕</button>
+      </li>`;
+  }).join('');
+  const summary = items.map(it => `${[it.brand, it.item].filter(Boolean).join(' ')} (${sizeBucket(it).label}, ${it.condition || 'used'})`).join('\n');
+  el.innerHTML = `
+    <div class="pick-head">
+      <h3>Selected items <span class="pick-count">${items.length}</span></h3>
+      <div class="pick-actions">
+        <button type="button" class="btn secondary" id="pickCopy">Copy bundle list</button>
+        <button type="button" class="icon-btn" id="pickClear">Clear</button>
+      </div>
+    </div>
+    <div class="stat-tiles pick-tiles">
+      <div class="stat-tile"><div class="num">${fmtMoney(total)}</div><div class="lbl">Sold separately</div></div>
+      <div class="stat-tile"><div class="num">${fmtMoney(bundlePrice(total))}</div><div class="lbl">Bundle at 15% off</div></div>
+      <div class="stat-tile"><div class="num">${fmtMoney(floor)}</div><div class="lbl">Floor total</div></div>
+    </div>
+    <ul class="pick-list">${rows}</ul>
+    <textarea class="pick-summary" id="pickSummary" rows="${Math.min(items.length + 1, 8)}" readonly>${escapeHtml(summary)}</textarea>`;
+  el.querySelector('#pickClear').addEventListener('click', () => { state.picked.clear(); persistPicked(); renderList(); renderPickPanel(); });
+  el.querySelector('#pickCopy').addEventListener('click', () => {
+    // Same belt-and-braces copy as the listing fields: select the text so it's
+    // ready for Cmd-C even when the clipboard API is blocked.
+    const box = el.querySelector('#pickSummary');
+    box.focus(); box.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch { ok = false; }
+    const btn = el.querySelector('#pickCopy');
+    btn.textContent = ok ? 'Copied' : 'Selected — press Cmd-C';
+    setTimeout(() => { btn.textContent = 'Copy bundle list'; }, 1800);
+  });
+  el.querySelectorAll('.pick-drop').forEach(b => b.addEventListener('click', () => {
+    state.picked.delete(String(b.dataset.id)); persistPicked(); renderList(); renderPickPanel();
+  }));
+}
+function persistPicked() { localSet('sellHub.picked', [...state.picked]); }
+
 function renderList() {
   const container = document.getElementById('catSections');
   container.innerHTML = '';
@@ -957,6 +1110,12 @@ function renderList() {
     if (state.listSort === 'price') return b.stats.price - a.stats.price;
     return (a.it.item || a.it.brand || '').localeCompare(b.it.item || b.it.brand || '');
   };
+
+  if (state.listGroup === 'size') {
+    renderSizeView(container, latestByPlatform, compareItems);
+    wireItemCards(container, renderList);
+    return;
+  }
 
   if (state.listGroup === 'ranked') {
     let items = state.inventory.filter(it => state.listActiveCats.has(categoryMeta(it.category).id));
@@ -2874,6 +3033,7 @@ document.getElementById('saveBalanceBtn').addEventListener('click', saveBalance)
 // Init
 // ---------------------------------------------------------------------
 
+state.picked = new Set(localGet('sellHub.picked', []));
 state.listGroup = localGet('sellHub.listGroup', 'category');
 state.collapsedCats = new Set(localGet('sellHub.collapsedCats', []));
 document.querySelectorAll('#groupSwitch button').forEach(b => b.classList.toggle('active', b.dataset.group === state.listGroup));
@@ -2883,6 +3043,7 @@ applyZoom();
 routeOverview();
 renderListChips();
 renderList();
+renderPickPanel();
 setMode(localGet('sellHub.mode', 'list'));
 renderStats();
 state.featuredActions = new Set(localGet('sellHub.featuredActions', []));
