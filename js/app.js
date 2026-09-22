@@ -5,7 +5,9 @@ const state = {
   zoom: 1,
   listSort: 'views',
   listGroup: 'category',  // 'category' = collapsible sections, 'ranked' = one sorted list
-  collapsedCats: new Set(),
+  expandedCats: new Set(),   // category sections open in list view (default: none)
+  expandedSizes: new Set(),  // size-band rows open in By size view (default: none)
+  expandedRanked: new Set(), // ranked item rows open in By views view (default: none)
   showCompletedActions: true,
   showSkippedListings: false,
   inventory: [],          // from Listing Hub (read-only, sourced from the Sheet)
@@ -32,6 +34,11 @@ const connected = () => !!APPS_SCRIPT_URL;
 
 function escapeHtml(s) {
   return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// Compact inventory label used on collapsed ranked rows (brand + item, no em dash).
+function itemShortName(item) {
+  return [item && item.brand, item && item.item].filter(Boolean).join(' ') || String((item && item.itemId) || 'Item');
 }
 
 // ---------------------------------------------------------------------
@@ -680,6 +687,7 @@ function wireItemCards(container, onChange) {
   }));
   container.querySelectorAll('.size-pick-all').forEach(btn => btn.addEventListener('click', ev => {
     ev.preventDefault();
+    ev.stopPropagation();
     String(btn.dataset.ids || '').split(',').filter(Boolean).forEach(id => state.picked.add(id));
     persistPicked();
     onChange();
@@ -1001,7 +1009,7 @@ function renderSizeView(container, latestByPlatform, compareItems) {
   items.forEach(it => {
     const b = sizeBucket(it);
     const key = `${b.order}|${b.group}|${String(Math.round(b.sort * 10)).padStart(5, '0')}|${b.label}`;
-    if (!buckets.has(key)) buckets.set(key, { ...b, items: [] });
+    if (!buckets.has(key)) buckets.set(key, { ...b, key, items: [] });
     buckets.get(key).items.push(it);
   });
   if (!buckets.size) { container.innerHTML = '<div class="empty-state">No inventory matches these filters.</div>'; return; }
@@ -1015,16 +1023,26 @@ function renderSizeView(container, latestByPlatform, compareItems) {
       <div class="size-group-head"><h2>${escapeHtml(group)}</h2><span class="count">${sizes.reduce((n, s) => n + s.items.length, 0)} items</span></div>
       ${sizes.map(s => {
         const sorted = s.items.map(it => ({ it, stats: itemSortStats(it, latestByPlatform) })).sort(compareItems).map(x => x.it);
+        const open = state.expandedSizes.has(s.key) ? ' open' : '';
         return `
-        <details class="size-row" ${sorted.length <= 6 ? 'open' : ''}>
-          <summary><span class="size-tag">${escapeHtml(s.label)}</span><span class="size-count">${sorted.length}</span>
-            <span class="size-names">${escapeHtml(sorted.map(it => [it.brand, it.item].filter(Boolean).join(' ')).join(' · ').slice(0, 90))}</span>
+        <details class="size-row" data-size-key="${escapeHtml(s.key)}"${open}>
+          <summary>
+            <span class="size-tag">${escapeHtml(s.label)}</span>
+            <span class="size-count">${sorted.length}</span>
+            <span class="size-names">${escapeHtml(sorted.map(it => itemShortName(it)).join(' · ').slice(0, 90))}</span>
             <button type="button" class="btn secondary size-pick-all" data-ids="${escapeHtml(sorted.map(it => it.itemId).join(','))}">Select these ${sorted.length}</button>
           </summary>
           <div class="card-grid">${sorted.map(it => itemCardHTML(it, categoryMeta(it.category))).join('')}</div>
         </details>`;
       }).join('')}
     </section>`).join('');
+  container.querySelectorAll('details.size-row').forEach(row => {
+    row.addEventListener('toggle', () => {
+      const key = row.dataset.sizeKey;
+      if (!key) return;
+      if (row.open) state.expandedSizes.add(key); else state.expandedSizes.delete(key);
+    });
+  });
 }
 
 // ---------------------------------------------------------------------
@@ -1125,9 +1143,29 @@ function renderList() {
     container.innerHTML = ranked.length ? `
       <div class="cat-section ranked-section">
         <div class="cat-heading"><span class="rank-mark">#</span><h2>${labels[state.listSort]}</h2><span class="count">${ranked.length} items</span></div>
-        <div class="card-grid">${ranked.map(({ it }) => itemCardHTML(it, categoryMeta(it.category))).join('')}</div>
+        <div class="ranked-list">
+          ${ranked.map(({ it }, i) => {
+            const rank = i + 1;
+            const id = String(it.itemId);
+            const open = state.expandedRanked.has(id) ? ' open' : '';
+            return `
+            <details class="ranked-row" data-rank-id="${escapeHtml(id)}"${open}>
+              <summary class="ranked-row-head">
+                <span class="ranked-row-title">${escapeHtml(itemShortName(it))} / ${rank}</span>
+              </summary>
+              <div class="card-grid ranked-card">${itemCardHTML(it, categoryMeta(it.category))}</div>
+            </details>`;
+          }).join('')}
+        </div>
       </div>
     ` : '<div class="empty-state">No inventory matches these filters.</div>';
+    container.querySelectorAll('details.ranked-row').forEach(row => {
+      row.addEventListener('toggle', () => {
+        const id = row.dataset.rankId;
+        if (!id) return;
+        if (row.open) state.expandedRanked.add(id); else state.expandedRanked.delete(id);
+      });
+    });
     wireItemCards(container, renderList);
     return;
   }
@@ -1139,10 +1177,10 @@ function renderList() {
     withStats.sort(compareItems);
     items = withStats.map(x => x.it);
 
-    // <details> so a category can be closed; which ones are closed is remembered.
+    // <details> default-collapsed; expanded category ids remembered for the session.
     const section = document.createElement('details');
     section.className = 'cat-section';
-    section.open = !state.collapsedCats.has(cat.id);
+    section.open = state.expandedCats.has(cat.id);
     section.style.setProperty('--cat', cat.color);
     section.innerHTML = `
       <summary class="cat-heading">
@@ -1153,8 +1191,7 @@ function renderList() {
       ${items.length ? `<div class="card-grid">${items.map(it => itemCardHTML(it, cat)).join('')}</div>` : '<div class="empty-state">Nothing here yet.</div>'}
     `;
     section.addEventListener('toggle', () => {
-      if (section.open) state.collapsedCats.delete(cat.id); else state.collapsedCats.add(cat.id);
-      localSet('sellHub.collapsedCats', [...state.collapsedCats]);
+      if (section.open) state.expandedCats.add(cat.id); else state.expandedCats.delete(cat.id);
     });
     wireItemCards(section, renderList);
     container.appendChild(section);
@@ -3035,7 +3072,10 @@ document.getElementById('saveBalanceBtn').addEventListener('click', saveBalance)
 
 state.picked = new Set(localGet('sellHub.picked', []));
 state.listGroup = localGet('sellHub.listGroup', 'category');
-state.collapsedCats = new Set(localGet('sellHub.collapsedCats', []));
+// Inventory sections always start collapsed; expand choices live only in-session.
+state.expandedCats = new Set();
+state.expandedSizes = new Set();
+state.expandedRanked = new Set();
 document.querySelectorAll('#groupSwitch button').forEach(b => b.classList.toggle('active', b.dataset.group === state.listGroup));
 
 renderWheel();
