@@ -449,6 +449,14 @@ details.cat-section:not([open]) { margin-bottom: 14px; }
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: 16px;
+  max-width: 100%;
+  min-width: 0;
+}
+
+#inventory,
+#inventory .card-grid {
+  max-width: 100%;
+  min-width: 0;
 }
 
 /* ---------- Item card ---------- */
@@ -462,6 +470,9 @@ details.cat-section:not([open]) { margin-bottom: 14px; }
   position: relative;
   border-top: 4px solid var(--cat);
   transition: transform 0.15s, box-shadow 0.15s;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: clip;
 }
 .card:hover {
   transform: translateY(-3px);
@@ -473,6 +484,7 @@ details.cat-section:not([open]) { margin-bottom: 14px; }
   width: calc(100% + 34px);
   margin: -16px -17px 14px;
   aspect-ratio: 4 / 3;
+  max-height: 220px;
   position: relative;
   overflow: hidden;
   border-radius: var(--radius-md) var(--radius-md) 0 0;
@@ -483,18 +495,35 @@ details.cat-section:not([open]) { margin-bottom: 14px; }
 .card-media.photo-pending { display: grid; place-items: center; background: linear-gradient(135deg, #e8eef7, #f7f9fd); }
 .card-media.photo-pending > span { display: block; color: var(--text-faint); font-size: .8rem; font-weight: 700; letter-spacing: .02em; }
 .card-photo {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
-  aspect-ratio: 4 / 3;
+  max-width: 100%;
   object-fit: cover;
   display: block;
 }
+@media (max-width: 680px) {
+  .card-media {
+    aspect-ratio: 16 / 9;
+    max-height: 190px;
+  }
+}
 
-.card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 7px; }
+
+.card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 7px; min-width: 0; }
 .card-top-actions { display:flex; align-items:center; gap:7px; flex-shrink:0; }
 .action-star { width:31px; height:31px; display:grid; place-items:center; border:1px solid var(--border); border-radius:999px; background:var(--bg-elevated); color:var(--text-faint); font-size:1.08rem; line-height:1; cursor:pointer; }
 .action-star:hover, .action-star.starred { border-color:var(--gold); background:color-mix(in srgb,var(--gold) 15%,var(--bg-elevated)); color:var(--gold-deep); }
-.card h3 { font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 1.05rem; }
+.card h3,
+.card-top h3 {
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: 1.05rem;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 
 .status-badge {
   font-size: 0.6rem;
@@ -522,7 +551,9 @@ details.cat-section:not([open]) { margin-bottom: 14px; }
   letter-spacing: 0.03em;
   padding: 3px 8px;
   border-radius: 999px;
-  white-space: nowrap;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
   color: #fff;
 }
 .action-badge.offer { background: #1f3a5c; }
@@ -1468,7 +1499,8 @@ body.acq-drawer-open { overflow: hidden; }
   background: var(--bg-elevated); color: var(--text-muted); font-size: 0.87rem;
 }
 .lane-carousel { margin-top: 4px; }
-.lane-foot { margin-top: 12px; }
+.lane-foot { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.lane-show-again { font-size: .72rem; }
 .lane-strong { border-left: 4px solid var(--good); }
 .lane-everyday { border-left: 4px solid var(--gold); }
 .lane-quick { border-left: 4px solid var(--primary); }
@@ -1496,6 +1528,7 @@ body.acq-drawer-open { overflow: hidden; }
   -webkit-overflow-scrolling: touch;
 }
 .acq-carousel .opp-card {
+  position: relative;
   flex: 0 0 min(300px, 85vw);
   width: min(300px, 85vw);
   max-width: 100%;
@@ -1581,6 +1614,30 @@ body.acq-drawer-open { overflow: hidden; }
   width: auto;
 }
 
+.acq-carousel .opp-lane-dismiss {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 2;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-elevated) 88%, transparent);
+  color: var(--text-faint);
+  font-size: .85rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+}
+.acq-carousel .opp-lane-dismiss:hover {
+  color: var(--bad, #8a2635);
+  border-color: color-mix(in srgb, var(--bad, #8a2635) 40%, var(--border));
+  background: var(--bg-card);
+}
 .acq-carousel .empty-state { flex: 1 1 auto; min-width: min(100%, 320px); }
 .acq-rail-btn {
   appearance: none;
