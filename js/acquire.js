@@ -246,7 +246,11 @@ function renderAcquireLanes() {
     const expanded = acqState.expandedLanes.has(lane.id);
     const shown = expanded ? lane.items : lane.items.slice(0, ACQUIRE_CONFIG.laneSize);
     const body = shown.length
-      ? `<div class="acq-carousel${expanded ? ' dense' : ''} lane-carousel">${shown.map(oppCardHTML).join('')}</div>`
+      ? `<div class="acq-rail">
+          <button type="button" class="acq-rail-btn" data-rail="-1" aria-label="Scroll left">‹</button>
+          <div class="acq-carousel${expanded ? ' dense' : ''} lane-carousel">${shown.map(oppCardHTML).join('')}</div>
+          <button type="button" class="acq-rail-btn" data-rail="1" aria-label="Scroll right">›</button>
+        </div>`
       : lane.id === 'emerging' ? emergingEmptyHTML(lane.meta) : `<p class="lane-empty">${escapeHtml(lane.empty)}</p>`;
     const criteria = laneCriteriaText(lane);
     return `
@@ -1198,7 +1202,27 @@ function wireAcquire() {
       if (preset) scrollToAcquire('acq-explorer');
       return;
     }
-    if (t.dataset.scroll) { scrollToAcquire(t.dataset.scroll); return; }
+    if (t.dataset.rail) {
+      const rail = t.closest('.acq-rail');
+      const scroller = rail && rail.querySelector('.acq-carousel');
+      if (scroller) {
+        scroller.scrollBy({
+          left: Number(t.dataset.rail) * Math.min(300, scroller.clientWidth * 0.85),
+          behavior: 'smooth'
+        });
+      }
+      return;
+    }
+    if (t.dataset.scroll) {
+      scrollToAcquire(t.dataset.scroll);
+      const jump = t.closest('#acqJump');
+      if (jump) {
+        jump.querySelectorAll('button[data-scroll]').forEach(btn => {
+          btn.classList.toggle('active', btn === t);
+        });
+      }
+      return;
+    }
     if (t.dataset.category !== undefined) {
       const category = t.classList.contains('cat-card') && acqState.filters.category === t.dataset.category ? '' : t.dataset.category;
       setAcquireFilter({ category });
