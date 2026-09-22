@@ -246,7 +246,7 @@ function renderAcquireLanes() {
     const expanded = acqState.expandedLanes.has(lane.id);
     const shown = expanded ? lane.items : lane.items.slice(0, ACQUIRE_CONFIG.laneSize);
     const body = shown.length
-      ? `<div class="opp-grid lane-grid">${shown.map(oppCardHTML).join('')}</div>`
+      ? `<div class="acq-carousel${expanded ? ' dense' : ''} lane-carousel">${shown.map(oppCardHTML).join('')}</div>`
       : lane.id === 'emerging' ? emergingEmptyHTML(lane.meta) : `<p class="lane-empty">${escapeHtml(lane.empty)}</p>`;
     const criteria = laneCriteriaText(lane);
     return `
@@ -263,6 +263,63 @@ function renderAcquireLanes() {
           : ''}
       </section>`;
   }).join('');
+}
+
+
+// ---------------------------------------------------------------------------
+// Featured Media run — thrift bins most trips actually have
+// ---------------------------------------------------------------------------
+function isMediaOpportunity(opp) {
+  if (opp.category && opp.category.groupId === 'media') return true;
+  const sub = String(opp.category && opp.category.subcategory || '').toLowerCase();
+  return /books?|cds?|dvds?|vinyl|vhs|blu/.test(sub);
+}
+
+function mediaShelfSort(a, b) {
+  const aData = !!(a.derived && a.derived.hasMarketData);
+  const bData = !!(b.derived && b.derived.hasMarketData);
+  if (aData !== bData) return aData ? -1 : 1;
+  if (aData && bData) {
+    const scoreDiff = (b.derived.score || 0) - (a.derived.score || 0);
+    if (scoreDiff) return scoreDiff;
+    const stA = a.derived.sellThrough == null ? -1 : a.derived.sellThrough;
+    const stB = b.derived.sellThrough == null ? -1 : b.derived.sellThrough;
+    if (stB !== stA) return stB - stA;
+  }
+  return String(a.searchTerm || '').localeCompare(String(b.searchTerm || ''), undefined, { sensitivity: 'base' });
+}
+
+function renderAcquireMediaShelf() {
+  const el = document.getElementById('acqMediaShelf');
+  if (!el) return;
+  if (acqState.loading) { el.innerHTML = '<div class="empty-state">Loading market data…</div>'; return; }
+  if (acqState.error) { el.innerHTML = ''; return; }
+
+  const freqRank = { Common: 0, Occasional: 1 };
+  const media = acqState.opps.filter(opp => {
+    if (!isMediaOpportunity(opp)) return false;
+    // Inactive targets are usually dropped in buildOpportunities; skip again if present.
+    if (opp.intel && ['n', 'no', 'false'].includes(String(opp.intel.active || '').trim().toLowerCase())) return false;
+    const freq = String(opp.intel && opp.intel.thriftFrequency || '');
+    return freq === '' || freq in freqRank;
+  }).sort((a, b) => {
+    const ra = freqRank[String(a.intel.thriftFrequency || '')];
+    const rb = freqRank[String(b.intel.thriftFrequency || '')];
+    const aPref = ra === undefined ? 2 : ra;
+    const bPref = rb === undefined ? 2 : rb;
+    if (aPref !== bPref) return aPref - bPref;
+    return mediaShelfSort(a, b);
+  });
+
+  // Prefer Common, then Occasional; keep untagged only if nothing preferred exists.
+  const preferred = media.filter(o => freqRank[String(o.intel.thriftFrequency || '')] !== undefined);
+  const list = preferred.length ? preferred : media;
+
+  if (!list.length) {
+    el.innerHTML = `<div class="empty-state">No Media targets yet — books, CDs, DVDs, vinyl and VHS show up here once researched. <button type="button" class="btn secondary" data-research="media">Add research target</button></div>`;
+    return;
+  }
+  el.innerHTML = list.map(oppCardHTML).join('');
 }
 
 function renderAcquireControls() {
@@ -1051,6 +1108,7 @@ function renderAcquireAll() {
   renderAcquireFreshness();
   renderAcquirePulse();
   renderAcquireLanes();
+  renderAcquireMediaShelf();
   renderAcquireControls();
   renderAcquireExplorer();
   renderAcquireCategories();
@@ -1072,6 +1130,7 @@ function renderAcquireAll() {
 
 function setAcquireFilter(patch) {
   acqState.filters = { ...acqState.filters, ...patch };
+  if ('frequency' in patch) acqPrefSet('frequency', acqState.filters.frequency);
   acqState.showAll = false;
   renderAcquirePulse();
   renderAcquireControls();
@@ -1090,6 +1149,8 @@ function wireAcquire() {
   acqState.quick = !!acqPrefGet('quick', false);
   acqState.sort = acqPrefGet('sort', 'score');
   if (!ACQUIRE_CONFIG.sorts.some(s => s.id === acqState.sort)) acqState.sort = 'score';
+  // Thrift-first: default frequency to Common when no saved preference so Everyday thrift finds dominate.
+  acqState.filters.frequency = acqPrefGet('frequency', 'Common');
 
   let searchTimer = null;
   document.getElementById('acqSearch').addEventListener('input', ev => {
