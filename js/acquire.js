@@ -29,6 +29,34 @@ function acqPrefSet(key, value) {
   try { localStorage.setItem('sellHub.acquire.' + key, JSON.stringify(value)); } catch { /* per-viewer convenience only */ }
 }
 
+// Per-browser shelf dismissals: hide an opp from one lane/media shelf only.
+// Explorer and other lanes are unchanged. Key: sellHub.acquire.laneDismissed
+const LANE_DISMISS_KEY = 'sellHub.acquire.laneDismissed';
+function getLaneDismissed() {
+  const map = localGet(LANE_DISMISS_KEY, {});
+  return map && typeof map === 'object' && !Array.isArray(map) ? map : {};
+}
+function setLaneDismissed(map) { localSet(LANE_DISMISS_KEY, map); }
+function dismissedIdsForLane(laneId) {
+  return new Set((getLaneDismissed()[laneId] || []).map(String));
+}
+function dismissFromLane(laneId, oppId) {
+  const map = getLaneDismissed();
+  const list = new Set((map[laneId] || []).map(String));
+  list.add(String(oppId));
+  map[laneId] = [...list];
+  setLaneDismissed(map);
+}
+function clearLaneDismissals(laneId) {
+  const map = getLaneDismissed();
+  delete map[laneId];
+  setLaneDismissed(map);
+}
+function laneShowAgainHTML(laneId, hiddenCount) {
+  if (!hiddenCount) return '';
+  return `<button type="button" class="btn secondary lane-show-again" data-clear-lane-dismiss="${escapeHtml(laneId)}">${hiddenCount} hidden · Show again</button>`;
+}
+
 // ---------------------------------------------------------------------------
 // Formatting
 // ---------------------------------------------------------------------------
@@ -244,27 +272,34 @@ function renderAcquireLanes() {
   const trending = summarizePlatformTrends(acqState.data.platformTrends, acqState.opps);
   el.innerHTML = acqState.lanes.map(lane => {
     const expanded = acqState.expandedLanes.has(lane.id);
-    const shown = expanded ? lane.items : lane.items.slice(0, ACQUIRE_CONFIG.laneSize);
+    const dismissed = dismissedIdsForLane(lane.id);
+    const visible = lane.items.filter(o => !dismissed.has(String(o.id)));
+    const hiddenCount = lane.items.length - visible.length;
+    const shown = expanded ? visible : visible.slice(0, ACQUIRE_CONFIG.laneSize);
     const body = shown.length
       ? `<div class="acq-rail">
           <button type="button" class="acq-rail-btn" data-rail="-1" aria-label="Scroll left">‹</button>
-          <div class="acq-carousel${expanded ? ' dense' : ''} lane-carousel">${shown.map(oppCardHTML).join('')}</div>
+          <div class="acq-carousel${expanded ? ' dense' : ''} lane-carousel">${shown.map(o => oppCardHTML(o, { laneId: lane.id })).join('')}</div>
           <button type="button" class="acq-rail-btn" data-rail="1" aria-label="Scroll right">›</button>
         </div>`
       : lane.id === 'emerging' ? emergingEmptyHTML(lane.meta) : `<p class="lane-empty">${escapeHtml(lane.empty)}</p>`;
     const criteria = laneCriteriaText(lane);
+    const footBits = [];
+    if (visible.length > shown.length || (expanded && visible.length > ACQUIRE_CONFIG.laneSize)) {
+      footBits.push(`<button type="button" class="btn secondary" data-lane="${lane.id}">${expanded ? 'Show fewer' : `See all ${visible.length}`}</button>`);
+    }
+    const showAgain = laneShowAgainHTML(lane.id, hiddenCount);
+    if (showAgain) footBits.push(showAgain);
     return `
       <section class="acq-lane lane-${lane.id}">
         <div class="lane-head">
-          <h4><span aria-hidden="true">${lane.icon}</span> ${escapeHtml(lane.title)} <span class="lane-count">${lane.total}</span></h4>
+          <h4><span aria-hidden="true">${lane.icon}</span> ${escapeHtml(lane.title)} <span class="lane-count">${visible.length}</span></h4>
           <p class="lane-blurb">${escapeHtml(lane.blurb)}</p>
           ${criteria ? `<p class="lane-criteria">Bar to get here: ${escapeHtml(criteria)}</p>` : ''}
         </div>
         ${body}
         ${lane.id === 'emerging' ? trendingTermsHTML(trending) : ''}
-        ${lane.items.length > shown.length || (expanded && lane.items.length > ACQUIRE_CONFIG.laneSize)
-          ? `<div class="lane-foot"><button type="button" class="btn secondary" data-lane="${lane.id}">${expanded ? 'Show fewer' : `See all ${lane.total}`}</button></div>`
-          : ''}
+        ${footBits.length ? `<div class="lane-foot">${footBits.join('')}</div>` : ''}
       </section>`;
   }).join('');
 }
@@ -296,8 +331,17 @@ function mediaShelfSort(a, b) {
 function renderAcquireMediaShelf() {
   const el = document.getElementById('acqMediaShelf');
   if (!el) return;
-  if (acqState.loading) { el.innerHTML = '<div class="empty-state">Loading market data…</div>'; return; }
-  if (acqState.error) { el.innerHTML = ''; return; }
+  const footEarly = document.getElementById('acqMediaFoot');
+  if (acqState.loading) {
+    el.innerHTML = '<div class="empty-state">Loading market data…</div>';
+    if (footEarly) { footEarly.hidden = true; footEarly.innerHTML = ''; }
+    return;
+  }
+  if (acqState.error) {
+    el.innerHTML = '';
+    if (footEarly) { footEarly.hidden = true; footEarly.innerHTML = ''; }
+    return;
+  }
 
   const freqRank = { Common: 0, Occasional: 1 };
   const media = acqState.opps.filter(opp => {
@@ -318,12 +362,27 @@ function renderAcquireMediaShelf() {
   // Prefer Common, then Occasional; keep untagged only if nothing preferred exists.
   const preferred = media.filter(o => freqRank[String(o.intel.thriftFrequency || '')] !== undefined);
   const list = preferred.length ? preferred : media;
+  const foot = document.getElementById('acqMediaFoot');
 
   if (!list.length) {
     el.innerHTML = `<div class="empty-state">No Media targets yet — books, CDs, DVDs, vinyl and VHS show up here once researched. <button type="button" class="btn secondary" data-research="media">Add research target</button></div>`;
+    if (foot) { foot.hidden = true; foot.innerHTML = ''; }
     return;
   }
-  el.innerHTML = list.map(oppCardHTML).join('');
+
+  const dismissed = dismissedIdsForLane('media');
+  const visible = list.filter(o => !dismissed.has(String(o.id)));
+  const hiddenCount = list.length - visible.length;
+  if (!visible.length) {
+    el.innerHTML = `<div class="empty-state">All Media items are hidden from this shelf.</div>`;
+  } else {
+    el.innerHTML = visible.map(o => oppCardHTML(o, { laneId: 'media' })).join('');
+  }
+  if (foot) {
+    const again = laneShowAgainHTML('media', hiddenCount);
+    foot.innerHTML = again;
+    foot.hidden = !again;
+  }
 }
 
 function renderAcquireControls() {
@@ -397,7 +456,7 @@ function acqFrequencyPillHTML(opp) {
   return `<span class="freq-pill freq-${key.toLowerCase()}" title="${escapeHtml(meta.blurb)}"><span aria-hidden="true">${meta.icon}</span> ${escapeHtml(meta.label)}</span>`;
 }
 
-function oppCardHTML(opp) {
+function oppCardHTML(opp, opts = {}) {
   const d = opp.derived;
   const band = d.hasMarketData ? d.band : { id: 'nodata', label: 'No data', icon: '⏳' };
   const hunting = !!opp.hunt;
@@ -405,8 +464,12 @@ function oppCardHTML(opp) {
   const brandLine = [opp.brand, opp.model].filter(Boolean).join(' · ');
   const best = d.best ? acqPlatformLabel(d.best.obs.platformId) : null;
   const flags = d.flags.filter(f => !['stale'].includes(f.id)).slice(0, 3);
+  const dismissBtn = opts.laneId
+    ? `<button type="button" class="opp-lane-dismiss" data-dismiss-lane="${escapeHtml(opts.laneId)}" data-dismiss-id="${escapeHtml(opp.id)}" aria-label="Hide from this shelf" title="Hide from this shelf">✕</button>`
+    : '';
   return `
     <article class="opp-card band-${band.id}" data-id="${escapeHtml(opp.id)}">
+      ${dismissBtn}
       <div class="opp-media">
         ${opp.imageUrl ? `<img src="${escapeHtml(opp.imageUrl)}" alt="" loading="lazy" onerror="this.remove()">` : ''}
         <span class="opp-media-icon" aria-hidden="true">${opp.category.icon}</span>
@@ -1189,6 +1252,22 @@ function wireAcquire() {
     const t = ev.target.closest('button, [data-open]');
     if (!t) return;
     if (t.dataset.hunt !== undefined) { ev.preventDefault(); ev.stopPropagation(); await toggleHunt(t.dataset.hunt, t); return; }
+    if (t.dataset.dismissLane !== undefined) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      dismissFromLane(t.dataset.dismissLane, t.dataset.dismissId);
+      renderAcquireLanes();
+      renderAcquireMediaShelf();
+      return;
+    }
+    if (t.dataset.clearLaneDismiss !== undefined) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      clearLaneDismissals(t.dataset.clearLaneDismiss);
+      renderAcquireLanes();
+      renderAcquireMediaShelf();
+      return;
+    }
     if (t.dataset.open !== undefined) { ev.preventDefault(); openAcquireDrawer('opp', t.dataset.open); return; }
     if (t.dataset.research !== undefined) {
       ev.preventDefault();
