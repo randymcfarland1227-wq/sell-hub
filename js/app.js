@@ -3054,7 +3054,24 @@ populateMetricForm();
 // person), so Actions re-renders once it arrives too.
 loadSalesData().then(() => { renderStats(); renderAction(); });
 loadSavedItems();
-Promise.all([loadInventory(), loadDescriptionsData(), loadPostingQueueData(), loadMetricsData(), loadPhotosData(), loadItemActionsData(), loadLocalDealsData()]).then(() => {
+(async () => {
+  // One cold start instead of seven parallel GETs. Fall back to the individual
+  // loaders if bootBundle isn't deployed yet (or the request fails).
+  document.getElementById('inventorySetupNote').style.display = connected() ? 'none' : 'block';
+  try {
+    if (!connected()) throw new Error('offline');
+    const bundle = await apiGetWithRetry('bootBundle', { timeoutMs: 45000 });
+    if (!bundle || bundle.error || !Array.isArray(bundle.inventory)) throw new Error('bootBundle unavailable');
+    state.inventory = (bundle.inventory || []).filter(isRealItem);
+    state.descriptions = bundle.descriptions || [];
+    state.postingQueue = bundle.postingQueue || [];
+    state.metrics = bundle.metrics || [];
+    state.photos = bundle.photos || [];
+    state.itemActions = bundle.itemActions || [];
+    state.localDeals = bundle.localDeals || [];
+  } catch {
+    await Promise.all([loadInventory(), loadDescriptionsData(), loadPostingQueueData(), loadMetricsData(), loadPhotosData(), loadItemActionsData(), loadLocalDealsData()]);
+  }
   state.loadedAt = new Date().toISOString();
   renderWheel();
   routeOverview();
@@ -3064,4 +3081,4 @@ Promise.all([loadInventory(), loadDescriptionsData(), loadPostingQueueData(), lo
   renderAction();
   notifyWorkroom();
   populateMetricForm();
-});
+})();
