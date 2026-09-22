@@ -243,6 +243,7 @@ function setListingLink(body) {
   if (body.listPrice && listPriceCol !== -1) sheet.getRange(targetRow, listPriceCol + 1).setValue(Number(body.listPrice));
   if (body.title && titleCol !== -1) sheet.getRange(targetRow, titleCol + 1).setValue(body.title);
 
+  invalidateBootCache();
   return { ok: true, row: targetRow, updatedExisting: targetRow <= trueLastContentRow };
 }
 
@@ -281,6 +282,7 @@ function setQueueStatus(body) {
          String(row[platformCol] || '').trim().toLowerCase() === wantPlatform);
     if (match) { sheet.getRange(startRow + i, statusCol + 1).setValue(status); updated++; }
   }
+  invalidateBootCache();
   return { ok: true, updated: updated };
 }
 
@@ -303,6 +305,7 @@ function setListingStatus(body) {
   if (statusCol === -1) return { ok: false, error: 'Could not find a "Status" column in ' + sourceTabName + '.' };
 
   sourceSheet.getRange(row, statusCol + 1).setValue(status);
+  invalidateBootCache();
   return { ok: true };
 }
 
@@ -399,12 +402,20 @@ function getSourceRowExtras(ss, cache, sourceTabName, sourceRowNum) {
   if (header === undefined) {
     var srcSheet = ss.getSheetByName(sourceTabName);
     header = srcSheet ? findHeaderRow(srcSheet, ['Status']) : null;
-    if (header) header.sheet = srcSheet;
+    if (header) {
+      header.sheet = srcSheet;
+      // One sheet read per source tab (not per inventory row) — inventory alone
+      // used to be ~78 getRange round trips and ~15s; getDataRange once is enough.
+      header.allValues = srcSheet.getDataRange().getValues();
+    }
     cache[sourceTabName] = header;
   }
   if (!header) return empty;
 
-  var rowVals = header.sheet.getRange(Number(sourceRowNum), 1, 1, header.sheet.getLastColumn()).getValues()[0];
+  var rowIdx = Number(sourceRowNum) - 1; // sheet row N -> 0-based index
+  if (isNaN(rowIdx) || rowIdx < 0 || rowIdx >= header.allValues.length) return empty;
+  var rowVals = header.allValues[rowIdx];
+  if (!rowVals) return empty;
   return {
     dateListed: formatDate(val(rowVals, header.colMap, 'Date listed')),
     buyer: val(rowVals, header.colMap, 'Buyer'),
@@ -491,6 +502,7 @@ function setDescription(body) {
       updated++;
     }
   }
+  invalidateBootCache();
   return { ok: true, updated: updated };
 }
 
@@ -589,6 +601,7 @@ function addMetricEntry(body) {
     body.impressions || 0, body.views || 0, body.watchers || 0, body.clicks || 0,
     body.price || '', body.source || 'manual',
   ]);
+  invalidateBootCache();
   return { ok: true, date: date };
 }
 
@@ -807,6 +820,7 @@ function markSold(body) {
       source: 'Marked sold on site',
     }] });
   }
+  invalidateBootCache();
   return { ok: true };
 }
 
@@ -835,6 +849,7 @@ function cancelSale(body) {
   if (buyerCol !== -1) sourceSheet.getRange(row, buyerCol + 1).setValue('');
   if (netCashCol !== -1) sourceSheet.getRange(row, netCashCol + 1).setValue('');
 
+  invalidateBootCache();
   return { ok: true };
 }
 
@@ -865,6 +880,7 @@ function dropListingPrice(body) {
     ? (Number(oldPrice) + '->' + Number(newPrice))
     : String(newPrice);
   var logged = logItemAction(itemId, 'Price Drop', detail);
+  invalidateBootCache();
   return { ok: true, date: logged.date };
 }
 
@@ -985,6 +1001,7 @@ function updateItem(body) {
       });
     }
   }
+  invalidateBootCache();
   return { ok: true, logged: logged, hubSynced: hubSynced };
 }
 
@@ -1008,6 +1025,7 @@ function logItemAction(itemId, action, detail) {
   var sheet = getItemActionsSheet();
   var today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
   sheet.appendRow([today, itemId, action, detail || '']);
+  invalidateBootCache();
   return { ok: true, date: today };
 }
 
@@ -1021,6 +1039,7 @@ function clearItemActions(itemId) {
   for (var r = data.length - 1; r >= 1; r--) {
     if (String(data[r][1]) === String(itemId)) { sheet.deleteRow(r + 1); removed++; }
   }
+  invalidateBootCache();
   return { ok: true, removed: removed };
 }
 
@@ -1124,10 +1143,12 @@ function setPhoto(body) {
   for (var r = 1; r < data.length; r++) {
     if (String(data[r][0]) === String(body.itemId) && String(data[r][1]) === String(body.platform)) {
       sheet.getRange(r + 1, 3).setValue(body.photoUrl || '');
+      invalidateBootCache();
       return { ok: true, updated: true };
     }
   }
   sheet.appendRow([body.itemId || '', body.platform || '', body.photoUrl || '']);
+  invalidateBootCache();
   return { ok: true, updated: false };
 }
 
@@ -1773,6 +1794,7 @@ function removeItem(body) {
 
     logItemAction(itemId, mode === 'delete' ? 'Deleted Item' : 'Saved for Later',
       [loc.field('Item'), body.reason || ''].filter(String).join(' — '));
+    invalidateBootCache();
     return { ok: true, summary: summary };
   } finally {
     lock.releaseLock();
@@ -1835,6 +1857,7 @@ function restoreItem(body) {
 
     saved.deleteRow(t.headerSheetRow + 1 + idx);
     logItemAction(itemId, 'Restored from Saved for Later', '');
+    invalidateBootCache();
     return { ok: true, hubRow: newHubRow, sourceRow: sourceRow };
   } finally {
     lock.releaseLock();
@@ -1954,6 +1977,7 @@ function upsertSales(body) {
       synced.push(row.itemId);
     });
   }
+  invalidateBootCache();
   return { ok: true, updated: res.updated, added: res.added, syncedInventory: synced };
 }
 
@@ -1976,6 +2000,7 @@ function setBalances(body) {
       if (Object.prototype.toString.call(d) === '[object Date]') d = formatDate(d);
       return get('Platform') ? d + '|' + salesPlatformKey(get('Platform')) : '';
     });
+    invalidateBootCache();
     return { ok: true, updated: res.updated, added: res.added };
   } finally {
     lock.releaseLock();
@@ -2003,11 +2028,61 @@ function getAcquireBundle() {
   };
 }
 
+// CacheService caps each key at 100KB; bootBundle JSON is ~360KB, so store it
+// in chunks of ≤90KB under key__0..key__(n-1) with key__n = chunk count.
+var BOOT_BUNDLE_CACHE_KEY = 'bootBundle_v1';
+var BOOT_BUNDLE_CACHE_TTL = 120; // seconds
+var CACHE_CHUNK_MAX = 90000; // leave headroom under the 100KB per-key limit
+
+function cachePutChunked(cache, key, str, ttlSeconds) {
+  var n = Math.ceil(str.length / CACHE_CHUNK_MAX) || 1;
+  cache.put(key + '__n', String(n), ttlSeconds);
+  for (var i = 0; i < n; i++) {
+    cache.put(key + '__' + i, str.substring(i * CACHE_CHUNK_MAX, (i + 1) * CACHE_CHUNK_MAX), ttlSeconds);
+  }
+}
+
+function cacheGetChunked(cache, key) {
+  var nStr = cache.get(key + '__n');
+  if (nStr === null || nStr === undefined) return null;
+  var n = Number(nStr);
+  if (!n || isNaN(n)) return null;
+  var parts = [];
+  for (var i = 0; i < n; i++) {
+    var part = cache.get(key + '__' + i);
+    if (part === null || part === undefined) return null;
+    parts.push(part);
+  }
+  return parts.join('');
+}
+
+function invalidateBootCache() {
+  var cache = CacheService.getScriptCache();
+  var key = BOOT_BUNDLE_CACHE_KEY;
+  var nStr = cache.get(key + '__n');
+  if (nStr === null || nStr === undefined) return;
+  var n = Number(nStr);
+  if (n && !isNaN(n)) {
+    for (var i = 0; i < n; i++) cache.remove(key + '__' + i);
+  }
+  cache.remove(key + '__n');
+}
+
 // First-page datasets in one request. Apps Script cold starts are slow when the
 // site fires ~7 parallel GETs on load, so boot uses this instead (with a
 // fallback to the individual actions if an older deployment is still live).
+// Served from a 2-minute chunked ScriptCache when warm.
 function getBootBundle() {
-  return {
+  var cache = CacheService.getScriptCache();
+  var cached = cacheGetChunked(cache, BOOT_BUNDLE_CACHE_KEY);
+  if (cached) {
+    try {
+      return JSON.parse(cached);
+    } catch (e) {
+      // Corrupt/incomplete cache — rebuild below.
+    }
+  }
+  var payload = {
     inventory: getInventory(),
     descriptions: getDescriptions(),
     postingQueue: getPostingQueue(),
@@ -2017,6 +2092,12 @@ function getBootBundle() {
     localDeals: getLocalDeals(),
     generatedAt: new Date().toISOString(),
   };
+  try {
+    cachePutChunked(cache, BOOT_BUNDLE_CACHE_KEY, JSON.stringify(payload), BOOT_BUNDLE_CACHE_TTL);
+  } catch (e) {
+    // Cache write can fail on size/quota; still return the fresh payload.
+  }
+  return payload;
 }
 
 // Refreshes the Poshmark side of both the Acquire Watchlist comps and the
@@ -2226,6 +2307,7 @@ function setLocalDeal(body) {
   if (!status) {
     if (target === -1) return { ok: true, cleared: 0 };
     sheet.deleteRow(target + 2);
+    invalidateBootCache();
     return { ok: true, cleared: 1 };
   }
 
@@ -2247,6 +2329,7 @@ function setLocalDeal(body) {
     SpreadsheetApp.flush(); // the format has to land before the value, or Sheets parses it first
   }
   sheet.getRange(rowIndex, 1, 1, lastCol).setValues([row]);
+  invalidateBootCache();
   return { ok: true, saved: 1, row: rowIndex };
 }
 
@@ -2318,5 +2401,6 @@ function addMetricEntries(body) {
     ];
   });
   sheet.getRange(sheet.getLastRow() + 1, 1, values.length, values[0].length).setValues(values);
+  invalidateBootCache();
   return { ok: true, added: values.length, date: date };
 }
