@@ -979,6 +979,9 @@ details.cat-section:not([open]) { margin-bottom: 14px; }
 
 /* Opportunity cards */
 .opp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+/* Mild explorer density — shorter media, slightly tighter body */
+.opp-grid .opp-card .opp-media { aspect-ratio: 2 / 1; }
+.opp-grid .opp-card .opp-body { padding: 11px 13px 12px; gap: 9px; }
 .opp-card {
   --band: var(--text-faint);
   display: flex; flex-direction: column; overflow: hidden; cursor: pointer;
@@ -1493,17 +1496,70 @@ body.acq-drawer-open { overflow: hidden; }
   -webkit-overflow-scrolling: touch;
 }
 .acq-carousel .opp-card {
-  flex: 0 0 min(280px, calc(100% - 48px));
-  width: min(280px, calc(100% - 48px));
+  flex: 0 0 min(230px, 70vw);
+  width: min(230px, 70vw);
   max-width: 100%;
   scroll-snap-align: start;
   min-width: 0;
 }
 .acq-carousel.dense .opp-card {
-  flex: 0 0 min(260px, calc(100% - 48px));
-  width: min(260px, calc(100% - 48px));
+  flex: 0 0 min(210px, 68vw);
+  width: min(210px, 68vw);
   max-width: 100%;
 }
+
+/* Dense rail cards: peek next card, ~half the old vertical height, keep key money metrics */
+.acq-carousel .opp-media {
+  aspect-ratio: 2.4 / 1;
+}
+.acq-carousel .opp-media-icon { font-size: 1.55rem; }
+.acq-carousel .opp-body {
+  padding: 8px 10px 10px;
+  gap: 7px;
+}
+.acq-carousel .opp-top { gap: 8px; }
+.acq-carousel .opp-score {
+  min-width: 46px;
+  padding: 4px 5px;
+}
+.acq-carousel .opp-score b { font-size: 1.3rem; }
+.acq-carousel .opp-score span { display: none; }
+.acq-carousel .opp-titles h4 { font-size: .94rem; line-height: 1.2; }
+.acq-carousel :is(.opp-cat, .opp-brand, .flag-pill, .conf, .m-sales, .m-best) {
+  display: none;
+}
+.acq-carousel .opp-status { gap: 4px; }
+.acq-carousel .status-pill,
+.acq-carousel .freq-pill {
+  font-size: .64rem;
+  padding: 2px 7px;
+}
+.acq-carousel .opp-key { gap: 6px; }
+.acq-carousel .opp-key > div { padding: 5px 7px; }
+.acq-carousel .opp-key dt { font-size: .58rem; }
+.acq-carousel .opp-key dd { font-size: 1.05rem; margin-top: 1px; }
+.acq-carousel .opp-metrics {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px 8px;
+}
+.acq-carousel .opp-metrics dt { font-size: .58rem; }
+.acq-carousel .opp-metrics dd { font-size: .76rem; }
+.acq-carousel .opp-metrics .m-range {
+  grid-column: 1 / -1;
+  order: -1;
+}
+.acq-carousel .opp-empty { font-size: .76rem; line-height: 1.35; }
+.acq-carousel .opp-foot {
+  gap: 6px;
+  margin-top: 2px;
+}
+.acq-carousel .hunt-btn {
+  min-height: 32px;
+  padding: 4px 11px;
+  font-size: .72rem;
+  width: auto;
+}
+
 .acq-carousel .empty-state { flex: 1 1 auto; min-width: min(100%, 320px); }
 .acq-rail-btn {
   appearance: none;
