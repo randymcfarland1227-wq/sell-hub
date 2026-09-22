@@ -228,7 +228,7 @@ const ACQUIRE_TAXONOMY = [
   { id: 'collectibles', label: 'Collectibles', icon: '🧸', subs: ['Trading cards', 'Toys', 'Figurines', 'Plush', 'Advertising', 'Memorabilia', 'Vintage media'] },
   { id: 'sporting-goods', label: 'Sporting Goods', icon: '⛳', subs: ['Outdoor gear', 'Golf', 'Camping', 'Fitness', 'Sports equipment'] },
   { id: 'auto-specialty', label: 'Auto / Specialty', icon: '🚗', subs: ['Auto parts', 'OEM accessories', 'Replacement components'] },
-  { id: 'media', label: 'Media', icon: '📚', subs: ['Books', 'Vinyl', 'CDs', 'DVDs/Blu-rays', 'Box sets', 'Rare editions'] },
+  { id: 'media', label: 'Media', icon: '📚', subs: ['Books', 'Vinyl', 'CDs', 'DVDs/Blu-rays', 'Box sets', 'VHS', 'Magazines', 'Rare editions'] },
   { id: 'other', label: 'Other', icon: '🏷️', subs: [] },
 ];
 const ACQUIRE_DEFAULT_CATEGORY_ICON = '🏷️';
