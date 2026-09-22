@@ -83,6 +83,7 @@ html, body {
   font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   font-size: 16px;
   -webkit-font-smoothing: antialiased;
+  overflow-x: clip;
 }
 
 body {
@@ -208,6 +209,16 @@ main.wrap {
 }
 @media (max-width: 680px) {
   main.wrap { margin: 16px auto 24px; padding: 24px 18px 44px; border-radius: var(--radius-md); }
+}
+
+/* Prevent Acquire carousels from expanding document width on mobile Safari */
+main.wrap,
+#acquire,
+.acq-lanes,
+.acq-lane,
+.acq-rail {
+  max-width: 100%;
+  min-width: 0;
 }
 
 .chip-toggle {
@@ -1191,7 +1202,14 @@ body.acq-drawer-open { overflow: hidden; }
   .acq-toolbar .sort-control { flex: 1; }
   .acq-filter-toggle { display: inline-block; min-height: 44px; padding: 8px 14px; }
   .acq-section-nav { margin: 4px -4px 12px; }
-  .acq-section-switch { width: 100%; overflow-x: auto; scrollbar-width: thin; }
+  .acq-section-switch {
+    display: flex;
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    scrollbar-width: thin;
+  }
   .acq-section-switch button { min-height: 38px; flex: 0 0 auto; }
   .acq-cat-chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 -18px 10px; padding: 0 18px; }
   .acq-cat-chips::-webkit-scrollbar { display: none; }
@@ -1433,7 +1451,7 @@ body.acq-drawer-open { overflow: hidden; }
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow);
   padding: 16px 16px 14px;
-  overflow: visible;
+  overflow: hidden;
 }
 .lane-head h4 { margin: 0 0 2px; font-size: 1.05rem; display: flex; align-items: center; gap: 8px; }
 .lane-count {
@@ -1457,27 +1475,34 @@ body.acq-drawer-open { overflow: hidden; }
 .acq-rail {
   position: relative;
   display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 .acq-carousel {
   display: flex;
   gap: 12px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   overflow-x: auto;
+  overscroll-behavior-x: contain;
   scroll-snap-type: x mandatory;
   scrollbar-width: auto;
   padding: 4px 36px 10px;
   -webkit-overflow-scrolling: touch;
 }
 .acq-carousel .opp-card {
-  flex: 0 0 280px;
-  width: 280px;
-  max-width: 78vw;
+  flex: 0 0 min(280px, calc(100% - 48px));
+  width: min(280px, calc(100% - 48px));
+  max-width: 100%;
   scroll-snap-align: start;
   min-width: 0;
 }
 .acq-carousel.dense .opp-card {
-  flex: 0 0 260px;
-  width: 260px;
-  max-width: 78vw;
+  flex: 0 0 min(260px, calc(100% - 48px));
+  width: min(260px, calc(100% - 48px));
+  max-width: 100%;
 }
 .acq-carousel .empty-state { flex: 1 1 auto; min-width: min(100%, 320px); }
 .acq-rail-btn {
@@ -1526,7 +1551,9 @@ body.acq-drawer-open { overflow: hidden; }
 .acq-section-switch {
   display: inline-flex;
   flex-wrap: wrap;
+  width: auto;
   max-width: 100%;
+  min-width: 0;
   margin-bottom: 0;
 }
 .acq-section-switch button {
