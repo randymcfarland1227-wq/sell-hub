@@ -23,6 +23,9 @@
  *   GET  ?action=photos        -> [{itemId, platform, photoUrl}]
  *   GET  ?action=trends        -> [{searchTerm, platform, avgSoldPrice, recentSalesFound, sellThrough, lastChecked}]
  *   GET  ?action=itemActions   -> [{date, itemId, action, detail}] — log of price drops/offers sent/ignored recommendations
+ *   GET  ?action=bootBundle    -> { inventory, descriptions, postingQueue, metrics, photos,
+ *                                   itemActions, localDeals, generatedAt } — first-page datasets
+ *                                   in one cold start instead of seven parallel GETs
  *   POST {action:'addMetricEntry', listingId, itemId, platform, impressions, views, watchers, clicks, price}
  *   POST {action:'addMetricEntries', date, rows:[...]}   — the same, in bulk
  *   GET  ?action=localDeals / POST {action:'setLocalDeal', itemId, platform, status, buyer, when, where, note}
@@ -77,6 +80,7 @@ function doGet(e) {
   if (action === 'sourcingIntel') return jsonOut(getSourcingIntel());
   if (action === 'acquireBundle') return jsonOut(getAcquireBundle());
   if (action === 'salesBundle') return jsonOut(getSalesBundle());
+  if (action === 'bootBundle') return jsonOut(getBootBundle());
   if (action === 'localDeals') return jsonOut(getLocalDeals());
   if (action === 'platformTrends') return jsonOut(getPlatformTrends());
   if (action === 'savedItems') return jsonOut(getSavedItems());
@@ -1995,6 +1999,22 @@ function getAcquireBundle() {
     history: getMarketHistory(),
     intel: getSourcingIntel(),
     platformTrends: getPlatformTrends(),
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+// First-page datasets in one request. Apps Script cold starts are slow when the
+// site fires ~7 parallel GETs on load, so boot uses this instead (with a
+// fallback to the individual actions if an older deployment is still live).
+function getBootBundle() {
+  return {
+    inventory: getInventory(),
+    descriptions: getDescriptions(),
+    postingQueue: getPostingQueue(),
+    metrics: getMetrics(),
+    photos: getPhotos(),
+    itemActions: getItemActions(),
+    localDeals: getLocalDeals(),
     generatedAt: new Date().toISOString(),
   };
 }
