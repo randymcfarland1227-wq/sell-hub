@@ -15,7 +15,7 @@
   // Apply the saved theme before first paint so the page never flashes the wrong one.
   try { var t = localStorage.getItem('sellHub.theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
 </script>
-<link rel="stylesheet" href="css/styles.css?v=20260922-acq15">
+<link rel="stylesheet" href="css/styles.css?v=20260922-stk1">
 </head>
 <body>
 
@@ -33,6 +33,7 @@
       <button data-view="inventory" role="tab" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg><span>Inventory</span></button>
       <button data-view="stats" role="tab" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span>Stats</span></button>
       <button data-view="acquire" role="tab" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg><span>Acquire</span></button>
+      <button data-view="stocking" role="tab" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h18"/><path d="M5 7l1.5 12h11L19 7"/><path d="M9 11v4M15 11v4"/><path d="M10 7V5a2 2 0 0 1 4 0v2"/></svg><span>Stocking</span></button>
     </nav>
   </div>
 </header>
@@ -374,6 +375,121 @@
     <datalist id="acqSubcategoryList"></datalist>
   </section>
 
+
+  <!-- ===================== STOCKING ===================== -->
+  <section id="stocking" class="view">
+    <div class="section-head">
+      <div>
+        <h2 class="section-title">Stocking</h2>
+        <p class="section-intro">Front door for new inventory — intake, answer Listing Questions, then move drafts through to Ready to post. Grok fills analysis and drafts in the Sheet; this page drives the stages.</p>
+      </div>
+      <button type="button" class="btn secondary" id="stockingRefreshBtn">Refresh</button>
+    </div>
+
+    <div id="stockingSetupNote" class="setup-note" style="display:none">
+      Not connected to your Sheet yet. Deploy <code>Code.gs</code> on <code>selling_inventory_updated</code> and paste the Web App URL into <code>js/config.js</code> — see <code>SETUP.md</code>.
+    </div>
+
+    <div class="panel stocking-intake" id="stockingIntakePanel">
+      <h3>New intake</h3>
+      <form id="stockingIntakeForm" class="stocking-form">
+        <div class="field-row">
+          <div class="field">
+            <label for="stkProduct">Product / item <span class="req">*</span></label>
+            <input id="stkProduct" name="product" required placeholder="e.g. Nike Tech Fleece hoodie">
+          </div>
+          <div class="field">
+            <label for="stkBrand">Brand</label>
+            <input id="stkBrand" name="brand" placeholder="Nike">
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="stkModel">Model</label>
+            <input id="stkModel" name="model" placeholder="Tech Fleece">
+          </div>
+          <div class="field">
+            <label for="stkVersion">Version</label>
+            <input id="stkVersion" name="version" placeholder="FW24 / style code">
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="stkKind">Inventory tab</label>
+            <select id="stkKind" name="kind">
+              <option value="clothing">Clothing Sell Inventory</option>
+              <option value="non">Non Clothing Sell Inventory</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="stkCategory">Category</label>
+            <input id="stkCategory" name="category" placeholder="Clothing / Electronics / …">
+          </div>
+        </div>
+        <div class="field-row clothing-only">
+          <div class="field">
+            <label for="stkClothingType">Clothing type</label>
+            <input id="stkClothingType" name="clothingType" placeholder="Hoodie / Pants / …">
+          </div>
+          <div class="field">
+            <label for="stkSize">Size</label>
+            <input id="stkSize" name="size" placeholder="L / 32x32">
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="stkCondition">Condition</label>
+            <input id="stkCondition" name="condition" placeholder="Good / Like new">
+          </div>
+          <div class="field">
+            <label for="stkPlatforms">Platforms</label>
+            <input id="stkPlatforms" name="platforms" placeholder="eBay, Poshmark">
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="stkListPrice">List price</label>
+            <input id="stkListPrice" name="listPrice" inputmode="decimal" placeholder="49.99">
+          </div>
+          <div class="field">
+            <label for="stkEstValue">Est. value</label>
+            <input id="stkEstValue" name="estValue" placeholder="$30–45">
+          </div>
+          <div class="field">
+            <label for="stkFloorPrice">Floor price</label>
+            <input id="stkFloorPrice" name="floorPrice" inputmode="decimal" placeholder="25">
+          </div>
+        </div>
+        <div class="field">
+          <label for="stkNotes">Notes</label>
+          <textarea id="stkNotes" name="notes" rows="2" placeholder="Where it came from, flaws, identifiers…"></textarea>
+        </div>
+        <label class="chip-toggle"><input type="checkbox" id="stkIntakeRow" checked> Also add a row on Adding to Selling Inventory</label>
+        <div class="stocking-form-actions">
+          <button type="submit" class="btn" id="stkSubmitBtn">Add to Stocking</button>
+          <span class="status-msg" id="stkFormStatus" role="status"></span>
+        </div>
+      </form>
+    </div>
+
+    <div class="stocking-board" id="stockingBoard" aria-live="polite"></div>
+
+    <dialog class="stocking-dialog" id="stockingDetailDialog" aria-labelledby="stockingDetailTitle">
+      <form method="dialog" class="stocking-dialog-inner">
+        <header>
+          <h3 id="stockingDetailTitle">Item details</h3>
+          <button type="submit" class="icon-btn" value="cancel" aria-label="Close">✕</button>
+        </header>
+        <div id="stockingDetailBody"></div>
+        <footer class="stocking-dialog-actions">
+          <button type="button" class="btn secondary" id="stkSaveAnswersBtn">Save answers</button>
+          <button type="button" class="btn" id="stkSubmitDraftsBtn">Submit for drafts</button>
+        </footer>
+        <p class="status-msg" id="stkDetailStatus" role="status"></p>
+      </form>
+    </dialog>
+  </section>
+
 </main>
 
 <dialog class="remove-dialog" id="removeItemDialog" aria-labelledby="removeItemTitle"></dialog>
@@ -383,11 +499,12 @@
   <div class="acq-drawer-body" id="acqDrawerBody"></div>
 </aside>
 
-<script src="js/config.js?v=20260922-acq15"></script>
-<script src="js/data.js?v=20260922-acq15"></script>
-<script src="js/app.js?v=20260922-acq15"></script>
-<script src="js/acquire-config.js?v=20260922-acq15"></script>
-<script src="js/acquire-model.js?v=20260922-acq15"></script>
-<script src="js/acquire.js?v=20260922-acq15"></script>
+<script src="js/config.js?v=20260922-stk1"></script>
+<script src="js/data.js?v=20260922-stk1"></script>
+<script src="js/app.js?v=20260922-stk1"></script>
+<script src="js/acquire-config.js?v=20260922-stk1"></script>
+<script src="js/acquire-model.js?v=20260922-stk1"></script>
+<script src="js/acquire.js?v=20260922-stk1"></script>
+<script src="js/stocking.js?v=20260922-stk1"></script>
 </body>
 </html>

@@ -2134,3 +2134,59 @@ details[open] > summary ~ * { animation: view-in .25s var(--ease); }
 .pick-summary { width: 100%; margin-top: 10px; font: inherit; font-size: .8rem; padding: 8px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text-muted); resize: vertical; }
 .pick-box { display: inline-flex; align-items: center; cursor: pointer; flex: none; margin-right: 2px; }
 .pick-box input { width: 17px; height: 17px; accent-color: var(--primary); cursor: pointer; }
+
+/* ---------- Stocking ---------- */
+.stocking-intake { margin-bottom: 22px; }
+.stocking-form { display: flex; flex-direction: column; gap: 12px; }
+.stocking-form .field-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+.stocking-form .field { display: flex; flex-direction: column; gap: 4px; }
+.stocking-form label { font-size: .74rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); }
+.stocking-form .req { color: var(--danger, #c44); }
+.stocking-form input, .stocking-form select, .stocking-form textarea {
+  font: inherit; padding: 9px 11px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+  background: var(--bg-elevated); color: var(--text);
+}
+.stocking-form-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.stocking-board {
+  display: grid; grid-template-columns: repeat(5, minmax(180px, 1fr)); gap: 12px; overflow-x: auto;
+  padding-bottom: 8px;
+}
+.stocking-col {
+  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-lg);
+  min-height: 220px; display: flex; flex-direction: column;
+}
+.stocking-col-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 10px 12px; border-bottom: 1px solid var(--border);
+}
+.stocking-col-head h3 { font-size: .82rem; margin: 0; }
+.stocking-col-head .count {
+  font-size: .7rem; font-weight: 700; padding: 1px 8px; border-radius: 999px;
+  background: var(--primary); color: #fff;
+}
+.stocking-col-body { padding: 10px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
+.stocking-card {
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-md);
+  padding: 10px 11px; display: flex; flex-direction: column; gap: 6px;
+}
+.stocking-card header { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.stocking-card header b { font-size: .9rem; }
+.stocking-card .mono { font-size: .7rem; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.stocking-card-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.btn.small { padding: 5px 9px; font-size: .72rem; }
+.stk-summary { font-size: .8rem; color: var(--text-muted); }
+.stocking-dialog { border: none; border-radius: var(--radius-lg); padding: 0; max-width: 560px; width: calc(100% - 24px); background: var(--bg-card); color: var(--text); box-shadow: var(--shadow-soft); }
+.stocking-dialog::backdrop { background: rgba(0,0,0,.45); }
+.stocking-dialog-inner { padding: 16px 18px 18px; display: flex; flex-direction: column; gap: 12px; }
+.stocking-dialog-inner header { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.stocking-dialog-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.stk-questions { display: flex; flex-direction: column; gap: 12px; }
+.stk-q label { font-weight: 600; font-size: .86rem; display: block; margin-bottom: 4px; }
+.stk-q textarea { width: 100%; font: inherit; padding: 8px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text); }
+.chip-toggle { display: inline-flex; align-items: center; gap: 8px; font-size: .84rem; cursor: pointer; }
+.status-msg { font-size: .82rem; color: var(--text-muted); }
+.status-msg.error, .error { color: var(--danger, #c44); }
+.icon-btn { appearance: none; border: none; background: transparent; color: var(--text-muted); font-size: 1.1rem; cursor: pointer; padding: 4px 8px; }
+@media (max-width: 1100px) {
+  .stocking-board { grid-template-columns: repeat(5, minmax(200px, 1fr)); }
+}
