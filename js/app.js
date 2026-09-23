@@ -293,6 +293,45 @@ function collectResaleActions() {
   });
   return actions;
 }
+// Actions that count as finished work on Life Hub: marking a listing posted, deploying a
+// pricing suggestion (price drop, offer, completed), and moving items along (shipped, ended
+// elsewhere). Sent to Life Hub as done tasks for the last 7 days; it records each once.
+const LIFE_HUB_DONE_ACTIONS = {
+  'Listing Posted': 'Listed',
+  'Price Drop': 'Price dropped',
+  'Offer Sent': 'Offer sent',
+  'Completed': 'Suggestion done',
+  'Shipped': 'Shipped',
+  'Listing Ended': 'Listing ended',
+};
+function resaleDoneTasks() {
+  const cutoff = new Date();
+  cutoff.setHours(0, 0, 0, 0);
+  cutoff.setDate(cutoff.getDate() - 6);
+  const seen = new Set();
+  return (state.itemActions || [])
+    .filter(a => LIFE_HUB_DONE_ACTIONS[a.action])
+    .map(a => {
+      const m = String(a.date || '').match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+      return m ? { a, when: new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) } : null;
+    })
+    .filter(x => x && x.when >= cutoff)
+    .map(({ a, when }) => {
+      const item = state.inventory.find(it => String(it.itemId) === String(a.itemId));
+      const id = `done:${a.itemId}:${a.action}:${a.detail || ''}:${a.date}`;
+      if (seen.has(id)) return null;
+      seen.add(id);
+      return {
+        id,
+        title: `${LIFE_HUB_DONE_ACTIONS[a.action]} — ${item ? itemTitle(item) : a.itemId}`,
+        detail: a.detail || '',
+        status: 'done',
+        completedAt: when.toISOString(),
+        originUrl: RESALE_ORIGIN_URL,
+      };
+    })
+    .filter(Boolean);
+}
 function resaleWorkroomSnapshot() {
   const active = state.inventory.filter(it => !isSold(it));
   const sold = state.inventory.filter(isSold);
@@ -325,7 +364,7 @@ function resaleWorkroomSnapshot() {
       listingViews,
     },
     featured,
-    tasks,
+    tasks: [...tasks, ...resaleDoneTasks()],
     refreshedAt: state.loadedAt || new Date().toISOString(),
   };
 }
@@ -3048,6 +3087,7 @@ function pricingActionFor(item) {
 
 async function recordItemAction(itemId, itemAction, detail) {
   state.itemActions.push({ date: todayStr(), itemId, action: itemAction, detail: detail || '' });
+  if (LIFE_HUB_DONE_ACTIONS[itemAction]) notifyWorkroom();
   if (connected()) {
     try { await apiPost('logItemAction', { itemId, itemAction, detail }); }
     catch { /* logged locally; will drift from the Sheet until the next successful call */ }
