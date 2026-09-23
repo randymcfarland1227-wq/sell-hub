@@ -272,11 +272,24 @@ main.wrap,
 }
 .mode-switch button.active { background: var(--primary); color: #fff; }
 
+.inventory-expand {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.inventory-expand-btn {
+  padding: 8px 12px;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
 .inventory-refresh {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-left: auto;
   flex-shrink: 0;
   min-width: 0;
 }
@@ -1461,6 +1474,8 @@ body.acq-drawer-open { overflow: hidden; }
   .inventory-toolbar, .action-toolbar { align-items: stretch; flex-direction: column; }
   .sort-control { justify-content: space-between; }
   .sort-control select { min-width: 155px; }
+  .inventory-expand { margin-left: 0; width: 100%; flex-wrap: wrap; }
+  .inventory-expand-btn { flex: 1 1 auto; min-width: 0; }
   .inventory-refresh { margin-left: 0; width: 100%; }
   .inventory-refresh-btn { flex: 1 1 auto; }
   .inventory-refresh-status { max-width: none; flex: 1 1 auto; }
