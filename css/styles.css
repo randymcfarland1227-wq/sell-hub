@@ -1553,9 +1553,10 @@ body.acq-drawer-open { overflow: hidden; }
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow);
-  padding: 16px 16px 14px;
+  padding: 0 16px 14px;
   overflow: hidden;
 }
+.lane-head-main { min-width: 0; flex: 1; }
 .lane-head h4 { margin: 0 0 2px; font-size: 1.05rem; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .lane-count {
   font-size: 0.78rem; font-weight: 700; padding: 1px 9px; border-radius: 999px;
@@ -1563,27 +1564,32 @@ body.acq-drawer-open { overflow: hidden; }
 }
 .lane-blurb { margin: 0 0 2px; color: var(--text-muted); font-size: 0.87rem; }
 .lane-criteria { margin: 0; color: var(--text-faint); font-size: 0.76rem; }
+/* Match .acq-bucket-summary: clear tappable title row + ▾/▸ so shelves read as collapsible. */
 details.acq-lane > summary.lane-head {
   list-style: none;
   cursor: pointer;
-  position: relative;
-  padding-right: 1.5rem;
-  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 -16px 12px;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-elevated) 70%, transparent);
 }
 details.acq-lane > summary.lane-head::-webkit-details-marker { display: none; }
 details.acq-lane > summary.lane-head::after {
   content: '▾';
-  position: absolute;
-  top: 2px;
-  right: 0;
+  margin-left: auto;
+  flex: none;
   color: var(--text-faint);
   font-size: .95rem;
 }
 details.acq-lane:not([open]) > summary.lane-head {
   margin-bottom: 0;
+  border-bottom-color: transparent;
 }
 details.acq-lane:not([open]) > summary.lane-head::after { content: '▸'; }
-details.acq-lane:not([open]) { padding-bottom: 12px; }
+details.acq-lane:not([open]) { padding-bottom: 0; }
 .lane-empty {
   margin: 4px 0 0; padding: 14px; border-radius: var(--radius-md);
   background: var(--bg-elevated); color: var(--text-muted); font-size: 0.87rem;
@@ -1639,7 +1645,6 @@ details.acq-lane:not([open]) { padding-bottom: 12px; }
   background: linear-gradient(var(--gold), var(--primary));
   flex: none;
 }
-.acq-emerging-slot { margin-top: 8px; }
 .acq-explorer-tools {
   display: flex;
   justify-content: flex-end;
@@ -1857,7 +1862,8 @@ details.acq-lane:not([open]) { padding-bottom: 12px; }
   color: var(--primary); cursor: pointer; text-decoration: underline;
 }
 @media (max-width: 640px) {
-  .acq-lane { padding: 14px 12px; }
+  .acq-lane { padding: 0 12px 12px; }
+  details.acq-lane > summary.lane-head { margin-left: -12px; margin-right: -12px; padding-left: 12px; padding-right: 12px; }
   .sold-share { gap: 14px; justify-content: center; }
 }
 .pa-badge.pa-price-held { background: var(--warn-bg); color: var(--warn); margin-left: 6px; }

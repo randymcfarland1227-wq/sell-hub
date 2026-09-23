@@ -290,7 +290,7 @@ function emergingEmptyHTML(meta) {
     </p>`;
 }
 
-function laneSectionHTML(lane, trending) {
+function laneBodyHTML(lane, { trending = null } = {}) {
   const expanded = acqState.expandedLanes.has(lane.id);
   const dismissed = dismissedIdsForLane(lane.id);
   const visible = lane.items.filter(o => !dismissed.has(String(o.id)));
@@ -303,24 +303,34 @@ function laneSectionHTML(lane, trending) {
         <button type="button" class="acq-rail-btn" data-rail="1" aria-label="Scroll right">›</button>
       </div>`
     : lane.id === 'emerging' ? emergingEmptyHTML(lane.meta) : `<p class="lane-empty">${escapeHtml(lane.empty)}</p>`;
-  const criteria = laneCriteriaText(lane);
   const footBits = [];
   if (visible.length > shown.length || (expanded && visible.length > ACQUIRE_CONFIG.laneSize)) {
     footBits.push(`<button type="button" class="btn secondary" data-lane="${lane.id}">${expanded ? 'Show fewer' : `See all ${visible.length}`}</button>`);
   }
   const showAgain = laneShowAgainHTML(lane.id, hiddenCount);
   if (showAgain) footBits.push(showAgain);
+  return {
+    visibleCount: visible.length,
+    html: `${body}
+      ${trending ? trendingTermsHTML(trending) : ''}
+      ${footBits.length ? `<div class="lane-foot">${footBits.join('')}</div>` : ''}`,
+  };
+}
+
+function laneSectionHTML(lane) {
+  const { visibleCount, html: body } = laneBodyHTML(lane);
+  const criteria = laneCriteriaText(lane);
   const openAttr = isBucketCollapsed(lane.id) ? '' : ' open';
   return `
     <details class="acq-lane lane-${lane.id}" data-bucket="${escapeHtml(lane.id)}"${openAttr}>
       <summary class="lane-head">
-        <h4><span aria-hidden="true">${lane.icon}</span> ${escapeHtml(lane.title)} <span class="lane-count">${visible.length}</span></h4>
-        <p class="lane-blurb">${escapeHtml(lane.blurb)}</p>
-        ${criteria ? `<p class="lane-criteria">Bar to get here: ${escapeHtml(criteria)}</p>` : ''}
+        <div class="lane-head-main">
+          <h4><span aria-hidden="true">${lane.icon}</span> ${escapeHtml(lane.title)} <span class="lane-count">${visibleCount}</span></h4>
+          <p class="lane-blurb">${escapeHtml(lane.blurb)}</p>
+          ${criteria ? `<p class="lane-criteria">Bar to get here: ${escapeHtml(criteria)}</p>` : ''}
+        </div>
       </summary>
       ${body}
-      ${lane.id === 'emerging' ? trendingTermsHTML(trending) : ''}
-      ${footBits.length ? `<div class="lane-foot">${footBits.join('')}</div>` : ''}
     </details>`;
 }
 
@@ -332,11 +342,11 @@ function renderAcquireLanes() {
 
   // Emerging renders below Media run — keep Everyday / Strong / Quick here.
   const shelves = acqState.lanes.filter(lane => lane.id !== 'emerging');
-  el.innerHTML = shelves.map(lane => laneSectionHTML(lane, null)).join('');
+  el.innerHTML = shelves.map(lane => laneSectionHTML(lane)).join('');
 }
 
 function renderAcquireEmerging() {
-  const el = document.getElementById('acqEmerging');
+  const el = document.getElementById('acqEmergingBody');
   if (!el) return;
   if (acqState.loading) { el.innerHTML = '<div class="empty-state">Loading market data…</div>'; return; }
   if (acqState.error) { el.innerHTML = ''; return; }
@@ -344,10 +354,8 @@ function renderAcquireEmerging() {
   const lane = acqState.lanes.find(l => l.id === 'emerging');
   if (!lane) { el.innerHTML = ''; return; }
   const trending = summarizePlatformTrends(acqState.data.platformTrends, acqState.opps);
-  el.innerHTML = laneSectionHTML(lane, trending);
-  // Anchor for jump nav / scroll-margin (details is inside the slot).
-  const details = el.querySelector('details[data-bucket="emerging"]');
-  if (details) details.id = 'acq-emerging';
+  // Fill the static Emerging bucket body only — do not replace the <details>.
+  el.innerHTML = laneBodyHTML(lane, { trending }).html;
 }
 
 

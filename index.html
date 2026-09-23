@@ -15,7 +15,7 @@
   // Apply the saved theme before first paint so the page never flashes the wrong one.
   try { var t = localStorage.getItem('sellHub.theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
 </script>
-<link rel="stylesheet" href="css/styles.css">
+<link rel="stylesheet" href="css/styles.css?v=20260922-acq15">
 </head>
 <body>
 
@@ -323,7 +323,13 @@
       <div class="lane-foot" id="acqMediaFoot" hidden></div>
     </details>
 
-    <div class="acq-lanes acq-emerging-slot" id="acqEmerging"></div>
+    <details class="acq-bucket" id="acq-emerging" data-bucket="emerging" open>
+      <summary class="acq-bucket-summary">
+        <span class="acq-bucket-title">Emerging trends</span>
+      </summary>
+      <p class="section-intro">Prices or demand moving up, plus what shoppers are searching for more of this week.</p>
+      <div id="acqEmergingBody"></div>
+    </details>
 
     <details class="acq-bucket" id="acq-explorer" data-bucket="explorer" open>
       <summary class="acq-bucket-summary acq-explorer-summary">
@@ -377,11 +383,11 @@
   <div class="acq-drawer-body" id="acqDrawerBody"></div>
 </aside>
 
-<script src="js/config.js"></script>
-<script src="js/data.js"></script>
-<script src="js/app.js"></script>
-<script src="js/acquire-config.js"></script>
-<script src="js/acquire-model.js"></script>
-<script src="js/acquire.js"></script>
+<script src="js/config.js?v=20260922-acq15"></script>
+<script src="js/data.js?v=20260922-acq15"></script>
+<script src="js/app.js?v=20260922-acq15"></script>
+<script src="js/acquire-config.js?v=20260922-acq15"></script>
+<script src="js/acquire-model.js?v=20260922-acq15"></script>
+<script src="js/acquire.js?v=20260922-acq15"></script>
 </body>
 </html>
