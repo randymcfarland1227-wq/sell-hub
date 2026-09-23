@@ -28,6 +28,8 @@
  *                                   in one cold start instead of seven parallel GETs
  *   POST {action:'addMetricEntry', listingId, itemId, platform, impressions, views, watchers, clicks, price}
  *   POST {action:'addMetricEntries', date, rows:[...]}   — the same, in bulk
+ *   POST {action:'syncEbayMetrics'} / GET ?action=syncEbayMetrics -> eBay Traffic Report sync
+ *        (Script Properties; see SETUP.md); returns {ok,synced,skipped,errors}; GET also includes metrics[]
  *   GET  ?action=localDeals / POST {action:'setLocalDeal', itemId, platform, status, buyer, when, where, note}
  *   GET  ?action=platformTrends / POST {action:'setPlatformTrends', date, platform, rows:[{term, searches, searchDelta, url}]}
  *   POST {action:'addAcquireItem', brand, itemType, size, color, condition, targetPrice, bestPlatform, priority, notes} -> the new row
@@ -107,6 +109,10 @@ function doGet(e) {
   if (action === 'debugRows') return jsonOut(debugRows(e.parameter.sheet, Number(e.parameter.start) || 1, Number(e.parameter.n) || 20));
   if (action === 'stocking') return jsonOut(getStocking());
   if (action === 'listingQuestions') return jsonOut(getListingQuestions(e.parameter.itemId));
+  if (action === 'syncEbayMetrics') {
+    var syncResult = syncEbayMetrics();
+    return jsonOut({ sync: syncResult, metrics: getMetrics() });
+  }
   return jsonOut({ error: 'unknown action' });
 }
 
@@ -204,6 +210,7 @@ function doPost(e) {
   if (action === 'upsertQueue') return jsonOut(upsertQueue(body));
   if (action === 'createInventoryItem') return jsonOut(createInventoryItem(body));
   if (action === 'saveListingAnswers') return jsonOut(saveListingAnswers(body));
+  if (action === 'syncEbayMetrics') return jsonOut(syncEbayMetrics());
 
   return jsonOut({ error: 'unknown action' });
 }
@@ -580,7 +587,7 @@ function getPostingQueue() {
 // ---------------------------------------------------------------------
 // Metrics — new tab, auto-created. Rows come from the site's manual
 // "Log a stat update" form (source:'manual') and, once configured, the
-// optional eBay auto-sync below (source:'api').
+// optional eBay auto-sync below (source:'ebay-api').
 // ---------------------------------------------------------------------
 
 var METRICS_HEADERS = ['Date', 'Listing ID', 'Item ID', 'Platform', 'Impressions', 'Views', 'Watchers', 'Clicks', 'Price', 'Source'];
@@ -1080,12 +1087,12 @@ function getItemActions() {
 }
 
 // ---------------------------------------------------------------------
-// Optional: eBay auto-sync. Inert until EBAY_OAUTH_TOKEN is set in this
-// project's Script Properties (Project Settings > Script Properties) —
-// see SETUP.md's "Optional: eBay live stats" section for how to get one.
-// Once set, run setupEbayTrigger() ONCE from this editor (Run menu) to
-// install a recurring 6-hour timer — after that it updates on its own,
-// no manual site interaction needed.
+// Optional: eBay live stats via Sell Analytics traffic_report.
+// Prefers refresh-token OAuth (EBAY_CLIENT_ID + EBAY_CLIENT_SECRET +
+// EBAY_REFRESH_TOKEN) so access tokens stay fresh; falls back to a
+// short-lived EBAY_OAUTH_TOKEN alone. See SETUP.md "Optional: eBay live
+// stats". Run setupEbayTrigger() once to install a 6-hour timer; Inventory
+// Refresh also POSTs action:syncEbayMetrics before reloading metrics.
 // ---------------------------------------------------------------------
 
 function setupEbayTrigger() {
@@ -1095,40 +1102,196 @@ function setupEbayTrigger() {
   ScriptApp.newTrigger('syncEbayMetrics').timeBased().everyHours(6).create();
 }
 
+/** Pull a usable access token; cache refreshed tokens in EBAY_OAUTH_TOKEN. */
+function getEbayAccessToken_() {
+  var props = PropertiesService.getScriptProperties();
+  var clientId = props.getProperty('EBAY_CLIENT_ID');
+  var clientSecret = props.getProperty('EBAY_CLIENT_SECRET');
+  var refreshToken = props.getProperty('EBAY_REFRESH_TOKEN');
+  if (clientId && clientSecret && refreshToken) {
+    try {
+      var basic = Utilities.base64Encode(clientId + ':' + clientSecret);
+      var scope = 'https://api.ebay.com/oauth/api_scope/sell.analytics.readonly';
+      var resp = UrlFetchApp.fetch('https://api.ebay.com/identity/v1/oauth2/token', {
+        method: 'post',
+        contentType: 'application/x-www-form-urlencoded',
+        headers: { Authorization: 'Basic ' + basic },
+        payload: {
+          grant_type: 'refresh_token',
+          refresh_token: refreshToken,
+          scope: scope,
+        },
+        muteHttpExceptions: true,
+      });
+      if (resp.getResponseCode() === 200) {
+        var data = JSON.parse(resp.getContentText());
+        if (data.access_token) {
+          props.setProperty('EBAY_OAUTH_TOKEN', data.access_token);
+          return data.access_token;
+        }
+      }
+    } catch (err) {
+      // Fall through to any cached access token below.
+    }
+  }
+  return props.getProperty('EBAY_OAUTH_TOKEN') || '';
+}
+
+/** eBay listing id from a live URL (or a bare numeric id). Hub ids like CLO-001-EBAY are not valid. */
+function extractEbayListingId_(urlOrId) {
+  var s = String(urlOrId || '').trim();
+  if (/^\d{9,}$/.test(s)) return s;
+  var m = s.match(/\/itm\/(?:[^\/?#]+\/)?(\d{9,})/i)
+    || s.match(/[?&]item=(\d{9,})/i)
+    || s.match(/\/(\d{9,})(?:[\/?#]|$)/);
+  return m ? m[1] : '';
+}
+
+/** Unwrap eBay Value / nested {value:{value}} shapes to a primitive. */
+function ebayPrimitive_(cell) {
+  if (cell === null || cell === undefined) return '';
+  var v = cell;
+  // Record cells are often { value: <primitive>, applicable: true }
+  if (typeof v === 'object' && v.value !== undefined) v = v.value;
+  if (typeof v === 'object' && v !== null && v.value !== undefined) v = v.value;
+  return v;
+}
+
+function ebayYmdPacific_(d) {
+  return Utilities.formatDate(d, 'America/Los_Angeles', 'yyyyMMdd');
+}
+
+/**
+ * Sync Active eBay queue rows into Metrics via traffic_report.
+ * Returns { ok, synced, skipped, errors: [...] } for the client / Refresh UI.
+ */
 function syncEbayMetrics() {
-  var token = PropertiesService.getScriptProperties().getProperty('EBAY_OAUTH_TOKEN');
-  if (!token) return; // not configured yet — see SETUP.md
+  var errors = [];
+  var token = getEbayAccessToken_();
+  if (!token) {
+    return {
+      ok: false,
+      synced: 0,
+      skipped: 0,
+      errors: ['no token — set EBAY_CLIENT_ID, EBAY_CLIENT_SECRET, EBAY_REFRESH_TOKEN (or EBAY_OAUTH_TOKEN)'],
+    };
+  }
 
   var queue = getPostingQueue().filter(function (row) {
-    return String(row.platform || '').toLowerCase().indexOf('ebay') !== -1;
+    var plat = String(row.platform || '').toLowerCase();
+    if (plat.indexOf('ebay') === -1) return false;
+    var st = String(row.status || '').toLowerCase();
+    return st === 'active' || !!String(row.listingUrl || '').trim();
   });
 
+  var byEbayId = {};
+  var skipped = 0;
   queue.forEach(function (row) {
-    try {
-      // eBay's Traffic Report API (Sell > Analytics). The exact response shape and
-      // whether view/impression data is even available depends on your eBay account
-      // tier (some require an eBay Store subscription) — treat this as a starting
-      // point to adjust once you see a real response, not a finished integration.
-      var resp = UrlFetchApp.fetch(
-        'https://api.ebay.com/sell/analytics/v1/traffic_report?listing_ids=' + encodeURIComponent(row.listingId),
-        { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true }
-      );
-      if (resp.getResponseCode() !== 200) return;
-      var data = JSON.parse(resp.getContentText());
-      addMetricEntry({
-        listingId: row.listingId,
-        itemId: row.itemId,
-        platform: 'eBay',
-        impressions: data.impressions || 0,
-        views: data.listingViews || 0,
-        watchers: data.watchCount || 0,
-        clicks: data.clicks || 0,
-        source: 'api',
-      });
-    } catch (err) {
-      // Skip this listing on any API error; the next scheduled run will retry.
+    var ebayId = extractEbayListingId_(row.listingUrl) || extractEbayListingId_(row.listingId);
+    if (!ebayId) {
+      skipped++;
+      return;
+    }
+    var existing = byEbayId[ebayId];
+    if (!existing || String(row.status || '').toLowerCase() === 'active') {
+      byEbayId[ebayId] = row;
     }
   });
+
+  var ids = Object.keys(byEbayId);
+  if (!ids.length) {
+    return {
+      ok: true,
+      synced: 0,
+      skipped: skipped,
+      errors: ['no Active eBay listings with extractable item IDs in Listing URL'],
+    };
+  }
+
+  var end = new Date();
+  var start = new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000);
+  var dateRange = '[' + ebayYmdPacific_(start) + '..' + ebayYmdPacific_(end) + ']';
+  var metricList = 'LISTING_IMPRESSION_TOTAL,LISTING_VIEWS_TOTAL,LISTING_VIEWS_SOURCE_DIRECT,CLICK_THROUGH_RATE';
+  var batchSize = 100;
+  var metricRows = [];
+
+  for (var i = 0; i < ids.length; i += batchSize) {
+    var batch = ids.slice(i, i + batchSize);
+    var filter = 'marketplace_ids:{EBAY_US},date_range:' + dateRange + ',listing_ids:{' + batch.join('|') + '}';
+    var url = 'https://api.ebay.com/sell/analytics/v1/traffic_report'
+      + '?dimension=LISTING'
+      + '&metric=' + encodeURIComponent(metricList)
+      + '&filter=' + encodeURIComponent(filter);
+    try {
+      var resp = UrlFetchApp.fetch(url, {
+        headers: {
+          Authorization: 'Bearer ' + token,
+          Accept: 'application/json',
+        },
+        muteHttpExceptions: true,
+      });
+      var code = resp.getResponseCode();
+      var bodyText = resp.getContentText();
+      if (code !== 200) {
+        errors.push('traffic_report HTTP ' + code + ': ' + String(bodyText).slice(0, 240));
+        continue;
+      }
+      var report = JSON.parse(bodyText);
+      var headerMetrics = (report.header && report.header.metrics) || [];
+      var metricKeys = headerMetrics.map(function (m) {
+        return String(m.key || '').toUpperCase();
+      });
+      (report.records || []).forEach(function (rec) {
+        var dimCell = (rec.dimensionValues && rec.dimensionValues[0]) || null;
+        var ebayId = String(ebayPrimitive_(dimCell) || '');
+        var row = byEbayId[ebayId];
+        if (!row) return;
+
+        var values = rec.metricValues || [];
+        var map = {};
+        for (var mi = 0; mi < metricKeys.length; mi++) {
+          map[metricKeys[mi]] = Number(ebayPrimitive_(values[mi])) || 0;
+        }
+        var impressions = map.LISTING_IMPRESSION_TOTAL || 0;
+        var views = map.LISTING_VIEWS_TOTAL || 0;
+        var directViews = map.LISTING_VIEWS_SOURCE_DIRECT || 0;
+        if (!views && directViews) views = directViews;
+        var ctr = map.CLICK_THROUGH_RATE || 0;
+        var clicks = 0;
+        if (ctr > 0 && impressions > 0) {
+          clicks = ctr <= 1
+            ? Math.round(ctr * impressions)
+            : Math.round(impressions * ctr / 100);
+        }
+
+        metricRows.push({
+          listingId: row.listingId,
+          itemId: row.itemId,
+          platform: 'eBay',
+          impressions: impressions,
+          views: views,
+          watchers: 0,
+          clicks: clicks,
+          source: 'ebay-api',
+        });
+      });
+    } catch (err) {
+      errors.push(String(err && err.message ? err.message : err));
+    }
+  }
+
+  if (metricRows.length) {
+    addMetricEntries({ rows: metricRows, source: 'ebay-api' });
+  } else {
+    invalidateBootCache();
+  }
+
+  return {
+    ok: errors.length === 0,
+    synced: metricRows.length,
+    skipped: skipped,
+    errors: errors,
+  };
 }
 
 // ---------------------------------------------------------------------

@@ -169,15 +169,22 @@ async function apiGetWithRetry(action, { timeoutMs = 30000, attempts = 3, onRetr
   }
   throw lastError;
 }
-async function apiPost(action, payload) {
+async function apiPost(action, payload, { timeoutMs } = {}) {
   if (!connected()) return null;
-  const res = await fetch(APPS_SCRIPT_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ action, ...payload }),
-  });
-  if (!res.ok) throw new Error('Request failed');
-  return res.json();
+  const ctrl = timeoutMs ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
+  try {
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action, ...payload }),
+      signal: ctrl ? ctrl.signal : undefined,
+    });
+    if (!res.ok) throw new Error('Request failed');
+    return await res.json();
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 function localGet(key, fallback) {
   try { return JSON.parse(localStorage.getItem(key)) || fallback; } catch { return fallback; }
@@ -863,6 +870,27 @@ async function reloadLiveData() {
     err.code = 'offline';
     throw err;
   }
+  // Best-effort eBay traffic sync first so the metrics fetch below sees fresh
+  // rows. Missing credentials / API errors must not fail the whole Refresh.
+  let ebaySyncNote = '';
+  try {
+    const syncRes = await apiPost('syncEbayMetrics', {}, { timeoutMs: 90000 });
+    if (!syncRes) {
+      ebaySyncNote = 'eBay sync skipped (no token)';
+    } else if (syncRes.ok === false) {
+      const err0 = (syncRes.errors && syncRes.errors[0]) || '';
+      ebaySyncNote = /no token/i.test(String(err0))
+        ? 'eBay sync skipped (no token)'
+        : 'eBay sync skipped';
+    } else if (Number(syncRes.synced) > 0) {
+      const n = Number(syncRes.synced);
+      ebaySyncNote = `eBay: ${n} listing${n === 1 ? '' : 's'} updated`;
+    } else {
+      ebaySyncNote = 'eBay: no listings updated';
+    }
+  } catch {
+    ebaySyncNote = 'eBay sync skipped';
+  }
   // Inventory is required; companion datasets are best-effort so one flaky
   // secondary call doesn't block the refresh Randy actually cares about.
   // Kick everything off together; only inventory must succeed.
@@ -907,6 +935,7 @@ async function reloadLiveData() {
   refreshInventoryViews();
   populateMetricForm();
   notifyWorkroom();
+  return { ebaySyncNote };
 }
 
 function refreshInventoryViews() {
@@ -3301,10 +3330,12 @@ populateMetricForm();
       status.classList.remove('is-error');
     }
     try {
-      await reloadLiveData();
+      const result = await reloadLiveData();
       if (status) {
-        status.textContent = 'Updated';
-        setTimeout(() => { if (status.textContent === 'Updated') status.textContent = ''; }, 2000);
+        const ebayNote = result && result.ebaySyncNote ? String(result.ebaySyncNote) : '';
+        status.textContent = ebayNote ? `Updated · ${ebayNote}` : 'Updated';
+        const shown = status.textContent;
+        setTimeout(() => { if (status.textContent === shown) status.textContent = ''; }, 4000);
       }
     } catch (err) {
       const msg = (err && err.code === 'offline')
