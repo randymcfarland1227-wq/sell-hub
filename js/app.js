@@ -396,7 +396,10 @@ function showView(view) {
   });
   document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === view));
   // The wheel sizes itself from its container, which measures 0 while hidden.
-  if (view === 'inventory') applyZoom();
+  if (view === 'inventory') {
+    syncInventoryToolbar();
+    requestAnimationFrame(() => applyZoom());
+  }
   if (changed) window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 document.querySelectorAll('nav.tabs button').forEach(btn => {
@@ -512,6 +515,33 @@ function setMode(mode, resetHash) {
   document.getElementById('listMode').style.display = mode === 'list' ? '' : 'none';
   localSet('sellHub.mode', mode);
   if (mode === 'wheel' && resetHash) location.hash = '';
+  syncInventoryToolbar();
+  // Wheel wrap measures 0 while #wheelMode is display:none (default List).
+  // Re-measure after it becomes visible so aspect-ratio height is not stuck at 0.
+  if (mode === 'wheel') {
+    requestAnimationFrame(() => applyZoom());
+  }
+}
+
+function syncInventoryToolbar() {
+  const inv = document.getElementById('inventory');
+  if (!inv) return;
+  const wheel = document.getElementById('wheelMode');
+  const list = document.getElementById('listMode');
+  const inWheel = !!(wheel && wheel.style.display !== 'none');
+  const inList = !!(list && list.style.display !== 'none');
+  const inWheelCat = inventoryWheelCategoryActive();
+  inv.classList.toggle('mode-wheel', inWheel);
+  inv.classList.toggle('mode-list', inList);
+  inv.classList.toggle('wheel-overview', inWheel && !inWheelCat);
+  inv.classList.toggle('wheel-category', inWheelCat);
+  const group = document.getElementById('groupSwitch');
+  const sort = document.querySelector('#inventory .sort-control');
+  const expand = document.querySelector('#inventory .inventory-expand');
+  if (group) group.hidden = !inList;
+  if (sort) sort.hidden = !inList;
+  // Expand/Collapse apply to list sections or wheel category drill-down rows.
+  if (expand) expand.hidden = !(inList || inWheelCat);
 }
 
 // ---------------------------------------------------------------------
@@ -560,9 +590,19 @@ function renderWheel() {
 function applyZoom() {
   const wrap = document.getElementById('wheelWrap');
   const scroll = document.getElementById('wheelScroll');
-  const base = Math.min(scroll.clientWidth, ZOOM_BASE);
+  if (!wrap || !scroll) return;
+  // Skip while the wheel host is hidden — writing width:0px permanently
+  // collapses aspect-ratio height and .wheel-scroll clips to a thin sliver.
+  const host = document.getElementById('wheelMode');
+  if (host && host.style.display === 'none') return;
+  const inv = document.getElementById('inventory');
+  if (inv && !inv.classList.contains('active')) return;
+  const avail = scroll.clientWidth;
+  if (avail <= 0) return;
+  const base = Math.min(avail, ZOOM_BASE);
   const px = Math.round(base * state.zoom);
   wrap.style.width = px + 'px';
+  wrap.style.height = px + 'px'; // explicit height so overflow clip cannot zero the canvas
   document.getElementById('zoomPct').textContent = Math.round(state.zoom * 100) + '%';
   document.getElementById('zoomOut').disabled = state.zoom <= ZOOM_MIN;
   document.getElementById('zoomIn').disabled = state.zoom >= ZOOM_MAX;
@@ -583,6 +623,8 @@ window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer
 function showWheel() {
   document.getElementById('wheelView').style.display = '';
   document.getElementById('categoryView').style.display = 'none';
+  syncInventoryToolbar();
+  requestAnimationFrame(() => applyZoom());
 }
 
 function showCategory(catId) {
@@ -593,6 +635,7 @@ function showCategory(catId) {
   const view = document.getElementById('categoryView');
   view.style.display = '';
   view.style.setProperty('--cat', cat.color);
+  syncInventoryToolbar();
 
   document.getElementById('catIcon').textContent = cat.icon;
   document.getElementById('catLabel').textContent = cat.label;
