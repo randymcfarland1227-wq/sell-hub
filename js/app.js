@@ -753,6 +753,63 @@ async function markSold(btn, onChange) {
 // the Saved for Later tab (restorable); "Delete for good" removes it and its
 // queue rows, descriptions, photos and stats. Sales and the action log stay.
 // ---------------------------------------------------------------------
+// Manual Refresh — re-fetches live Sheet data without a browser reload.
+// Uses the individual (uncached) endpoints instead of bootBundle so Sheet
+// edits aren't hidden behind the 2-minute ScriptCache on bootBundle.
+// Fetches into locals first so a failed request never blanks the current UI.
+async function reloadLiveData() {
+  document.getElementById('inventorySetupNote').style.display = connected() ? 'none' : 'block';
+  if (!connected()) {
+    const err = new Error('Not connected to your Sheet.');
+    err.code = 'offline';
+    throw err;
+  }
+  // Inventory is required; companion datasets are best-effort so one flaky
+  // secondary call doesn't block the refresh Randy actually cares about.
+  // Kick everything off together; only inventory must succeed.
+  const inventoryPromise = apiGetWithRetry('inventory', { timeoutMs: 45000 });
+  const settledPromise = Promise.allSettled([
+    apiGetWithRetry('descriptions', { timeoutMs: 45000 }),
+    apiGetWithRetry('postingQueue', { timeoutMs: 45000 }),
+    apiGetWithRetry('metrics', { timeoutMs: 45000 }),
+    apiGetWithRetry('photos', { timeoutMs: 45000 }),
+    apiGetWithRetry('itemActions', { timeoutMs: 45000 }),
+    apiGetWithRetry('localDeals', { timeoutMs: 45000 }),
+    apiGetWithRetry('savedItems', { timeoutMs: 45000 }),
+    apiGetWithRetry('salesBundle', { timeoutMs: 45000 }),
+  ]);
+  const inventory = await inventoryPromise;
+  if (!Array.isArray(inventory)) throw new Error('inventory refresh failed');
+  const settled = await settledPromise;
+  const val = (i) => settled[i].status === 'fulfilled' ? settled[i].value : null;
+  state.inventory = inventory.filter(isRealItem);
+  const descriptions = val(0);
+  const postingQueue = val(1);
+  const metrics = val(2);
+  const photos = val(3);
+  const itemActions = val(4);
+  const localDeals = val(5);
+  const savedItems = val(6);
+  const salesBundle = val(7);
+  if (Array.isArray(descriptions)) state.descriptions = descriptions;
+  if (Array.isArray(postingQueue)) state.postingQueue = postingQueue;
+  if (Array.isArray(metrics)) state.metrics = metrics;
+  if (Array.isArray(photos)) state.photos = photos;
+  if (Array.isArray(itemActions)) state.itemActions = itemActions;
+  if (Array.isArray(localDeals)) state.localDeals = localDeals;
+  if (Array.isArray(savedItems)) state.savedItems = savedItems;
+  if (salesBundle && typeof salesBundle === 'object') {
+    if (Array.isArray(salesBundle.sales)) state.sales = salesBundle.sales;
+    if (Array.isArray(salesBundle.balances)) state.balances = salesBundle.balances;
+  }
+  state.loadedAt = new Date().toISOString();
+  // Keep in-session collapse choices; do not auto-expand sections.
+  renderSavedItems();
+  refreshInventoryViews();
+  populateMetricForm();
+  notifyWorkroom();
+}
+
 function refreshInventoryViews() {
   renderWheel();
   routeOverview();
@@ -3121,6 +3178,43 @@ renderStats();
 state.featuredActions = new Set(localGet('sellHub.featuredActions', []));
 renderAction();
 populateMetricForm();
+
+(function wireInventoryRefresh() {
+  const btn = document.getElementById('inventoryRefreshBtn');
+  const status = document.getElementById('inventoryRefreshStatus');
+  if (!btn) return;
+  let busy = false;
+  btn.addEventListener('click', async () => {
+    if (busy) return;
+    busy = true;
+    const prev = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Refreshing…';
+    if (status) {
+      status.textContent = '';
+      status.classList.remove('is-error');
+    }
+    try {
+      await reloadLiveData();
+      if (status) {
+        status.textContent = 'Updated';
+        setTimeout(() => { if (status.textContent === 'Updated') status.textContent = ''; }, 2000);
+      }
+    } catch (err) {
+      const msg = (err && err.code === 'offline')
+        ? 'Connect your Sheet first — see SETUP.md.'
+        : "Couldn't refresh — try again in a moment.";
+      if (status) {
+        status.textContent = msg;
+        status.classList.add('is-error');
+      }
+    } finally {
+      btn.disabled = false;
+      btn.textContent = prev;
+      busy = false;
+    }
+  });
+})();
 
 // The Sales tab decides where an item sold (and whether it was handed over in
 // person), so Actions re-renders once it arrives too.
