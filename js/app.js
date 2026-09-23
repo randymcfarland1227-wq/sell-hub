@@ -192,21 +192,100 @@ function localGet(key, fallback) {
 function localSet(key, value) { localStorage.setItem(key, JSON.stringify(value)); }
 
 const WORKROOM_ORIGIN = 'https://frontier-work-room.randymcfarland1227.workers.dev';
+const RESALE_ORIGIN_URL = 'https://randymcfarland1227-wq.github.io/sell-hub/';
 // Posting tasks are starred per site, separately from the item's pricing/shipping star.
 function postingTaskKey(itemId, platformIdValue) { return `list:${itemId}:${platformIdValue}`; }
 function isFeaturedAction(itemId) { return state.featuredActions.has(String(itemId)); }
+function setFeaturedAction(id, starred) {
+  const key = String(id);
+  if (starred) state.featuredActions.add(key); else state.featuredActions.delete(key);
+  localSet('sellHub.featuredActions', [...state.featuredActions]);
+}
 function actionStarHTML(itemId, label) {
   const starred = isFeaturedAction(itemId);
-  return `<button class="action-star${starred ? ' starred' : ''}" data-feature-action="${escapeHtml(itemId)}" aria-label="${starred ? 'Remove' : 'Feature'} ${escapeHtml(label)} in Randy's Work Room" title="${starred ? 'Featured in Work Room' : 'Feature in Work Room'}">${starred ? '★' : '☆'}</button>`;
+  return `<button class="action-star${starred ? ' starred' : ''}" data-feature-action="${escapeHtml(itemId)}" aria-label="${starred ? 'Remove' : 'Feature'} ${escapeHtml(label)} in Randy's Life Hub" title="${starred ? 'Featured in Life Hub' : 'Feature in Life Hub'}">${starred ? '★' : '☆'}</button>`;
 }
 function wireActionStars(root) {
   root.querySelectorAll('[data-feature-action]').forEach(btn => btn.addEventListener('click', () => {
     const id = String(btn.dataset.featureAction);
-    if (state.featuredActions.has(id)) state.featuredActions.delete(id); else state.featuredActions.add(id);
-    localSet('sellHub.featuredActions', [...state.featuredActions]);
+    setFeaturedAction(id, !state.featuredActions.has(id));
     renderAction();
     syncWorkroomFromStar();
   }));
+}
+function itemTitle(item) {
+  return [item.brand, item.item].filter(Boolean).join(' — ') || String(item.itemId);
+}
+/** All open Resale actions for Life Hub tasks[] (+ starred featured strip). */
+function collectResaleActions() {
+  const active = state.inventory.filter(it => !isSold(it));
+  const sold = state.inventory.filter(isSold);
+  const actions = [];
+  sold.filter(it => !hasShipped(it.itemId) && !soldInPerson(it)).forEach(item => {
+    actions.push({
+      id: String(item.itemId),
+      title: itemTitle(item),
+      detail: 'Ship this sold item.',
+      meta: item.soldPrice ? `Sold for ${item.soldPrice}` : 'Sold',
+      kind: 'ship',
+      completable: true,
+    });
+  });
+  soldElsewhereTasks().forEach(t => {
+    actions.push({
+      id: endTaskKey(t.item.itemId, t.meta.id),
+      title: itemTitle(t.item),
+      detail: `It sold — take the ${t.meta.label} listing down.`,
+      meta: t.item.soldPrice ? `Sold for ${t.item.soldPrice}` : 'Sold',
+      kind: 'end',
+      platformLabel: t.meta.label,
+      listingId: (t.entry && t.entry.listingId) || '',
+      itemId: t.item.itemId,
+      completable: true,
+    });
+  });
+  active.forEach(item => {
+    platformsStatusFor(item).missing.forEach(m => {
+      actions.push({
+        id: postingTaskKey(item.itemId, m.meta.id),
+        title: itemTitle(item),
+        detail: `Post it on ${m.meta.label}.`,
+        meta: item.listPrice ? `List price ${fmtMoney(parseMoney(item.listPrice))}` : 'No list price yet',
+        kind: 'list',
+        platformLabel: m.meta.label,
+        itemId: item.itemId,
+        completable: true,
+      });
+    });
+  });
+  active.forEach(item => {
+    const action = pricingActionFor(item);
+    if (!action || action.severity === 'ok' || action.severity === 'dismissed' || action.severity === 'handled') return;
+    // Skip if this itemId is already a ship task (sold items are filtered out of active).
+    actions.push({
+      id: String(item.itemId),
+      title: itemTitle(item),
+      detail: `${action.label}: ${action.reason}`,
+      meta: `${action.views || 0} views · ${action.clicks || 0} clicks`,
+      kind: 'pricing',
+      actionLabel: action.label,
+      completable: true,
+    });
+  });
+  openLocalDeals().forEach(deal => {
+    const item = state.inventory.find(it => String(it.itemId) === String(deal.itemId));
+    const title = item ? itemTitle(item) : String(deal.itemId);
+    const meta = localDealStatusMeta(deal.status);
+    actions.push({
+      id: `deal:${deal.itemId}`,
+      title,
+      detail: deal.note || `${meta.label}${deal.when ? ` · ${deal.when}` : ''}`,
+      meta: platformMeta(deal.platform).label,
+      kind: 'deal',
+      completable: false,
+    });
+  });
+  return actions;
 }
 function resaleWorkroomSnapshot() {
   const active = state.inventory.filter(it => !isSold(it));
@@ -214,26 +293,23 @@ function resaleWorkroomSnapshot() {
   const latest = latestMetricsByItemPlatform();
   let listingViews = 0;
   latest.forEach(metric => { listingViews += Number(metric.views || metric.impressions) || 0; });
-  const featured = active.filter(it => isFeaturedAction(it.itemId)).map(item => {
-    const action = pricingActionFor(item);
-    return { id: String(item.itemId), title: [item.brand, item.item].filter(Boolean).join(' — ') || item.itemId, detail: `${action.label}: ${action.reason}`, meta: `${action.views} views · ${action.clicks} clicks` };
-  }).concat(sold.filter(it => !hasShipped(it.itemId) && isFeaturedAction(it.itemId)).map(item => ({
-    id: String(item.itemId), title: [item.brand, item.item].filter(Boolean).join(' — ') || item.itemId, detail: 'Ship this sold item.', meta: item.soldPrice ? `Sold for ${item.soldPrice}` : 'Sold'
-  }))).concat(active.flatMap(item => platformsStatusFor(item).missing
-    .filter(m => isFeaturedAction(postingTaskKey(item.itemId, m.meta.id)))
-    .map(m => ({
-      id: postingTaskKey(item.itemId, m.meta.id),
-      title: [item.brand, item.item].filter(Boolean).join(' — ') || item.itemId,
-      detail: `Post it on ${m.meta.label}.`,
-      meta: item.listPrice ? `List price ${fmtMoney(parseMoney(item.listPrice))}` : 'No list price yet',
-    })))).concat(soldElsewhereTasks()
-      .filter(t => isFeaturedAction(endTaskKey(t.item.itemId, t.meta.id)))
-      .map(t => ({
-        id: endTaskKey(t.item.itemId, t.meta.id),
-        title: [t.item.brand, t.item.item].filter(Boolean).join(' — ') || t.item.itemId,
-        detail: `It sold — take the ${t.meta.label} listing down.`,
-        meta: t.item.soldPrice ? `Sold for ${t.item.soldPrice}` : 'Sold',
-      })));
+  const actions = collectResaleActions();
+  const tasks = actions.map(a => ({
+    id: a.id,
+    title: a.title,
+    detail: a.detail,
+    status: 'open',
+    starred: isFeaturedAction(a.id),
+    originUrl: RESALE_ORIGIN_URL,
+  }));
+  const featured = actions.filter(a => isFeaturedAction(a.id)).map(a => ({
+    id: a.id,
+    title: a.title,
+    detail: a.detail,
+    meta: a.meta,
+    originUrl: RESALE_ORIGIN_URL,
+    completable: a.completable !== false,
+  }));
   return {
     source: 'resale',
     metrics: {
@@ -243,6 +319,7 @@ function resaleWorkroomSnapshot() {
       listingViews,
     },
     featured,
+    tasks,
     refreshedAt: state.loadedAt || new Date().toISOString(),
   };
 }
@@ -254,11 +331,67 @@ function notifyWorkroom() {
 function syncWorkroomFromStar() {
   notifyWorkroom();
   const encoded = btoa(encodeURIComponent(JSON.stringify(resaleWorkroomSnapshot())));
-  window.open(`${WORKROOM_ORIGIN}/#sync=${encoded}`, 'randys-work-room');
+  // Prefer Life Hub window name; keep legacy name as fallback for older tabs.
+  window.open(`${WORKROOM_ORIGIN}/#sync=${encoded}`, 'randys-life-hub');
+}
+async function completeResaleWorkroomItem(id) {
+  const key = String(id || '');
+  if (!key) return;
+  if (key.startsWith('end:')) {
+    const parts = key.split(':');
+    const itemId = parts[1];
+    const platformIdValue = parts.slice(2).join(':');
+    const task = soldElsewhereTasks().find(t => endTaskKey(t.item.itemId, t.meta.id) === key);
+    const platformLabel = task ? task.meta.label : (platformMeta(platformIdValue).label || platformIdValue);
+    const listingId = task && task.entry ? task.entry.listingId : '';
+    await endListingElsewhere(itemId, platformLabel, listingId);
+  } else if (key.startsWith('list:')) {
+    const parts = key.split(':');
+    const itemId = parts[1];
+    const platformIdValue = parts.slice(2).join(':');
+    const platformLabel = platformMeta(platformIdValue).label || platformIdValue;
+    await recordItemAction(itemId, 'Listing Posted', platformLabel);
+    renderAction();
+  } else if (key.startsWith('deal:')) {
+    // Local deals need a meetup status change in-app; unstar only from hub complete.
+    setFeaturedAction(key, false);
+  } else {
+    const item = state.inventory.find(it => String(it.itemId) === key);
+    if (item && isSold(item) && !hasShipped(item.itemId) && !soldInPerson(item)) {
+      await markShipped(key);
+    } else if (item && !isSold(item)) {
+      const action = pricingActionFor(item);
+      await toggleActionComplete(key, false, action.label || 'Action');
+    }
+  }
+  setFeaturedAction(key, false);
+  renderAction();
+  notifyWorkroom();
+}
+function starResaleWorkroomItem(id, starred) {
+  const key = String(id || '');
+  if (!key) return;
+  const next = typeof starred === 'boolean' ? starred : !isFeaturedAction(key);
+  setFeaturedAction(key, next);
+  renderAction();
+  notifyWorkroom();
 }
 window.addEventListener('message', event => {
-  if (event.origin !== WORKROOM_ORIGIN || event.data?.type !== 'randys-workroom:request') return;
-  event.source?.postMessage({ type: 'randys-workroom:snapshot', payload: resaleWorkroomSnapshot() }, event.origin);
+  if (event.origin !== WORKROOM_ORIGIN) return;
+  const type = event.data?.type;
+  if (type === 'randys-workroom:request') {
+    event.source?.postMessage({ type: 'randys-workroom:snapshot', payload: resaleWorkroomSnapshot() }, event.origin);
+    return;
+  }
+  const payload = event.data?.payload || {};
+  if (payload.source && payload.source !== 'resale') return;
+  if (type === 'randys-workroom:complete') {
+    completeResaleWorkroomItem(payload.id);
+    return;
+  }
+  if (type === 'randys-workroom:star') {
+    starResaleWorkroomItem(payload.id, payload.starred);
+  }
 });
 
 // ---------------------------------------------------------------------
