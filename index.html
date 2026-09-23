@@ -15,7 +15,7 @@
   // Apply the saved theme before first paint so the page never flashes the wrong one.
   try { var t = localStorage.getItem('sellHub.theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
 </script>
-<link rel="stylesheet" href="css/styles.css?v=20260922-ebay1">
+<link rel="stylesheet" href="css/styles.css?v=20260922-actions1">
 </head>
 <body>
 
@@ -235,47 +235,50 @@
 
   <!-- ===================== ACTION ===================== -->
   <section id="action" class="view active">
-    <div class="section-head">
+    <div class="section-head action-head">
       <h2 class="section-title">Actions</h2>
-      <p class="section-intro">Your to-do hub — what to ship, where each item still needs to be posted, and which listings need an offer, a price change, or more visibility. Hit <b>Edit</b> on any card to change its price, the sites it goes on, or its next action; it saves straight to your Sheet.</p>
     </div>
 
     <div class="action-summary" id="actionSummary"></div>
 
     <div class="action-toolbar">
-      <p>Mark an action complete when it is handled, reopen it if needed, or delete it from this list. Every change is saved to the Item Actions sheet.</p>
-      <label class="chip-toggle"><input type="checkbox" id="showCompletedActions" checked> show completed</label>
+      <label class="chip-toggle"><input type="checkbox" id="showCompletedActions" checked> Show completed pricing</label>
     </div>
 
-    <h3 class="subhead" id="sec-ship">To ship</h3>
-    <div id="toShipList" class="card-grid"></div>
+    <div class="action-section" id="section-ship" hidden>
+      <h3 class="subhead" id="sec-ship">To ship</h3>
+      <div id="toShipList" class="card-grid"></div>
+    </div>
 
-    <h3 class="subhead" id="sec-local">Local deals</h3>
-    <p class="section-intro" style="margin-top:0">Anything being handed over in person — someone asking, a meetup booked, or a sale marked pending. Marketplace listings only; everything that ships is tracked by its listing instead.</p>
-    <div id="localDealsList" class="card-grid"></div>
+    <div class="action-section" id="section-local">
+      <h3 class="subhead" id="sec-local">Local deals</h3>
+      <div id="localDealsList" class="card-grid"></div>
+    </div>
 
-    <h3 class="subhead" id="sec-end">End listings elsewhere</h3>
-    <p class="section-intro" style="margin-top:0">When something sells on one site, its listings on the other sites need to come down. Mark each one ended once you've taken it down.</p>
-    <div id="soldElsewhereList" class="card-grid"></div>
+    <div class="action-section" id="section-end" hidden>
+      <h3 class="subhead" id="sec-end">End listings elsewhere</h3>
+      <div id="soldElsewhereList" class="card-grid"></div>
+    </div>
 
-    <h3 class="subhead" id="sec-list">Still to list</h3>
-    <div class="stl-head">
-      <p class="section-intro" style="margin:0">Grouped by the site each item still needs — Facebook first, then eBay, Poshmark, and Depop. Mark it listed when the post is up, or choose “Not posting” to drop that site.</p>
-      <div class="stl-filters">
-        <label class="sort-control">Site
-          <select id="stillToListSite">
-            <option value="">All platforms</option>
-          </select>
-        </label>
-        <label class="chip-toggle"><input type="checkbox" id="showSkippedListings"> show not posting</label>
+    <div class="action-section" id="section-list" hidden>
+      <h3 class="subhead" id="sec-list">Still to list</h3>
+      <div class="stl-head">
+        <div class="stl-filters">
+          <label class="sort-control">Site
+            <select id="stillToListSite">
+              <option value="">All platforms</option>
+            </select>
+          </label>
+          <label class="chip-toggle"><input type="checkbox" id="showSkippedListings"> show not posting</label>
+        </div>
       </div>
+      <div id="stillToListList"></div>
     </div>
-    <p class="stl-note">For clothing, a known labeled size is enough. Measurements are optional unless the size is missing, unclear, or the fit is unusual.</p>
-    <div id="stillToListList"></div>
 
-    <h3 class="subhead" id="sec-pricing">Pricing suggestions</h3>
-    <p class="section-intro" style="margin-top:0">Grouped by what to do next, based on each listing's views, clicks, watchers, and room above your floor price. Waiting and on-track items are collapsed at the bottom.</p>
-    <div id="pricingActions"></div>
+    <div class="action-section" id="section-pricing">
+      <h3 class="subhead" id="sec-pricing">Pricing suggestions</h3>
+      <div id="pricingActions"></div>
+    </div>
   </section>
 
   <!-- ===================== ACQUIRE ===================== -->
@@ -499,12 +502,12 @@
   <div class="acq-drawer-body" id="acqDrawerBody"></div>
 </aside>
 
-<script src="js/config.js?v=20260922-ebay1"></script>
-<script src="js/data.js?v=20260922-ebay1"></script>
-<script src="js/app.js?v=20260922-ebay1"></script>
-<script src="js/acquire-config.js?v=20260922-ebay1"></script>
-<script src="js/acquire-model.js?v=20260922-ebay1"></script>
-<script src="js/acquire.js?v=20260922-ebay1"></script>
-<script src="js/stocking.js?v=20260922-ebay1"></script>
+<script src="js/config.js?v=20260922-actions1"></script>
+<script src="js/data.js?v=20260922-actions1"></script>
+<script src="js/app.js?v=20260922-actions1"></script>
+<script src="js/acquire-config.js?v=20260922-actions1"></script>
+<script src="js/acquire-model.js?v=20260922-actions1"></script>
+<script src="js/acquire.js?v=20260922-actions1"></script>
+<script src="js/stocking.js?v=20260922-actions1"></script>
 </body>
 </html>

@@ -1984,28 +1984,39 @@ function soldDateFor(itemId) {
 async function markShipped(itemId) {
   await recordItemAction(itemId, 'Shipped', '');
   renderToShip();
+  renderActionSummary();
 }
+function setActionSectionVisible(sectionId, visible) {
+  const section = document.getElementById(sectionId);
+  if (section) section.hidden = !visible;
+}
+
 function renderToShip() {
   const container = document.getElementById('toShipList');
   if (!container) return;
   const items = state.inventory.filter(it => isSold(it) && !hasShipped(it.itemId) && !soldInPerson(it));
-  if (!items.length) { container.innerHTML = '<div class="empty-state">Nothing waiting to ship.</div>'; return; }
+  setActionSectionVisible('section-ship', items.length > 0);
+  if (!items.length) { container.innerHTML = ''; return; }
 
   const sorted = items.slice().sort((a, b) => (soldDateFor(a.itemId) || '').localeCompare(soldDateFor(b.itemId) || ''));
   container.innerHTML = sorted.map(it => {
     const soldDate = soldDateFor(it.itemId);
+    const title = [it.brand, it.item].filter(Boolean).join(' — ') || it.itemId;
+    const metaBits = [
+      it.soldPrice ? `Sold ${escapeHtml(it.soldPrice)}` : '',
+      it.buyer ? escapeHtml(it.buyer) : '',
+      soldDate ? escapeHtml(soldDate) : '',
+    ].filter(Boolean);
     return `
-      <div class="card to-ship-card" style="--cat:#1f5c46">
-      <div class="card-top">
-        <h3>${escapeHtml([it.brand, it.item].filter(Boolean).join(' — ') || it.itemId)}</h3>
-        ${actionStarHTML(it.itemId, [it.brand, it.item].filter(Boolean).join(' ') || it.itemId)}
+      <div class="card to-ship-card action-row" style="--cat:#1f5c46">
+        <div class="ar-title-row">
+          <h3>${escapeHtml(title)}</h3>
+          ${actionStarHTML(it.itemId, [it.brand, it.item].filter(Boolean).join(' ') || it.itemId)}
         </div>
-        <div class="meta">
-          <span><b>Sold price —</b> ${escapeHtml(it.soldPrice || '—')}</span>
-          ${it.buyer ? `<span><b>Buyer/platform —</b> ${escapeHtml(it.buyer)}</span>` : ''}
-          ${soldDate ? `<span><b>Sold —</b> ${escapeHtml(soldDate)}</span>` : ''}
+        ${metaBits.length ? `<div class="ar-meta-line">${metaBits.join(' · ')}</div>` : ''}
+        <div class="ar-actions">
+          <button class="btn ar-primary ts-ship-btn" data-id="${escapeHtml(it.itemId)}">Mark shipped</button>
         </div>
-        <button class="btn secondary ts-ship-btn" data-id="${escapeHtml(it.itemId)}">Mark shipped</button>
       </div>
     `;
   }).join('');
@@ -2042,24 +2053,29 @@ function renderSoldElsewhere() {
   const container = document.getElementById('soldElsewhereList');
   if (!container) return;
   const tasks = soldElsewhereTasks();
-  if (!tasks.length) { container.innerHTML = '<div class="empty-state">No sold item still has a listing up elsewhere.</div>'; return; }
+  setActionSectionVisible('section-end', tasks.length > 0);
+  if (!tasks.length) { container.innerHTML = ''; return; }
 
   container.innerHTML = tasks.map(({ item, meta, entry, soldOn }) => {
     const title = [item.brand, item.item].filter(Boolean).join(' — ') || item.itemId;
-    const soldWhere = soldOn ? ` on ${escapeHtml(platformMeta(item.buyer).label)}` : item.buyer ? ` (${escapeHtml(item.buyer)})` : '';
+    const soldWhere = soldOn ? platformMeta(item.buyer).label : (item.buyer || '');
+    const metaBits = [
+      item.soldPrice ? `Sold ${escapeHtml(item.soldPrice)}` : '',
+      soldWhere ? `via ${escapeHtml(soldWhere)}` : '',
+      `Still up on ${escapeHtml(meta.label)}`,
+    ].filter(Boolean);
     return `
-      <div class="card end-card">
-        <div class="card-top">
+      <div class="card end-card action-row">
+        <div class="ar-title-row">
           <h3>${escapeHtml(title)}</h3>
           <div class="card-top-actions">${actionStarHTML(endTaskKey(item.itemId, meta.id), `${title} on ${meta.label}`)}<span class="stl-chip stl-done" style="--plat:${meta.color}">${escapeHtml(meta.label)}</span></div>
         </div>
-        <div class="meta">
-          <span><b>Sold —</b> ${escapeHtml(item.soldPrice || '—')}${soldWhere}</span>
-          <span><b>Still up on —</b> ${escapeHtml(meta.label)}</span>
-        </div>
-        <div class="stl-platform-row">
-          ${entry && entry.listingUrl ? `<a class="btn secondary" href="${escapeHtml(entry.listingUrl)}" target="_blank" rel="noopener">Open listing</a>` : ''}
-          <button class="btn secondary end-btn" data-id="${escapeHtml(item.itemId)}" data-platform="${escapeHtml(meta.label)}" data-listing="${escapeHtml((entry && entry.listingId) || '')}">Mark ended on ${escapeHtml(meta.label)}</button>
+        <div class="ar-meta-line">${metaBits.join(' · ')}</div>
+        <div class="ar-actions">
+          <button class="btn ar-primary end-btn" data-id="${escapeHtml(item.itemId)}" data-platform="${escapeHtml(meta.label)}" data-listing="${escapeHtml((entry && entry.listingId) || '')}">Mark ended</button>
+          <div class="ar-secondary">
+            ${entry && entry.listingUrl ? `<a class="icon-btn" href="${escapeHtml(entry.listingUrl)}" target="_blank" rel="noopener">Open listing</a>` : ''}
+          </div>
         </div>
       </div>`;
   }).join('');
@@ -2165,10 +2181,12 @@ function renderLocalDeals() {
   if (!container) return;
   const deals = openLocalDeals();
   const editingNew = state.editingLocalDeal && state.editingLocalDeal.startsWith('new|');
+  // Keep Local deals visible so meetup tracking stays one tap away even when empty.
+  setActionSectionVisible('section-local', true);
 
   if (!deals.length && !editingNew) {
     container.innerHTML = `
-      <div class="empty-state">Nothing in person on the go. <button type="button" class="btn secondary ld-add-btn">＋ Track a meetup or pending sale</button></div>`;
+      <div class="ld-add-row ld-empty-add"><button type="button" class="btn secondary ld-add-btn">＋ Track a meetup or pending sale</button></div>`;
   } else {
     const cards = deals.map(deal => {
       const item = state.inventory.find(it => String(it.itemId) === String(deal.itemId));
@@ -2176,30 +2194,33 @@ function renderLocalDeals() {
       const meta = localDealStatusMeta(deal.status);
       const pmeta = platformMeta(deal.platform);
       const editing = state.editingLocalDeal === localDealKey(deal);
+      const metaBits = [
+        escapeHtml(pmeta.label),
+        item ? priceLineHTML(item) : '',
+        deal.when ? escapeHtml(deal.when) : '',
+        deal.buyer ? escapeHtml(deal.buyer) : '',
+        deal.where ? `@ ${escapeHtml(deal.where)}` : '',
+      ].filter(Boolean);
       return `
-        <div class="card ld-card ld-${meta.id}" style="--cat:${meta.color}">
-          <div class="card-top">
+        <div class="card ld-card ld-${meta.id} action-row" style="--cat:${meta.color}">
+          <div class="ar-title-row">
             <h3>${escapeHtml(title)}</h3>
             <div class="card-top-actions">${actionStarHTML(`deal:${deal.itemId}`, `${title} — ${meta.label}`)}<span class="ld-chip" style="--plat:${meta.color}"><span aria-hidden="true">${meta.icon}</span> ${escapeHtml(meta.label)}</span></div>
           </div>
-          <div class="meta">
-            <span><b>Where —</b> ${escapeHtml(pmeta.label)}</span>
-            ${item ? `<span><b>Price —</b> ${priceLineHTML(item)}</span>` : ''}
-            ${deal.when ? `<span><b>When —</b> ${escapeHtml(deal.when)}</span>` : ''}
-            ${deal.buyer ? `<span><b>Who —</b> ${escapeHtml(deal.buyer)}</span>` : ''}
-            ${deal.where ? `<span><b>Meeting at —</b> ${escapeHtml(deal.where)}</span>` : ''}
-          </div>
+          ${metaBits.length ? `<div class="ar-meta-line">${metaBits.join(' · ')}</div>` : ''}
           ${deal.note ? `<p class="ld-note-text">${escapeHtml(deal.note)}</p>` : ''}
           ${editing ? localDealFormHTML(deal) : `
-            <div class="ld-actions">
-              <button type="button" class="btn secondary ld-edit" data-key="${escapeHtml(localDealKey(deal))}">Update</button>
-              <button type="button" class="icon-btn ld-clear-btn" data-id="${escapeHtml(deal.itemId)}" data-platform="${escapeHtml(deal.platform)}">Deal's off — clear</button>
+            <div class="ar-actions">
+              <button type="button" class="btn ar-primary ld-edit" data-key="${escapeHtml(localDealKey(deal))}">Update</button>
+              <div class="ar-secondary">
+                <button type="button" class="icon-btn ld-clear-btn" data-id="${escapeHtml(deal.itemId)}" data-platform="${escapeHtml(deal.platform)}">Clear</button>
+              </div>
             </div>`}
         </div>`;
     }).join('');
     const newForm = editingNew ? `
-      <div class="card ld-card ld-new" style="--cat:#1f3a5c">
-        <div class="card-top"><h3>Track a meetup or pending sale</h3></div>
+      <div class="card ld-card ld-new action-row" style="--cat:#1f3a5c">
+        <div class="ar-title-row"><h3>Track a meetup or pending sale</h3></div>
         <form class="ld-form ld-new-form">
           <div class="field">
             <label>Item</label>
@@ -2536,7 +2557,7 @@ function stlListingDetailsHTML(item, meta) {
 
   return `
     <details class="stl-details">
-      <summary>Listing details</summary>
+      <summary>Details &amp; copy</summary>
       <div class="ld-body">
         ${photo ? `<img class="ld-photo" src="${escapeHtml(photo)}" alt="" loading="lazy" onerror="this.remove()">` : ''}
         ${specs.length ? `<dl class="ld-specs">${specs.map(function (pair) {
@@ -2569,10 +2590,16 @@ function renderStillToList() {
     ? rows.filter(function (r) { return r.status.skipped.some(function (s) { return !siteFilter || s.meta.id === siteFilter; }); })
     : [];
 
-  if (!groups.size && !skippedRows.length) {
-    container.innerHTML = `<div class="empty-state">${siteFilter ? 'Nothing outstanding for that platform.' : 'Everything is listed everywhere it should be.'}</div>`;
+  const hasWork = groups.size > 0 || skippedRows.length > 0;
+  setActionSectionVisible('section-list', hasWork || !!siteFilter || state.showSkippedListings);
+  if (!hasWork) {
+    container.innerHTML = siteFilter || state.showSkippedListings
+      ? `<div class="empty-state">${siteFilter ? 'Nothing outstanding for that platform.' : 'Nothing marked not posting.'}</div>`
+      : '';
+    if (!siteFilter && !state.showSkippedListings) setActionSectionVisible('section-list', false);
     return;
   }
+  setActionSectionVisible('section-list', true);
 
   const byName = function (a, b) { return (a.item.item || a.item.brand || '').localeCompare(b.item.item || b.item.brand || ''); };
   const itemTitle = function (item) { return [item.brand, item.item].filter(Boolean).join(' — ') || item.itemId; };
@@ -2587,23 +2614,27 @@ function renderStillToList() {
       }).map(function ({ item, status }) {
         const live = status.done.map(function (d) { return d.meta.label; });
         const elsewhere = status.missing.filter(function (m) { return m.meta.id !== g.meta.id; }).map(function (m) { return m.meta.label; });
+        const metaBits = [
+          priceLineHTML(item),
+          item.floorPrice ? `floor ${escapeHtml(item.floorPrice)}` : '',
+          live.length ? `Live: ${escapeHtml(live.join(', '))}` : '',
+          elsewhere.length ? `Also needs: ${escapeHtml(elsewhere.join(', '))}` : '',
+        ].filter(Boolean);
         return `
-          <div class="card stl-card${postingNoteFor(item.itemId) ? ' stl-on-hold' : ''}" style="--cat:${g.meta.color}">
-            <div class="card-top">
+          <div class="card stl-card action-row${postingNoteFor(item.itemId) ? ' stl-on-hold' : ''}" style="--cat:${g.meta.color}">
+            <div class="ar-title-row">
               <h3>${escapeHtml(itemTitle(item))}</h3>
-              <div class="card-top-actions">${actionStarHTML(postingTaskKey(item.itemId, g.meta.id), `${itemTitle(item)} on ${g.meta.label}`)}<span class="status-badge ${statusClass(item.sourceStatus)}">${escapeHtml(item.sourceStatus || '—')}</span></div>
+              ${actionStarHTML(postingTaskKey(item.itemId, g.meta.id), `${itemTitle(item)} on ${g.meta.label}`)}
             </div>
             ${postingNoteHTML(item, g.meta.id)}
-            <div class="meta">
-              <span><b>List price —</b> ${priceLineHTML(item)}${item.floorPrice ? ` (floor ${escapeHtml(item.floorPrice)})` : ''}</span>
-              ${live.length ? `<span><b>Live on —</b> ${escapeHtml(live.join(', '))}</span>` : ''}
-              ${elsewhere.length ? `<span><b>Also still needs —</b> ${escapeHtml(elsewhere.join(', '))}</span>` : ''}
-            </div>
-            <div class="stl-platform-row">
-              <button class="btn secondary stl-listed-btn" data-id="${escapeHtml(item.itemId)}" data-platform="${escapeHtml(g.meta.label)}">Mark listed on ${escapeHtml(g.meta.label)}</button>
-              <button class="icon-btn stl-skip-btn" data-id="${escapeHtml(item.itemId)}" data-platform="${escapeHtml(g.meta.label)}">Not posting on ${escapeHtml(g.meta.label)}</button>
-              ${editToggleHTML(item)}
-              ${postingNoteFor(item.itemId) || state.editingPostingNote === `${item.itemId}|${g.meta.id}` ? '' : `<button class="icon-btn stl-note-add" data-key="${escapeHtml(`${item.itemId}|${g.meta.id}`)}">+ Add note</button>`}
+            ${metaBits.length ? `<div class="ar-meta-line">${metaBits.join(' · ')}</div>` : ''}
+            <div class="ar-actions">
+              <button class="btn ar-primary stl-listed-btn" data-id="${escapeHtml(item.itemId)}" data-platform="${escapeHtml(g.meta.label)}">Mark listed</button>
+              <div class="ar-secondary">
+                <button class="icon-btn stl-skip-btn" data-id="${escapeHtml(item.itemId)}" data-platform="${escapeHtml(g.meta.label)}">Not posting</button>
+                ${editToggleHTML(item).replace('btn secondary ie-toggle', 'icon-btn ie-toggle')}
+                ${postingNoteFor(item.itemId) || state.editingPostingNote === `${item.itemId}|${g.meta.id}` ? '' : `<button class="icon-btn stl-note-add" data-key="${escapeHtml(`${item.itemId}|${g.meta.id}`)}">+ Note</button>`}
+              </div>
             </div>
             ${itemEditPanelHTML(item)}
             ${stlListingDetailsHTML(item, g.meta)}
@@ -2617,15 +2648,15 @@ function renderStillToList() {
     }).join('');
 
   const skippedHTML = skippedRows.length ? `
-    <details class="action-group stl-group" open>
+    <details class="action-group stl-group">
       <summary><span class="ag-title">Not posting</span><span class="ag-count">${skippedRows.length}</span></summary>
       <div class="card-grid">${skippedRows.slice().sort(byName).map(function ({ item, status }) {
         const skipped = status.skipped.filter(function (s) { return !siteFilter || s.meta.id === siteFilter; });
         return `
-          <div class="card stl-card">
-            <div class="card-top"><h3>${escapeHtml(itemTitle(item))}</h3></div>
+          <div class="card stl-card action-row">
+            <div class="ar-title-row"><h3>${escapeHtml(itemTitle(item))}</h3></div>
             <div class="stl-chips">${skipped.map(function (s) {
-              return `<div class="stl-platform-row"><span class="stl-chip stl-skipped" style="--plat:${s.meta.color}">Not posting · ${escapeHtml(s.meta.label)}</span><button class="btn secondary stl-reopen-btn" data-id="${escapeHtml(item.itemId)}" data-platform="${escapeHtml(s.meta.label)}">Post it on ${escapeHtml(s.meta.label)} after all</button></div>`;
+              return `<div class="ar-actions"><span class="stl-chip stl-skipped" style="--plat:${s.meta.color}">${escapeHtml(s.meta.label)}</span><button class="btn ar-primary stl-reopen-btn" data-id="${escapeHtml(item.itemId)}" data-platform="${escapeHtml(s.meta.label)}">Post after all</button></div>`;
             }).join('')}</div>
           </div>`;
       }).join('')}</div>
@@ -2639,12 +2670,14 @@ function renderStillToList() {
     btn.addEventListener('click', async function () {
       await recordItemAction(btn.dataset.id, 'Listing Posted', btn.dataset.platform);
       renderStillToList();
+      renderActionSummary();
     });
   });
   container.querySelectorAll('.stl-skip-btn').forEach(function (btn) {
     btn.addEventListener('click', async function () {
       await recordItemAction(btn.dataset.id, 'Not Posting', btn.dataset.platform);
       renderStillToList();
+      renderActionSummary();
     });
   });
   container.querySelectorAll('.stl-note-add, .stl-note-edit').forEach(function (btn) {
@@ -2691,6 +2724,7 @@ function renderStillToList() {
     btn.addEventListener('click', async function () {
       await recordItemAction(btn.dataset.id, 'Reopened Listing', btn.dataset.platform);
       renderStillToList();
+      renderActionSummary();
     });
   });
 }
@@ -3089,10 +3123,10 @@ async function dropPriceForAction(item, newPrice, btn) {
 // Pricing suggestions are shown in these sections, in this order. Anything
 // that needs a move from you is open; waiting/done sections start collapsed.
 const PRICING_GROUPS = [
-  { key: 'Send an offer', title: 'Send an offer', color: '#1f3a5c', blurb: 'Someone is watching or liked it — nudge them with an offer.' },
-  { key: 'Try a price drop', title: 'Try a price drop', color: '#7a2038', blurb: 'Getting views but few clicks — price is the likely sticking point.' },
-  { key: 'Boost visibility', title: 'Boost visibility', color: '#a1752e', blurb: 'No views yet — refresh it, sharpen the title, or share it.' },
-  { key: 'Refresh listing', title: 'Refresh listing', color: '#a1752e', blurb: 'Already near your floor — new photos or copy instead of a lower price.' },
+  { key: 'Send an offer', title: 'Send an offer', color: '#1f3a5c' },
+  { key: 'Try a price drop', title: 'Try a price drop', color: '#7a2038' },
+  { key: 'Boost visibility', title: 'Boost visibility', color: '#a1752e' },
+  { key: 'Refresh listing', title: 'Refresh listing', color: '#a1752e' },
   { key: 'Offer sent', title: 'Offer sent — waiting', color: '#1f5c64', collapsed: true },
   { key: 'Price dropped', title: 'Price dropped — waiting', color: '#1f5c64', collapsed: true },
   { key: 'Hold', title: 'On hold', color: '#56657a', collapsed: true },
@@ -3101,18 +3135,30 @@ const PRICING_GROUPS = [
   { key: 'No data yet', title: 'No data yet', color: '#74849a', collapsed: true },
   { key: 'Completed', title: 'Completed', color: '#16836a', collapsed: true },
 ];
+
+function pricingReasonHTML(reason, limit) {
+  const text = String(reason || '');
+  const max = limit || 96;
+  if (text.length <= max) return `<p class="pa-reason">${escapeHtml(text)}</p>`;
+  const short = text.slice(0, max).replace(/\s+\S*$/, '').trim() || text.slice(0, max);
+  return `<p class="pa-reason"><span class="pa-reason-clip">${escapeHtml(short)}…</span><span class="pa-reason-full" hidden>${escapeHtml(text)}</span> <button type="button" class="pa-reason-toggle">more</button></p>`;
+}
 function pricingGroupId(label) { return 'pa-group-' + categoryId(label); }
 
 function renderPricingActions() {
   const container = document.getElementById('pricingActions');
   if (!container) return;
   const items = state.inventory.filter(it => !isSold(it));
+  setActionSectionVisible('section-pricing', true);
   if (!items.length) { container.innerHTML = '<div class="empty-state">No active listings yet.</div>'; return; }
 
   const rows = items.map(it => ({ item: it, action: pricingActionFor(it) }))
     .filter(row => !row.action.hidden && (state.showCompletedActions || row.action.severity !== 'complete'));
 
-  if (!rows.length) { container.innerHTML = '<div class="empty-state">No open actions. Turn on “show completed” to review finished items.</div>'; return; }
+  if (!rows.length) {
+    container.innerHTML = '<div class="empty-state">No open pricing actions. Turn on “Show completed pricing” to review finished items.</div>';
+    return;
+  }
 
   const cardHTML = ({ item, action }) => {
     const isCompleted = action.severity === 'complete';
@@ -3122,34 +3168,47 @@ function renderPricingActions() {
     const showIgnore = ['urgent', 'attention', 'opportunity'].includes(action.severity);
     // Only offer the hold where a suggestion could push the price down.
     const showHold = held || PRICE_HOLD_LABELS.includes(action.label);
+    const title = [item.brand, item.item].filter(Boolean).join(' — ') || item.itemId;
+    const platforms = splitPlatforms(item.platform).map(p => platformMeta(p).label).join(', ') || '—';
+    const metaBits = [
+      priceLineHTML(item),
+      item.floorPrice ? `floor ${escapeHtml(item.floorPrice)}` : '',
+      `${action.views}v / ${action.clicks}c${action.watchers ? ` / ${action.watchers}w` : ''}`,
+      escapeHtml(platforms),
+    ].filter(Boolean);
+    const primary = showOfferBtn
+      ? `<button class="btn ar-primary pa-offer-btn" data-id="${escapeHtml(item.itemId)}" data-plat="${escapeHtml(action.offerPlatformLabel || '')}">Offer sent</button>`
+      : (showPriceControls && action.suggestedPrice)
+        ? `<button class="btn ar-primary pa-drop-suggested-btn" data-id="${escapeHtml(item.itemId)}" data-price="${action.suggestedPrice}">Dropped to ${fmtMoney(action.suggestedPrice)}</button>`
+        : `<button class="btn ar-primary pa-complete-btn" data-id="${escapeHtml(item.itemId)}" data-completed="${isCompleted}" data-label="${escapeHtml(action.label)}">${isCompleted ? 'Reopen' : 'Mark complete'}</button>`;
+    const secondaryComplete = (showOfferBtn || (showPriceControls && action.suggestedPrice))
+      ? `<button class="icon-btn pa-complete-btn" data-id="${escapeHtml(item.itemId)}" data-completed="${isCompleted}" data-label="${escapeHtml(action.label)}">${isCompleted ? 'Reopen' : 'Complete'}</button>`
+      : '';
     return `
-    <div class="card pricing-card pa-${action.severity}" data-item-id="${escapeHtml(item.itemId)}">
-      <div class="card-top">
-        <h3>${escapeHtml([item.brand, item.item].filter(Boolean).join(' — ') || item.itemId)}</h3>
-        <div class="card-top-actions">${actionStarHTML(item.itemId, [item.brand, item.item].filter(Boolean).join(' ') || item.itemId)}<span class="pa-badge pa-${action.severity}">${escapeHtml(action.label)}${action.manual ? ' · set by you' : ''}</span>${held ? '<span class="pa-badge pa-price-held" title="Price drops stay off this one until you release it">🔒 Price held</span>' : ''}</div>
+    <div class="card pricing-card action-row pa-${action.severity}" data-item-id="${escapeHtml(item.itemId)}">
+      <div class="ar-title-row">
+        <h3>${escapeHtml(title)}</h3>
+        <div class="card-top-actions">${actionStarHTML(item.itemId, [item.brand, item.item].filter(Boolean).join(' ') || item.itemId)}<span class="pa-badge pa-${action.severity}">${escapeHtml(action.label)}${action.manual ? ' · you' : ''}</span>${held ? '<span class="pa-badge pa-price-held" title="Price drops stay off this one until you release it">🔒</span>' : ''}</div>
       </div>
-      <div class="meta">
-        <span><b>List price —</b> ${priceLineHTML(item)}${item.floorPrice ? ` (floor ${escapeHtml(item.floorPrice)})` : ''}</span>
-        <span><b>Views —</b> ${action.views} &nbsp; <b>Clicks —</b> ${action.clicks}${action.watchers ? ` &nbsp; <b>Watchers —</b> ${action.watchers}` : ''}</span>
-        <span><b>Posting to —</b> ${escapeHtml(splitPlatforms(item.platform).map(p => platformMeta(p).label).join(', ') || '—')}</span>
-      </div>
-      ${action.suggestedPrice ? `<div class="pa-callout"><b>Suggested price — ${fmtMoney(action.suggestedPrice)}</b></div>` : ''}
+      <div class="ar-meta-line">${metaBits.join(' · ')}</div>
+      ${action.suggestedPrice ? `<div class="pa-callout"><b>Suggest ${fmtMoney(action.suggestedPrice)}</b></div>` : ''}
       ${action.offerWhere ? `<div class="pa-callout"><b>${escapeHtml(action.offerWhere)}</b></div>` : ''}
-      <p class="pa-reason">${escapeHtml(action.reason)}</p>
-      <div class="pa-actions">
-          ${showOfferBtn ? `<button class="btn secondary pa-offer-btn" data-id="${escapeHtml(item.itemId)}" data-plat="${escapeHtml(action.offerPlatformLabel || '')}">Offer sent</button>` : ''}
-          ${showPriceControls && action.suggestedPrice ? `<button class="btn secondary pa-drop-suggested-btn" data-id="${escapeHtml(item.itemId)}" data-price="${action.suggestedPrice}">Dropped to ${fmtMoney(action.suggestedPrice)}</button>` : ''}
-          ${showPriceControls ? `
-            <span class="pa-custom-price">
-              <input type="number" min="0" step="1" class="pa-custom-input" placeholder="Custom $">
-              <button class="btn secondary pa-drop-custom-btn" data-id="${escapeHtml(item.itemId)}">Save</button>
-            </span>
-          ` : ''}
-          ${showIgnore ? `<button class="icon-btn pa-ignore-btn" data-id="${escapeHtml(item.itemId)}" data-label="${escapeHtml(action.label)}">Ignore</button>` : ''}
-          ${showHold ? `<button class="icon-btn pa-hold-btn${held ? ' on' : ''}" data-id="${escapeHtml(item.itemId)}" data-held="${held}">${held ? 'Release price' : 'Hold this price'}</button>` : ''}
-          <button class="btn secondary pa-complete-btn" data-id="${escapeHtml(item.itemId)}" data-completed="${isCompleted}" data-label="${escapeHtml(action.label)}">${isCompleted ? 'Reopen' : 'Mark complete'}</button>
-          ${editToggleHTML(item)}
-          <button class="icon-btn pa-delete-btn" data-id="${escapeHtml(item.itemId)}" data-label="${escapeHtml(action.label)}" aria-label="Delete action">Delete</button>
+      ${pricingReasonHTML(action.reason)}
+      <div class="ar-actions pa-actions">
+          ${primary}
+          <div class="ar-secondary">
+            ${showPriceControls ? `
+              <span class="pa-custom-price">
+                <input type="number" min="0" step="1" class="pa-custom-input" placeholder="$">
+                <button class="icon-btn pa-drop-custom-btn" data-id="${escapeHtml(item.itemId)}">Save $</button>
+              </span>
+            ` : ''}
+            ${showIgnore ? `<button class="icon-btn pa-ignore-btn" data-id="${escapeHtml(item.itemId)}" data-label="${escapeHtml(action.label)}">Ignore</button>` : ''}
+            ${showHold ? `<button class="icon-btn pa-hold-btn${held ? ' on' : ''}" data-id="${escapeHtml(item.itemId)}" data-held="${held}">${held ? 'Release' : 'Hold'}</button>` : ''}
+            ${secondaryComplete}
+            ${editToggleHTML(item).replace('btn secondary ie-toggle', 'icon-btn ie-toggle')}
+            <button class="icon-btn pa-delete-btn" data-id="${escapeHtml(item.itemId)}" data-label="${escapeHtml(action.label)}" aria-label="Delete action">Delete</button>
+          </div>
       </div>
       <div class="status-msg pa-status"></div>
       ${itemEditPanelHTML(item)}
@@ -3167,7 +3226,7 @@ function renderPricingActions() {
     const groupRows = byGroup.get(g.key).sort((a, b) => (b.action.watchers - a.action.watchers) || (b.action.views - a.action.views));
     return `
       <details class="action-group pa-group" id="${pricingGroupId(g.key)}" style="--plat:${g.color}"${g.collapsed ? '' : ' open'}>
-        <summary><span class="ag-title">${escapeHtml(g.title)}</span><span class="ag-count">${groupRows.length}</span>${g.blurb ? `<span class="ag-blurb">${escapeHtml(g.blurb)}</span>` : ''}</summary>
+        <summary><span class="ag-title">${escapeHtml(g.title)}</span><span class="ag-count">${groupRows.length}</span></summary>
         <div class="card-grid">${groupRows.map(cardHTML).join('')}</div>
       </details>`;
   }).join('');
@@ -3175,6 +3234,17 @@ function renderPricingActions() {
   wireActionStars(container);
   wireItemEditors(container);
 
+  container.querySelectorAll('.pa-reason-toggle').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const reason = btn.closest('.pa-reason');
+      const clip = reason.querySelector('.pa-reason-clip');
+      const full = reason.querySelector('.pa-reason-full');
+      const expanding = full.hidden;
+      if (clip) clip.hidden = expanding;
+      full.hidden = !expanding;
+      btn.textContent = expanding ? 'less' : 'more';
+    });
+  });
   container.querySelectorAll('.pa-offer-btn').forEach(btn => {
     btn.addEventListener('click', () => sendOfferForAction(btn.dataset.id, btn.dataset.plat));
   });
