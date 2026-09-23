@@ -8,6 +8,8 @@ const acqState = {
   opps: [],
   lanes: [],
   expandedLanes: new Set(),
+  // Collapse state for Acquire shelves/sections. Empty = all expanded (scout-friendly default).
+  collapsedBuckets: new Set(),
   loading: true,
   error: '',
   filters: { q: '', category: '', budget: '', profit: '', sellThrough: '', risk: '', conditionReq: '', location: '', frequency: '', preset: '' },
@@ -55,6 +57,31 @@ function clearLaneDismissals(laneId) {
 function laneShowAgainHTML(laneId, hiddenCount) {
   if (!hiddenCount) return '';
   return `<button type="button" class="btn secondary lane-show-again" data-clear-lane-dismiss="${escapeHtml(laneId)}">${hiddenCount} hidden · Show again</button>`;
+}
+
+const ACQ_BUCKET_COLLAPSE_KEY = 'bucketCollapsed';
+function loadCollapsedBuckets() {
+  const list = acqPrefGet(ACQ_BUCKET_COLLAPSE_KEY, []);
+  acqState.collapsedBuckets = new Set(Array.isArray(list) ? list.map(String) : []);
+}
+function persistCollapsedBuckets() {
+  acqPrefSet(ACQ_BUCKET_COLLAPSE_KEY, [...acqState.collapsedBuckets]);
+}
+function isBucketCollapsed(id) {
+  return acqState.collapsedBuckets.has(String(id));
+}
+function setBucketCollapsed(id, collapsed) {
+  const key = String(id);
+  if (collapsed) acqState.collapsedBuckets.add(key);
+  else acqState.collapsedBuckets.delete(key);
+  persistCollapsedBuckets();
+}
+function expandAcquireBucket(id) {
+  if (!id) return;
+  setBucketCollapsed(id, false);
+  const safe = String(id).replace(/[^a-z0-9_-]/gi, '');
+  const el = document.querySelector(`#acquire details[data-bucket="${safe}"]`);
+  if (el) el.open = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -263,45 +290,64 @@ function emergingEmptyHTML(meta) {
     </p>`;
 }
 
+function laneSectionHTML(lane, trending) {
+  const expanded = acqState.expandedLanes.has(lane.id);
+  const dismissed = dismissedIdsForLane(lane.id);
+  const visible = lane.items.filter(o => !dismissed.has(String(o.id)));
+  const hiddenCount = lane.items.length - visible.length;
+  const shown = expanded ? visible : visible.slice(0, ACQUIRE_CONFIG.laneSize);
+  const body = shown.length
+    ? `<div class="acq-rail">
+        <button type="button" class="acq-rail-btn" data-rail="-1" aria-label="Scroll left">‹</button>
+        <div class="acq-carousel${expanded ? ' dense' : ''} lane-carousel">${shown.map(o => oppCardHTML(o, { laneId: lane.id })).join('')}</div>
+        <button type="button" class="acq-rail-btn" data-rail="1" aria-label="Scroll right">›</button>
+      </div>`
+    : lane.id === 'emerging' ? emergingEmptyHTML(lane.meta) : `<p class="lane-empty">${escapeHtml(lane.empty)}</p>`;
+  const criteria = laneCriteriaText(lane);
+  const footBits = [];
+  if (visible.length > shown.length || (expanded && visible.length > ACQUIRE_CONFIG.laneSize)) {
+    footBits.push(`<button type="button" class="btn secondary" data-lane="${lane.id}">${expanded ? 'Show fewer' : `See all ${visible.length}`}</button>`);
+  }
+  const showAgain = laneShowAgainHTML(lane.id, hiddenCount);
+  if (showAgain) footBits.push(showAgain);
+  const openAttr = isBucketCollapsed(lane.id) ? '' : ' open';
+  return `
+    <details class="acq-lane lane-${lane.id}" data-bucket="${escapeHtml(lane.id)}"${openAttr}>
+      <summary class="lane-head">
+        <h4><span aria-hidden="true">${lane.icon}</span> ${escapeHtml(lane.title)} <span class="lane-count">${visible.length}</span></h4>
+        <p class="lane-blurb">${escapeHtml(lane.blurb)}</p>
+        ${criteria ? `<p class="lane-criteria">Bar to get here: ${escapeHtml(criteria)}</p>` : ''}
+      </summary>
+      ${body}
+      ${lane.id === 'emerging' ? trendingTermsHTML(trending) : ''}
+      ${footBits.length ? `<div class="lane-foot">${footBits.join('')}</div>` : ''}
+    </details>`;
+}
+
 function renderAcquireLanes() {
   const el = document.getElementById('acqLanes');
   if (!el) return;
   if (acqState.loading) { el.innerHTML = '<div class="empty-state">Loading market data…</div>'; return; }
   if (acqState.error) { el.innerHTML = ''; return; }
 
+  // Emerging renders below Media run — keep Everyday / Strong / Quick here.
+  const shelves = acqState.lanes.filter(lane => lane.id !== 'emerging');
+  el.innerHTML = shelves.map(lane => laneSectionHTML(lane, null)).join('');
+}
+
+function renderAcquireEmerging() {
+  const el = document.getElementById('acqEmerging');
+  if (!el) return;
+  if (acqState.loading) { el.innerHTML = '<div class="empty-state">Loading market data…</div>'; return; }
+  if (acqState.error) { el.innerHTML = ''; return; }
+
+  const lane = acqState.lanes.find(l => l.id === 'emerging');
+  if (!lane) { el.innerHTML = ''; return; }
   const trending = summarizePlatformTrends(acqState.data.platformTrends, acqState.opps);
-  el.innerHTML = acqState.lanes.map(lane => {
-    const expanded = acqState.expandedLanes.has(lane.id);
-    const dismissed = dismissedIdsForLane(lane.id);
-    const visible = lane.items.filter(o => !dismissed.has(String(o.id)));
-    const hiddenCount = lane.items.length - visible.length;
-    const shown = expanded ? visible : visible.slice(0, ACQUIRE_CONFIG.laneSize);
-    const body = shown.length
-      ? `<div class="acq-rail">
-          <button type="button" class="acq-rail-btn" data-rail="-1" aria-label="Scroll left">‹</button>
-          <div class="acq-carousel${expanded ? ' dense' : ''} lane-carousel">${shown.map(o => oppCardHTML(o, { laneId: lane.id })).join('')}</div>
-          <button type="button" class="acq-rail-btn" data-rail="1" aria-label="Scroll right">›</button>
-        </div>`
-      : lane.id === 'emerging' ? emergingEmptyHTML(lane.meta) : `<p class="lane-empty">${escapeHtml(lane.empty)}</p>`;
-    const criteria = laneCriteriaText(lane);
-    const footBits = [];
-    if (visible.length > shown.length || (expanded && visible.length > ACQUIRE_CONFIG.laneSize)) {
-      footBits.push(`<button type="button" class="btn secondary" data-lane="${lane.id}">${expanded ? 'Show fewer' : `See all ${visible.length}`}</button>`);
-    }
-    const showAgain = laneShowAgainHTML(lane.id, hiddenCount);
-    if (showAgain) footBits.push(showAgain);
-    return `
-      <section class="acq-lane lane-${lane.id}">
-        <div class="lane-head">
-          <h4><span aria-hidden="true">${lane.icon}</span> ${escapeHtml(lane.title)} <span class="lane-count">${visible.length}</span></h4>
-          <p class="lane-blurb">${escapeHtml(lane.blurb)}</p>
-          ${criteria ? `<p class="lane-criteria">Bar to get here: ${escapeHtml(criteria)}</p>` : ''}
-        </div>
-        ${body}
-        ${lane.id === 'emerging' ? trendingTermsHTML(trending) : ''}
-        ${footBits.length ? `<div class="lane-foot">${footBits.join('')}</div>` : ''}
-      </section>`;
-  }).join('');
+  el.innerHTML = laneSectionHTML(lane, trending);
+  // Anchor for jump nav / scroll-margin (details is inside the slot).
+  const details = el.querySelector('details[data-bucket="emerging"]');
+  if (details) details.id = 'acq-emerging';
 }
 
 
@@ -1176,11 +1222,13 @@ function renderAcquireAll() {
   renderAcquirePulse();
   renderAcquireLanes();
   renderAcquireMediaShelf();
+  renderAcquireEmerging();
   renderAcquireControls();
   renderAcquireExplorer();
   renderAcquireCategories();
   renderHuntList();
   renderHuntAddForm();
+  syncStaticAcquireBuckets();
   const drawer = document.getElementById('acqDrawer');
   if (drawer && !drawer.hidden && acqState.drawerMode === 'opp') {
     // Keep the open drawer's hunt button in step without resetting the calculator.
@@ -1207,12 +1255,43 @@ function setAcquireFilter(patch) {
 
 function scrollToAcquire(id) {
   const el = document.getElementById(id);
-  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  if (!el) return;
+  // Jump targets that are collapsed open first so the content is reachable.
+  const bucket = el.matches('details[data-bucket]') ? el : el.querySelector('details[data-bucket]');
+  if (bucket && !bucket.open) {
+    bucket.open = true;
+    if (bucket.dataset.bucket) setBucketCollapsed(bucket.dataset.bucket, false);
+  }
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function syncStaticAcquireBuckets() {
+  document.querySelectorAll('#acquire > details.acq-bucket[data-bucket]').forEach(el => {
+    const id = el.dataset.bucket;
+    if (!id) return;
+    el.open = !isBucketCollapsed(id);
+  });
+}
+
+function wireAcquireBucketToggles() {
+  const section = document.getElementById('acquire');
+  if (!section || section.dataset.bucketToggleWired) return;
+  section.dataset.bucketToggleWired = '1';
+  section.addEventListener('toggle', ev => {
+    const details = ev.target;
+    if (!(details instanceof HTMLDetailsElement)) return;
+    const id = details.dataset.bucket;
+    if (!id) return;
+    setBucketCollapsed(id, !details.open);
+  }, true);
 }
 
 function wireAcquire() {
   const section = document.getElementById('acquire');
   if (!section) return;
+  loadCollapsedBuckets();
+  wireAcquireBucketToggles();
+  syncStaticAcquireBuckets();
   acqState.quick = !!acqPrefGet('quick', false);
   acqState.sort = acqPrefGet('sort', 'score');
   if (!ACQUIRE_CONFIG.sorts.some(s => s.id === acqState.sort)) acqState.sort = 'score';
@@ -1258,6 +1337,7 @@ function wireAcquire() {
       dismissFromLane(t.dataset.dismissLane, t.dataset.dismissId);
       renderAcquireLanes();
       renderAcquireMediaShelf();
+      renderAcquireEmerging();
       return;
     }
     if (t.dataset.clearLaneDismiss !== undefined) {
@@ -1266,6 +1346,7 @@ function wireAcquire() {
       clearLaneDismissals(t.dataset.clearLaneDismiss);
       renderAcquireLanes();
       renderAcquireMediaShelf();
+      renderAcquireEmerging();
       return;
     }
     if (t.dataset.open !== undefined) { ev.preventDefault(); openAcquireDrawer('opp', t.dataset.open); return; }
@@ -1317,7 +1398,8 @@ function wireAcquire() {
     if (t.dataset.lane !== undefined) {
       if (acqState.expandedLanes.has(t.dataset.lane)) acqState.expandedLanes.delete(t.dataset.lane);
       else acqState.expandedLanes.add(t.dataset.lane);
-      renderAcquireLanes();
+      if (t.dataset.lane === 'emerging') renderAcquireEmerging();
+      else renderAcquireLanes();
       return;
     }
     if (t.classList.contains('ae-edit-btn')) { acqState.editingHuntId = t.dataset.id; renderHuntList(); return; }

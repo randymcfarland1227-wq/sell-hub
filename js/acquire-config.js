@@ -133,6 +133,7 @@ const ACQUIRE_CONFIG = {
       requireBuyable: true,
       sort: 'velocity',
     },
+    // Rendered below Media run on the Acquire tab (not above it).
     {
       id: 'emerging',
       title: 'Emerging trends',
