@@ -272,6 +272,35 @@ main.wrap,
 }
 .mode-switch button.active { background: var(--primary); color: #fff; }
 
+.inventory-refresh {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  flex-shrink: 0;
+  min-width: 0;
+}
+.inventory-refresh-btn {
+  padding: 8px 14px;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.inventory-refresh-btn:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+.inventory-refresh-status {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 12rem;
+}
+.inventory-refresh-status.is-error { color: var(--bad); }
+
 /* ---------- Category chips (list mode) ---------- */
 
 .chip-row {
@@ -1432,6 +1461,9 @@ body.acq-drawer-open { overflow: hidden; }
   .inventory-toolbar, .action-toolbar { align-items: stretch; flex-direction: column; }
   .sort-control { justify-content: space-between; }
   .sort-control select { min-width: 155px; }
+  .inventory-refresh { margin-left: 0; width: 100%; }
+  .inventory-refresh-btn { flex: 1 1 auto; }
+  .inventory-refresh-status { max-width: none; flex: 1 1 auto; }
   .card-grid { grid-template-columns: 1fr; }
 }
 
