@@ -136,13 +136,13 @@ When you know a listing is priced right and just needs time — lots of interest
 
 ## 9. Stocking (intake → drafts → ready to post)
 
-Stocking is the front door for new inventory. It writes **only** into the existing workbook `selling_inventory_updated` (never a new spreadsheet):
+Stocking is the front door for new inventory. It writes **only** into the existing workbook `selling_inventory_updated` (never a new spreadsheet), and it never calls out to anything — no AI, no webhook. Pasting parks the text; turning it into an item is always a deliberate step.
 
-- **Stocking** tab — stage board (`needs_analysis` → `details_needed` → `ready_for_drafts` → `ready_to_post` → `done`)
+- **Stocking** tab — stage board (`pasted` → `needs_analysis` → `details_needed` → `ready_for_drafts` → `ready_to_post` → `done`). A `pasted` row holds the raw text in **Raw Entry** and has no Item ID yet.
 - **Clothing Sell Inventory** / **Non Clothing Sell Inventory** — new rows with Status `Identify`
 - **Listing Hub** — formula row linked to the source row
 - **Listing Questions** — reused for the details-needed Q&A (answered from the Stocking page)
-- **Listing Descriptions** / **Platform Posting Queue** — draft upserts (usually filled by Grok Bot)
+- **Listing Descriptions** / **Platform Posting Queue** — draft upserts
 - **Item Actions** — audit log
 - Optional row on **Adding to Selling Inventory**
 
@@ -151,8 +151,17 @@ Stocking is the front door for new inventory. It writes **only** into the existi
 1. Open the spreadsheet → **Extensions → Apps Script**.
 2. Replace `Code.gs` with this repo’s `Code.gs` (or paste from `sell-hub-code-paste.html`).
 3. **Deploy → Manage deployments → Edit (pencil) → New version → Deploy**. URL stays the same; `js/config.js` needs no change if it’s already set.
-4. Optional: **Project Settings → Script properties** → add `STOCKING_WEBHOOK_URL` = your Grok Bot webhook. Apps Script best-effort `UrlFetchApp` pings it on `needs_analysis` and `ready_for_drafts`. Analysis/drafts are **not** generated inside Apps Script.
+No script properties are needed for Stocking. (An old `STOCKING_WEBHOOK_URL` property is ignored now — safe to delete.)
+
+### Working a paste
+
+**Park it** saves whatever you paste as a `pasted` row: first line becomes the card title, the whole text goes in Raw Entry. Nothing else happens until either:
+
+- **Fill in myself** on the card — loads the raw text into the detail form, and saving turns *that* row into the item (`pastedId` in the POST), or
+- you ask Claude to process the parked entries — same path, filled in for you.
+
+**Bin it** deletes the Stocking row only; anything already created from it stays.
 
 ### Site
 
-After GitHub Pages picks up `main`, open **Stocking** in the nav. Cache-bust query is `?v=20260922-stk1`.
+After GitHub Pages picks up `main`, open **Stocking** in the nav. Cache-bust query is `?v=20260923-stock`.

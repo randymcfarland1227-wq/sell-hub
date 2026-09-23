@@ -1,6 +1,7 @@
 /* Stocking — intake front door + stage board for the existing Sheet pipeline. */
 (function () {
   const STAGES = [
+    { id: 'pasted', label: 'Pasted' },
     { id: 'needs_analysis', label: 'Needs analysis' },
     { id: 'details_needed', label: 'Details needed' },
     { id: 'ready_for_drafts', label: 'Ready for drafts' },
@@ -50,7 +51,7 @@
     if (!board) return;
     const byStage = Object.fromEntries(STAGES.map((s) => [s.id, []]));
     stockingRows.forEach((r) => {
-      const stage = byStage[r.stage] ? r.stage : 'needs_analysis';
+      const stage = byStage[r.stage] ? r.stage : (r.rawEntry && !r.itemId ? 'pasted' : 'needs_analysis');
       byStage[stage].push(r);
     });
     board.innerHTML = STAGES.map((stage) => {
@@ -61,6 +62,24 @@
       </div>`;
     }).join('');
 
+    board.querySelectorAll('[data-fill-form]').forEach((btn) => {
+      btn.addEventListener('click', () => fillFormFrom(btn.getAttribute('data-fill-form')));
+    });
+    board.querySelectorAll('[data-delete-stocking]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const stockingId = btn.getAttribute('data-delete-stocking');
+        if (!confirm(`Bin ${stockingId}? The pasted text goes with it.`)) return;
+        btn.disabled = true;
+        try {
+          const res = await apiPost('deleteStocking', { stockingId });
+          if (!res || res.ok === false) throw new Error((res && res.error) || 'Delete failed');
+          await refreshStocking();
+        } catch (err) {
+          alert(err.message || String(err));
+          btn.disabled = false;
+        }
+      });
+    });
     board.querySelectorAll('[data-open-stocking]').forEach((btn) => {
       btn.addEventListener('click', () => openDetail(btn.getAttribute('data-open-stocking')));
     });
@@ -88,6 +107,7 @@
   }
 
   function cardHtml(r) {
+    if (r.stage === 'pasted') return pastedCardHtml(r);
     const title = r.product || r.itemId || r.stockingId;
     const meta = [r.brand, r.model, r.version].filter(Boolean).join(' · ');
     return `<article class="stocking-card">
@@ -105,6 +125,21 @@
     </article>`;
   }
 
+  function pastedCardHtml(r) {
+    return `<article class="stocking-card pasted">
+      <header>
+        <b>${esc(r.product || r.stockingId)}</b>
+        <span class="mono">${esc(r.stockingId)}</span>
+      </header>
+      <pre class="stk-raw">${esc(r.rawEntry || '')}</pre>
+      <p class="muted small">Parked ${esc(r.created || '')} — waiting to be processed.</p>
+      <div class="stocking-card-actions">
+        <button type="button" class="btn small" data-fill-form="${esc(r.stockingId)}">Fill in myself</button>
+        <button type="button" class="btn secondary small" data-delete-stocking="${esc(r.stockingId)}">Bin it</button>
+      </div>
+    </article>`;
+  }
+
   function stageAdvanceBtn(r) {
     const order = STAGES.map((s) => s.id);
     const idx = order.indexOf(r.stage);
@@ -117,6 +152,25 @@
       done: 'Mark done',
     };
     return `<button type="button" class="btn small" data-stage-to="${next}" data-stocking-id="${esc(r.stockingId)}" data-item-id="${esc(r.itemId)}">${labels[next] || 'Advance'}</button>`;
+  }
+
+  // Hands a parked paste to the manual form. The raw text lands in Notes so
+  // nothing is lost if the first line was a poor guess at the product.
+  function fillFormFrom(stockingId) {
+    const row = stockingRows.find((r) => String(r.stockingId) === String(stockingId));
+    if (!row) return;
+    const panel = document.getElementById('stockingIntakePanel');
+    const product = document.getElementById('stkProduct');
+    const notes = document.getElementById('stkNotes');
+    const pastedField = document.getElementById('stkPastedId');
+    if (panel) panel.open = true;
+    if (product) product.value = row.product || '';
+    if (notes) notes.value = row.rawEntry || '';
+    if (pastedField) pastedField.value = row.stockingId;
+    const status = document.getElementById('stkFormStatus');
+    setStatus(status, `Processing ${row.stockingId} — saving turns this paste into the item.`);
+    if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (product) product.focus();
   }
 
   async function openDetail(stockingId) {
@@ -142,7 +196,7 @@
       renderQuestions();
       setStatus(status, activeDetail.questions.length
         ? ''
-        : 'No Listing Questions rows for this Item ID yet (Grok adds them during analysis).');
+        : 'No Listing Questions rows for this Item ID yet.');
     } catch (err) {
       const wrap = document.getElementById('stkQuestionsWrap');
       if (wrap) wrap.innerHTML = `<p class="error">${esc(err.message || err)}</p>`;
@@ -199,7 +253,7 @@
         stage: 'ready_for_drafts',
       });
       if (!res || res.ok === false) throw new Error((res && res.error) || 'Update failed');
-      setStatus(status, 'Moved to Ready for drafts. Grok writes drafts when STOCKING_WEBHOOK_URL is set.');
+      setStatus(status, 'Moved to Ready for drafts.');
       await refreshStocking();
     } catch (err) {
       setStatus(status, err.message || String(err), true);
@@ -241,6 +295,7 @@
         notes: (document.getElementById('stkNotes')?.value || '').trim(),
         isClothing,
         addIntakeRow: !!(document.getElementById('stkIntakeRow')?.checked),
+        pastedId: (document.getElementById('stkPastedId')?.value || '').trim(),
       };
       btn.disabled = true;
       setStatus(status, 'Creating…');
@@ -249,8 +304,36 @@
         if (!res || res.ok === false) throw new Error((res && res.error) || 'Create failed');
         setStatus(status, `Created ${res.itemId} (${res.stockingId}) in needs_analysis.`);
         form.reset();
+        const pastedField = document.getElementById('stkPastedId');
+        if (pastedField) pastedField.value = '';
         if (kind) kind.value = 'clothing';
         syncKind();
+        await refreshStocking();
+      } catch (err) {
+        setStatus(status, err.message || String(err), true);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  }
+
+  function wirePaste() {
+    const form = document.getElementById('stockingPasteForm');
+    if (!form) return;
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const status = document.getElementById('stkPasteStatus');
+      const btn = document.getElementById('stkPasteBtn');
+      const box = document.getElementById('stkPasteText');
+      const text = (box?.value || '').trim();
+      if (!text) { setStatus(status, 'Paste something first.', true); return; }
+      btn.disabled = true;
+      setStatus(status, 'Parking…');
+      try {
+        const res = await apiPost('addStockingPaste', { text });
+        if (!res || res.ok === false) throw new Error((res && res.error) || 'Save failed');
+        setStatus(status, `Parked as ${res.stockingId}.`);
+        if (box) box.value = '';
         await refreshStocking();
       } catch (err) {
         setStatus(status, err.message || String(err), true);
@@ -268,6 +351,7 @@
 
   document.addEventListener('DOMContentLoaded', () => {
     wireIntake();
+    wirePaste();
     wireChrome();
   });
 })();

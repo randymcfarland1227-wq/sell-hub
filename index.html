@@ -384,7 +384,7 @@
     <div class="section-head">
       <div>
         <h2 class="section-title">Stocking</h2>
-        <p class="section-intro">Front door for new inventory — intake, answer Listing Questions, then move drafts through to Ready to post. Grok fills analysis and drafts in the Sheet; this page drives the stages.</p>
+        <p class="section-intro">Front door for new inventory. Paste what you have and it waits in Pasted until it gets worked through — nothing is sent anywhere on save. Processed items move on to Listing Questions, drafts, then Ready to post.</p>
       </div>
       <button type="button" class="btn secondary" id="stockingRefreshBtn">Refresh</button>
     </div>
@@ -393,8 +393,21 @@
       Not connected to your Sheet yet. Deploy <code>Code.gs</code> on <code>selling_inventory_updated</code> and paste the Web App URL into <code>js/config.js</code> — see <code>SETUP.md</code>.
     </div>
 
-    <div class="panel stocking-intake" id="stockingIntakePanel">
-      <h3>New intake</h3>
+    <div class="panel stocking-paste" id="stockingPastePanel">
+      <h3>Paste an entry</h3>
+      <p class="muted small">Whatever you have — a sentence, a receipt line, notes off your phone. It's parked as-is until it's processed.</p>
+      <form id="stockingPasteForm" class="stocking-paste-form">
+        <label class="sr-only" for="stkPasteText">Entry</label>
+        <textarea id="stkPasteText" rows="4" placeholder="Nike Tech Fleece hoodie, black, size L, good shape, $12 at Goodwill&#10;Sony Discman D-EJ011, tested, no headphones"></textarea>
+        <div class="stocking-form-actions">
+          <button type="submit" class="btn" id="stkPasteBtn">Park it</button>
+          <span class="status-msg" id="stkPasteStatus" role="status"></span>
+        </div>
+      </form>
+    </div>
+
+    <details class="panel stocking-intake" id="stockingIntakePanel">
+      <summary>Fill in the details myself</summary>
       <form id="stockingIntakeForm" class="stocking-form">
         <div class="field-row">
           <div class="field">
@@ -467,13 +480,14 @@
           <label for="stkNotes">Notes</label>
           <textarea id="stkNotes" name="notes" rows="2" placeholder="Where it came from, flaws, identifiers…"></textarea>
         </div>
+        <input type="hidden" id="stkPastedId">
         <label class="chip-toggle"><input type="checkbox" id="stkIntakeRow" checked> Also add a row on Adding to Selling Inventory</label>
         <div class="stocking-form-actions">
           <button type="submit" class="btn" id="stkSubmitBtn">Add to Stocking</button>
           <span class="status-msg" id="stkFormStatus" role="status"></span>
         </div>
       </form>
-    </div>
+    </details>
 
     <div class="stocking-board" id="stockingBoard" aria-live="polite"></div>
 
@@ -508,6 +522,6 @@
 <script src="js/acquire-config.js?v=20260923-actions2"></script>
 <script src="js/acquire-model.js?v=20260923-actions2"></script>
 <script src="js/acquire.js?v=20260923-actions2"></script>
-<script src="js/stocking.js?v=20260923-actions2"></script>
+<script src="js/stocking.js?v=20260923-stock"></script>
 </body>
 </html>

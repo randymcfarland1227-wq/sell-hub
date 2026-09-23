@@ -54,16 +54,20 @@
  *        the source tab (same row-lookup as markSold), e.g. "Photograph" -> "Listed"
  *
  *   GET  ?action=stocking      -> [{stockingId, itemId, stage, created, updated, product, brand,
- *                                   model, version, notes, sourceTab, analysisSummary, error}]
+ *                                   model, version, notes, sourceTab, analysisSummary, error,
+ *                                   rawEntry}]
  *   GET  ?action=listingQuestions&itemId=CLO-001 -> questions rows for one item (or all if omitted)
+ *   POST {action:'addStockingPaste', text} -> parks pasted text as a Stocking row (stage pasted).
+ *        Nothing is parsed or sent anywhere: it waits until someone processes it.
  *   POST {action:'createStocking', product, brand, model, version, notes, category, clothingType,
- *        size, condition, platforms, listPrice, estValue, floorPrice, isClothing, addIntakeRow}
- *        -> creates inventory row (Status=Identify) + Listing Hub formulas + Stocking row
- *        (stage needs_analysis) + optional Adding to Selling Inventory row + Item Action log;
- *        best-effort UrlFetchApp ping to Script Property STOCKING_WEBHOOK_URL
+ *        size, condition, platforms, listPrice, estValue, floorPrice, isClothing, addIntakeRow,
+ *        pastedId} -> creates inventory row (Status=Identify) + Listing Hub formulas + Stocking row
+ *        (stage needs_analysis) + optional Adding to Selling Inventory row + Item Action log.
+ *        With pastedId, the parked paste row becomes the Stocking row instead of a new one.
  *   POST {action:'updateStocking', stockingId|itemId, stage, product, brand, model, version, notes,
  *        analysisSummary, error, answers:[{row|question, answer}]} -> updates Stocking + optional
- *        Listing Questions answers; stage ready_for_drafts also pings the webhook
+ *        Listing Questions answers
+ *   POST {action:'deleteStocking', stockingId} -> removes one Stocking row (used to bin a paste)
  *   POST {action:'upsertDescription', itemId, platform, listingId, suggestedTitle, description,
  *        listPrice, floorPrice, listingStatus, ...} -> upsert Listing Descriptions by Item ID + Platform
  *   POST {action:'upsertQueue', itemId, platform, listingId, status, suggestedTitle, listPrice, ...}
@@ -204,7 +208,9 @@ function doPost(e) {
   if (action === 'updateItem') return jsonOut(updateItem(body));
   if (action === 'setQueueStatus') return jsonOut(setQueueStatus(body));
   if (action === 'debugRestoreRow') return jsonOut(debugRestoreRow(body.sheet, body.row, body.values));
+  if (action === 'addStockingPaste') return jsonOut(addStockingPaste(body));
   if (action === 'createStocking') return jsonOut(createStocking(body));
+  if (action === 'deleteStocking') return jsonOut(deleteStocking(body));
   if (action === 'updateStocking') return jsonOut(updateStocking(body));
   if (action === 'upsertDescription') return jsonOut(upsertDescription(body));
   if (action === 'upsertQueue') return jsonOut(upsertQueue(body));
@@ -2597,18 +2603,19 @@ function addMetricEntries(body) {
 
 // ---------------------------------------------------------------------
 // Stocking — intake front door into the existing sell pipeline.
-// Data lives ONLY in this workbook (getActiveSpreadsheet). Grok Bot does
-// analysis/drafts externally; Apps Script never calls AI. Set Script
-// Property STOCKING_WEBHOOK_URL for a best-effort ping on
-// needs_analysis / ready_for_drafts.
+// Data lives ONLY in this workbook (getActiveSpreadsheet), and nothing here
+// calls out to an AI or anywhere else. A pasted entry is parked as-is in the
+// 'pasted' stage until someone works through it; processing is always a
+// deliberate step, never a side effect of saving.
 // ---------------------------------------------------------------------
 
 var STOCKING_SHEET_NAME = 'Stocking';
 var STOCKING_HEADERS = [
   'Stocking ID', 'Item ID', 'Stage', 'Created', 'Updated', 'Product', 'Brand', 'Model',
-  'Version', 'Notes', 'Source Tab', 'Analysis Summary', 'Error'
+  'Version', 'Notes', 'Source Tab', 'Analysis Summary', 'Error', 'Raw Entry'
 ];
 var STOCKING_STAGES = {
+  PASTED: 'pasted',
   NEEDS_ANALYSIS: 'needs_analysis',
   DETAILS_NEEDED: 'details_needed',
   READY_FOR_DRAFTS: 'ready_for_drafts',
@@ -2682,28 +2689,6 @@ function nextStockingId_() {
   return 'STK-' + ('000' + (max + 1)).slice(-3);
 }
 
-function pingStockingWebhook_(eventName, payload) {
-  try {
-    var url = PropertiesService.getScriptProperties().getProperty('STOCKING_WEBHOOK_URL');
-    if (!url) return { skipped: true, reason: 'STOCKING_WEBHOOK_URL not set' };
-    UrlFetchApp.fetch(url, {
-      method: 'post',
-      contentType: 'application/json',
-      payload: JSON.stringify({
-        event: eventName,
-        spreadsheetId: SpreadsheetApp.getActiveSpreadsheet().getId(),
-        at: new Date().toISOString(),
-        payload: payload || {}
-      }),
-      muteHttpExceptions: true,
-      followRedirects: true
-    });
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: String(err) };
-  }
-}
-
 function getStocking() {
   return readRecords(getStockingSheet()).filter(function (r) {
     return r['Stocking ID'] || r['Item ID'];
@@ -2721,7 +2706,8 @@ function getStocking() {
       notes: String(r['Notes'] || ''),
       sourceTab: String(r['Source Tab'] || ''),
       analysisSummary: String(r['Analysis Summary'] || ''),
-      error: String(r['Error'] || '')
+      error: String(r['Error'] || ''),
+      rawEntry: String(r['Raw Entry'] || '')
     };
   });
 }
@@ -2896,6 +2882,36 @@ function createInventoryItem(body) {
   };
 }
 
+// A paste is stored verbatim. The first line becomes the card title so the
+// board reads sensibly, but nothing else is parsed until someone processes it.
+function addStockingPaste(body) {
+  body = body || {};
+  var text = String(body.text || '').trim();
+  if (!text) return { ok: false, error: 'Nothing pasted.' };
+  var firstLine = text.split(/\r?\n/)[0].trim();
+  if (firstLine.length > 80) firstLine = firstLine.slice(0, 77) + '...';
+  var stockingId = nextStockingId_();
+  var stamp = nowStamp_();
+  getStockingSheet().appendRow([
+    stockingId, '', STOCKING_STAGES.PASTED, stamp, stamp,
+    firstLine, '', '', '', '', '', '', '', text
+  ]);
+  invalidateBootCache();
+  return { ok: true, stockingId: stockingId, stage: STOCKING_STAGES.PASTED, product: firstLine };
+}
+
+// Only removes the Stocking row — an item already created from it stays put.
+function deleteStocking(body) {
+  body = body || {};
+  var stockingId = String((body && body.stockingId) || '').trim();
+  if (!stockingId) return { ok: false, error: 'stockingId is required.' };
+  var located = findStockingRow_(stockingId, '');
+  if (!located) return { ok: false, error: 'Stocking row not found.' };
+  located.sheet.deleteRow(located.row);
+  invalidateBootCache();
+  return { ok: true, stockingId: stockingId };
+}
+
 function createStocking(body) {
   body = body || {};
   if (!String(body.product || body.item || '').trim()) {
@@ -2904,14 +2920,31 @@ function createStocking(body) {
   var created = createInventoryItem(body);
   if (!created.ok) return created;
 
-  var stockingId = nextStockingId_();
   var stamp = nowStamp_();
   var stage = STOCKING_STAGES.NEEDS_ANALYSIS;
-  getStockingSheet().appendRow([
-    stockingId, created.itemId, stage, stamp, stamp,
-    body.product || body.item || '', body.brand || '', body.model || '', body.version || '',
-    body.notes || '', created.sourceTab, '', ''
-  ]);
+  var stockingId;
+  // Processing a parked paste reuses its row, so the raw text stays attached
+  // to the item it turned into instead of being orphaned.
+  var parked = body.pastedId ? findStockingRow_(body.pastedId, '') : null;
+  if (parked) {
+    stockingId = String(body.pastedId);
+    setStockingCell_(parked, 'Item ID', created.itemId);
+    setStockingCell_(parked, 'Stage', stage);
+    setStockingCell_(parked, 'Updated', stamp);
+    setStockingCell_(parked, 'Product', body.product || body.item || '');
+    setStockingCell_(parked, 'Brand', body.brand || '');
+    setStockingCell_(parked, 'Model', body.model || '');
+    setStockingCell_(parked, 'Version', body.version || '');
+    setStockingCell_(parked, 'Notes', body.notes || '');
+    setStockingCell_(parked, 'Source Tab', created.sourceTab);
+  } else {
+    stockingId = nextStockingId_();
+    getStockingSheet().appendRow([
+      stockingId, created.itemId, stage, stamp, stamp,
+      body.product || body.item || '', body.brand || '', body.model || '', body.version || '',
+      body.notes || '', created.sourceTab, '', '', body.rawEntry || ''
+    ]);
+  }
 
   var intake = { skipped: true };
   if (body.addIntakeRow !== false) {
@@ -2937,18 +2970,6 @@ function createStocking(body) {
   logItemAction(created.itemId, 'Stocking Intake', stockingId + ' -> ' + stage);
   invalidateBootCache();
 
-  var webhook = pingStockingWebhook_('needs_analysis', {
-    stockingId: stockingId,
-    itemId: created.itemId,
-    product: body.product || body.item || '',
-    brand: body.brand || '',
-    model: body.model || '',
-    version: body.version || '',
-    notes: body.notes || '',
-    sourceTab: created.sourceTab,
-    sourceRow: created.sourceRow
-  });
-
   return {
     ok: true,
     stockingId: stockingId,
@@ -2957,8 +2978,7 @@ function createStocking(body) {
     sourceTab: created.sourceTab,
     sourceRow: created.sourceRow,
     hubRow: created.hubRow,
-    intakeRow: intake.row || null,
-    webhook: webhook
+    intakeRow: intake.row || null
   };
 }
 
@@ -2991,14 +3011,6 @@ function updateStocking(body) {
   }
   if (stage) logItemAction(itemId, 'Stocking Stage', stage);
 
-  var webhook = { skipped: true };
-  if (stage === STOCKING_STAGES.NEEDS_ANALYSIS || stage === STOCKING_STAGES.READY_FOR_DRAFTS) {
-    webhook = pingStockingWebhook_(stage, {
-      stockingId: stockingId, itemId: itemId, stage: stage,
-      product: body.product, analysisSummary: body.analysisSummary
-    });
-  }
-
   if (body.promoteIfDrafts && itemId) {
     var descs = getDescriptions().filter(function (d) {
       return String(d.itemId) === String(itemId) && String(d.suggestedTitle || d.description || '').trim();
@@ -3013,7 +3025,7 @@ function updateStocking(body) {
   invalidateBootCache();
   return {
     ok: true, stockingId: String(stockingId), itemId: String(itemId),
-    stage: stage || undefined, answersSaved: answersSaved, webhook: webhook
+    stage: stage || undefined, answersSaved: answersSaved
   };
 }
 
