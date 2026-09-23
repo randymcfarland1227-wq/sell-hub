@@ -48,21 +48,35 @@ This is a one-time setup. The push needs your own GitHub login, so it has to hap
 
 ## 3. Optional: eBay live stats (no eBay account needed to skip this)
 
-Poshmark and Depop have no public metrics API, so their stats stay manual from the Stats tab's "Log a stat update" form. eBay *can* pull live traffic into Metrics (and the Inventory Refresh button does that first), but it needs your own developer credentials — eBay does not hand out API access per-site.
+Poshmark and Depop have no public metrics API, so their stats stay manual from the Stats tab's "Log a stat update" form. eBay *can* pull live stats into Metrics — **impressions, views and clicks** (Sell Analytics traffic report, last 30 days) plus **watchers and current price** (from your active listings) — and the Inventory **Refresh** button does that first. It needs your own developer credentials; eBay does not hand out API access per-site.
 
-**Lasting setup (recommended)** — refresh-token OAuth so access tokens renew themselves:
+**A. On developer.ebay.com** (one time)
 
-1. Create a free account at **developer.ebay.com**, register an application (App ID / Cert ID), and complete the one-time user consent flow for a **User refresh token** with scope `https://api.ebay.com/oauth/api_scope/sell.analytics.readonly` (add other sell scopes only if you use them elsewhere).
-2. In the Apps Script editor (Extensions → Apps Script, same project as above): **Project Settings** (gear icon) → **Script Properties** → **Add script property**. Add:
-   - `EBAY_CLIENT_ID` = App ID (Client ID)
-   - `EBAY_CLIENT_SECRET` = Cert ID (Client Secret)
-   - `EBAY_REFRESH_TOKEN` = the user refresh token from step 1
-3. Optional short-lived fallback: `EBAY_OAUTH_TOKEN` = a user access token. Used only when the three properties above are missing; it expires in ~2 hours. With the refresh trio set, Code.gs refreshes and caches a fresh access token into `EBAY_OAUTH_TOKEN` automatically.
-4. Back in the editor's **Run** menu, select `setupEbayTrigger` and run it once (authorize if prompted). That installs a timer calling `syncEbayMetrics` every 6 hours.
-5. On the site, **Inventory → Refresh** now best-effort POSTs `syncEbayMetrics` (timeout ~90s), then reloads inventory/metrics. Status shows e.g. `Updated · eBay: 12 listings updated` or `Updated · eBay sync skipped (no token)` — a missing/failed eBay sync never blocks the rest of Refresh.
-6. **Store / tier:** which traffic metrics eBay returns can depend on your seller tier or Store subscription. Watchers are not in the Traffic Report API (left at 0). Poshmark and Depop stay manual.
+1. **Application Keys** → create a **Production** keyset (not Sandbox — sandbox has none of your real listings). Note the **App ID (Client ID)** and **Cert ID (Client Secret)**. If eBay asks about Marketplace Account Deletion notifications, choose the exemption ("I do not persist eBay user data") — this site only stores your own listing stats.
+2. **User Tokens** (next to the Production keyset) → **Get a Token from eBay via Your Application** → **Add eBay Redirect URL**. Fill in:
+   - **Your auth accepted URL**: your Apps Script **Web app URL** (the `…/exec` URL in `js/config.js`)
+   - **Your auth declined URL** and **Privacy policy URL**: your site URL is fine (e.g. `https://YOUR-USERNAME.github.io/sell-hub/`)
+   - Tick **OAuth Enabled**, save.
+3. Copy the **RuName** it shows (looks like `Your_Name-YourApp-PRD-abc123-defgh`). That — not the URL — is what eBay calls the redirect URI.
 
-Until credentials are set, log eBay stats manually from the Stats tab — same form as Poshmark/Depop. Never commit secrets to the repo; Script Properties only.
+**B. In Apps Script** (Extensions → Apps Script, same project as step 1)
+
+1. Paste in the latest `Code.gs` and **Deploy → Manage deployments → edit → New version** (URL stays the same).
+2. **Project Settings** (gear) → **Script Properties** → add:
+   - `EBAY_CLIENT_ID` = App ID
+   - `EBAY_CLIENT_SECRET` = Cert ID
+   - `EBAY_RUNAME` = the RuName from A3
+3. Back in the editor, pick **startEbayConnect** in the function dropdown → **Run**. Open the link it prints in the execution log (valid 30 minutes), sign in to eBay as your seller account and **Agree**.
+4. eBay sends you back to the Web App, which saves your refresh token (`EBAY_REFRESH_TOKEN`, good for ~18 months) and runs a first sync. You'll see "eBay connected — N listings updated".
+5. Pick **setupEbayTrigger** → **Run** once. That keeps stats fresh every 6 hours even when the site is closed.
+
+**Using it:** **Inventory → Refresh** syncs eBay first (up to ~90s), then reloads everything. The status reads e.g. `Updated · eBay: 12 listings updated` or `Updated · eBay sync skipped (no token)` — a missing/failed eBay sync never blocks the rest of Refresh. Stats and Actions recommendations use the same numbers. Re-syncing on the same day updates that day's row rather than adding another.
+
+**What gets matched:** a listing syncs when its Platform Posting Queue row is eBay and its **Listing URL** has the eBay item number (`ebay.com/itm/1234567890…`). Rows without one are counted as skipped.
+
+**Checking it:** open `YOUR-WEB-APP-URL?action=ebayStatus` — it shows which settings are present, whether you're connected, when the refresh token expires and when it last synced (never the secrets themselves). When the refresh token expires, or you change scopes, just run **startEbayConnect** again.
+
+Notes: which traffic metrics eBay returns can depend on your seller tier or Store subscription. If you connected before watchers were supported, watchers stay 0 until you re-run **startEbayConnect** once. Never commit secrets to the repo; Script Properties only.
 
 ## 4. Acquire — sourcing intelligence
 

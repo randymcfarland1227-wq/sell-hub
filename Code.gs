@@ -28,8 +28,10 @@
  *                                   in one cold start instead of seven parallel GETs
  *   POST {action:'addMetricEntry', listingId, itemId, platform, impressions, views, watchers, clicks, price}
  *   POST {action:'addMetricEntries', date, rows:[...]}   — the same, in bulk
- *   POST {action:'syncEbayMetrics'} / GET ?action=syncEbayMetrics -> eBay Traffic Report sync
+ *   POST {action:'syncEbayMetrics'} / GET ?action=syncEbayMetrics -> eBay traffic + watchers sync
  *        (Script Properties; see SETUP.md); returns {ok,synced,skipped,errors}; GET also includes metrics[]
+ *   GET  ?action=ebayStatus -> which eBay settings are present, connected?, last sync (no secrets)
+ *   GET  ?code=...&state=... -> eBay OAuth consent callback (started by startEbayConnect() in the editor)
  *   GET  ?action=localDeals / POST {action:'setLocalDeal', itemId, platform, status, buyer, when, where, note}
  *   GET  ?action=platformTrends / POST {action:'setPlatformTrends', date, platform, rows:[{term, searches, searchDelta, url}]}
  *   POST {action:'addAcquireItem', brand, itemType, size, color, condition, targetPrice, bestPlatform, priority, notes} -> the new row
@@ -113,6 +115,10 @@ function doGet(e) {
   if (action === 'debugRows') return jsonOut(debugRows(e.parameter.sheet, Number(e.parameter.start) || 1, Number(e.parameter.n) || 20));
   if (action === 'stocking') return jsonOut(getStocking());
   if (action === 'listingQuestions') return jsonOut(getListingQuestions(e.parameter.itemId));
+  if (action === 'ebayStatus') return jsonOut(getEbayStatus());
+  // eBay's consent redirect: the RuName's accept URL is this Web App URL, and
+  // eBay appends ?code=...&state=... (no action param).
+  if (!action && e.parameter.code && e.parameter.state) return handleEbayOAuthCallback_(e.parameter);
   if (action === 'syncEbayMetrics') {
     var syncResult = syncEbayMetrics();
     return jsonOut({ sync: syncResult, metrics: getMetrics() });
@@ -1093,13 +1099,21 @@ function getItemActions() {
 }
 
 // ---------------------------------------------------------------------
-// Optional: eBay live stats via Sell Analytics traffic_report.
-// Prefers refresh-token OAuth (EBAY_CLIENT_ID + EBAY_CLIENT_SECRET +
-// EBAY_REFRESH_TOKEN) so access tokens stay fresh; falls back to a
-// short-lived EBAY_OAUTH_TOKEN alone. See SETUP.md "Optional: eBay live
-// stats". Run setupEbayTrigger() once to install a 6-hour timer; Inventory
-// Refresh also POSTs action:syncEbayMetrics before reloading metrics.
+// Optional: eBay live stats.
+//   - Views / impressions / clicks: Sell Analytics traffic_report (last 30 days)
+//   - Watchers + current price: Trading API GetMyeBaySelling (active listings)
+// Credentials live only in Script Properties: EBAY_CLIENT_ID, EBAY_CLIENT_SECRET,
+// EBAY_RUNAME, then EBAY_REFRESH_TOKEN is filled in by the connect flow below
+// (run startEbayConnect() from the editor, open the logged link, approve).
+// Access tokens are refreshed and cached automatically. See SETUP.md step 3.
+// Run setupEbayTrigger() once to install a 6-hour timer; Inventory Refresh
+// also POSTs action:syncEbayMetrics before reloading metrics.
 // ---------------------------------------------------------------------
+
+var EBAY_SCOPES = [
+  'https://api.ebay.com/oauth/api_scope',
+  'https://api.ebay.com/oauth/api_scope/sell.analytics.readonly',
+];
 
 function setupEbayTrigger() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
@@ -1108,31 +1122,112 @@ function setupEbayTrigger() {
   ScriptApp.newTrigger('syncEbayMetrics').timeBased().everyHours(6).create();
 }
 
-/** Pull a usable access token; cache refreshed tokens in EBAY_OAUTH_TOKEN. */
-function getEbayAccessToken_() {
+/**
+ * Run from the Apps Script editor (Run menu). Logs a one-time eBay sign-in
+ * link. Only the script owner can run editor functions, and the callback only
+ * accepts the single-use state minted here, so a stranger hitting the public
+ * Web App URL can't swap in their own eBay account.
+ */
+function startEbayConnect() {
   var props = PropertiesService.getScriptProperties();
   var clientId = props.getProperty('EBAY_CLIENT_ID');
-  var clientSecret = props.getProperty('EBAY_CLIENT_SECRET');
+  var ruName = props.getProperty('EBAY_RUNAME');
+  if (!clientId || !ruName) {
+    throw new Error('Set EBAY_CLIENT_ID, EBAY_CLIENT_SECRET and EBAY_RUNAME in Project Settings → Script Properties first.');
+  }
+  var state = Utilities.getUuid();
+  props.setProperty('EBAY_OAUTH_STATE', state + '|' + (Date.now() + 30 * 60 * 1000));
+  var url = 'https://auth.ebay.com/oauth2/authorize'
+    + '?client_id=' + encodeURIComponent(clientId)
+    + '&redirect_uri=' + encodeURIComponent(ruName)
+    + '&response_type=code'
+    + '&scope=' + encodeURIComponent(EBAY_SCOPES.join(' '))
+    + '&state=' + encodeURIComponent(state);
+  Logger.log('Open this link within 30 minutes and approve access:\n' + url);
+  return url;
+}
+
+/** eBay's redirect back after consent lands here (from doGet). */
+function handleEbayOAuthCallback_(params) {
+  var props = PropertiesService.getScriptProperties();
+  var saved = String(props.getProperty('EBAY_OAUTH_STATE') || '').split('|');
+  var msg;
+  if (!saved[0] || saved[0] !== params.state || Date.now() > Number(saved[1] || 0)) {
+    msg = 'This sign-in link is expired or was not started from the Apps Script editor. Run startEbayConnect() again and use the new link.';
+    return ebayCallbackPage_(false, msg);
+  }
+  props.deleteProperty('EBAY_OAUTH_STATE');
+  var resp = UrlFetchApp.fetch('https://api.ebay.com/identity/v1/oauth2/token', {
+    method: 'post',
+    contentType: 'application/x-www-form-urlencoded',
+    headers: { Authorization: 'Basic ' + ebayBasicAuth_() },
+    payload: {
+      grant_type: 'authorization_code',
+      code: params.code,
+      redirect_uri: props.getProperty('EBAY_RUNAME'),
+    },
+    muteHttpExceptions: true,
+  });
+  var data = {};
+  try { data = JSON.parse(resp.getContentText()); } catch (err) { /* reported below */ }
+  if (resp.getResponseCode() !== 200 || !data.refresh_token) {
+    msg = 'eBay rejected the code (HTTP ' + resp.getResponseCode() + '): '
+      + String(data.error_description || data.error || resp.getContentText()).slice(0, 300);
+    return ebayCallbackPage_(false, msg);
+  }
+  props.setProperties({
+    EBAY_REFRESH_TOKEN: data.refresh_token,
+    EBAY_REFRESH_TOKEN_EXPIRES: String(Date.now() + Number(data.refresh_token_expires_in || 0) * 1000),
+    EBAY_GRANTED_SCOPES: EBAY_SCOPES.join(' '),
+    EBAY_OAUTH_TOKEN: data.access_token || '',
+    EBAY_OAUTH_TOKEN_EXPIRES: String(Date.now() + Number(data.expires_in || 0) * 1000),
+  });
+  var sync = syncEbayMetrics();
+  msg = 'eBay is connected. First sync: ' + sync.synced + ' listing' + (sync.synced === 1 ? '' : 's') + ' updated'
+    + (sync.errors.length ? ' (' + sync.errors.join('; ') + ')' : '') + '. You can close this tab and hit Refresh on the site.';
+  return ebayCallbackPage_(true, msg);
+}
+
+function ebayCallbackPage_(ok, msg) {
+  var safe = String(msg).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return HtmlService.createHtmlOutput(
+    '<div style="font:16px/1.5 system-ui,sans-serif;max-width:560px;margin:48px auto;padding:0 16px">'
+    + '<h2>' + (ok ? 'eBay connected' : 'eBay connection failed') + '</h2><p>' + safe + '</p></div>'
+  ).setTitle('eBay connection').addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
+function ebayBasicAuth_() {
+  var props = PropertiesService.getScriptProperties();
+  return Utilities.base64Encode(props.getProperty('EBAY_CLIENT_ID') + ':' + props.getProperty('EBAY_CLIENT_SECRET'));
+}
+
+/** Cached access token while it has 5+ minutes left; otherwise refresh it. */
+function getEbayAccessToken_() {
+  var props = PropertiesService.getScriptProperties();
+  var cached = props.getProperty('EBAY_OAUTH_TOKEN');
+  var expires = Number(props.getProperty('EBAY_OAUTH_TOKEN_EXPIRES') || 0);
+  if (cached && expires - Date.now() > 5 * 60 * 1000) return cached;
+
   var refreshToken = props.getProperty('EBAY_REFRESH_TOKEN');
-  if (clientId && clientSecret && refreshToken) {
+  if (props.getProperty('EBAY_CLIENT_ID') && props.getProperty('EBAY_CLIENT_SECRET') && refreshToken) {
     try {
-      var basic = Utilities.base64Encode(clientId + ':' + clientSecret);
-      var scope = 'https://api.ebay.com/oauth/api_scope/sell.analytics.readonly';
+      // A refresh may only ask for scopes the user consented to; older setups
+      // consented to analytics alone.
+      var scope = props.getProperty('EBAY_GRANTED_SCOPES') || 'https://api.ebay.com/oauth/api_scope/sell.analytics.readonly';
       var resp = UrlFetchApp.fetch('https://api.ebay.com/identity/v1/oauth2/token', {
         method: 'post',
         contentType: 'application/x-www-form-urlencoded',
-        headers: { Authorization: 'Basic ' + basic },
-        payload: {
-          grant_type: 'refresh_token',
-          refresh_token: refreshToken,
-          scope: scope,
-        },
+        headers: { Authorization: 'Basic ' + ebayBasicAuth_() },
+        payload: { grant_type: 'refresh_token', refresh_token: refreshToken, scope: scope },
         muteHttpExceptions: true,
       });
       if (resp.getResponseCode() === 200) {
         var data = JSON.parse(resp.getContentText());
         if (data.access_token) {
-          props.setProperty('EBAY_OAUTH_TOKEN', data.access_token);
+          props.setProperties({
+            EBAY_OAUTH_TOKEN: data.access_token,
+            EBAY_OAUTH_TOKEN_EXPIRES: String(Date.now() + Number(data.expires_in || 7200) * 1000),
+          });
           return data.access_token;
         }
       }
@@ -1140,7 +1235,25 @@ function getEbayAccessToken_() {
       // Fall through to any cached access token below.
     }
   }
-  return props.getProperty('EBAY_OAUTH_TOKEN') || '';
+  // Manually pasted short-lived token (no expiry recorded) — still worth a try.
+  return cached && !expires ? cached : '';
+}
+
+/** GET ?action=ebayStatus — what's configured, without revealing any secret. */
+function getEbayStatus() {
+  var props = PropertiesService.getScriptProperties();
+  var has = function (k) { return !!props.getProperty(k); };
+  var refreshExpires = Number(props.getProperty('EBAY_REFRESH_TOKEN_EXPIRES') || 0);
+  return {
+    clientId: has('EBAY_CLIENT_ID'),
+    clientSecret: has('EBAY_CLIENT_SECRET'),
+    ruName: has('EBAY_RUNAME'),
+    connected: has('EBAY_REFRESH_TOKEN'),
+    scopes: props.getProperty('EBAY_GRANTED_SCOPES') || '',
+    refreshTokenExpires: refreshExpires ? new Date(refreshExpires).toISOString() : '',
+    lastSync: props.getProperty('EBAY_LAST_SYNC') || '',
+    trigger: ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'syncEbayMetrics'; }),
+  };
 }
 
 /** eBay listing id from a live URL (or a bare numeric id). Hub ids like CLO-001-EBAY are not valid. */
@@ -1168,7 +1281,85 @@ function ebayYmdPacific_(d) {
 }
 
 /**
- * Sync Active eBay queue rows into Metrics via traffic_report.
+ * Watchers and current price for every active listing, keyed by eBay item id.
+ * Trading API accepts the same OAuth user token via X-EBAY-API-IAF-TOKEN.
+ */
+function fetchEbayActiveListings_(token, errors) {
+  var out = {};
+  var ns = XmlService.getNamespace('urn:ebay:apis:eBLBaseComponents');
+  for (var page = 1, pages = 1; page <= pages && page <= 10; page++) {
+    var xml = '<?xml version="1.0" encoding="utf-8"?>'
+      + '<GetMyeBaySellingRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
+      + '<ActiveList><Include>true</Include><Pagination><EntriesPerPage>200</EntriesPerPage>'
+      + '<PageNumber>' + page + '</PageNumber></Pagination></ActiveList>'
+      + '<DetailLevel>ReturnAll</DetailLevel></GetMyeBaySellingRequest>';
+    try {
+      var resp = UrlFetchApp.fetch('https://api.ebay.com/ws/api.dll', {
+        method: 'post',
+        contentType: 'text/xml',
+        headers: {
+          'X-EBAY-API-IAF-TOKEN': token,
+          'X-EBAY-API-CALL-NAME': 'GetMyeBaySelling',
+          'X-EBAY-API-SITEID': '0',
+          'X-EBAY-API-COMPATIBILITY-LEVEL': '1193',
+        },
+        payload: xml,
+        muteHttpExceptions: true,
+      });
+      var root = XmlService.parse(resp.getContentText()).getRootElement();
+      var ack = root.getChildText('Ack', ns);
+      if (ack !== 'Success' && ack !== 'Warning') {
+        var errEl = root.getChild('Errors', ns);
+        errors.push('watchers: ' + (errEl ? errEl.getChildText('LongMessage', ns) : 'HTTP ' + resp.getResponseCode()));
+        return out;
+      }
+      var active = root.getChild('ActiveList', ns);
+      if (!active) return out;
+      var pag = active.getChild('PaginationResult', ns);
+      if (pag) pages = Number(pag.getChildText('TotalNumberOfPages', ns)) || 1;
+      var arr = active.getChild('ItemArray', ns);
+      (arr ? arr.getChildren('Item', ns) : []).forEach(function (item) {
+        var status = item.getChild('SellingStatus', ns);
+        var price = status ? Number(status.getChildText('CurrentPrice', ns)) : NaN;
+        out[item.getChildText('ItemID', ns)] = {
+          watchers: Number(item.getChildText('WatchCount', ns)) || 0,
+          price: isNaN(price) ? '' : price,
+        };
+      });
+    } catch (err) {
+      errors.push('watchers: ' + String(err && err.message ? err.message : err));
+      return out;
+    }
+  }
+  return out;
+}
+
+/**
+ * Today's eBay-API snapshot per listing, written into Metrics. Re-running on
+ * the same day overwrites that day's ebay-api rows instead of piling up
+ * duplicates (the site reads the latest snapshot anyway).
+ */
+function writeEbayMetricRows_(rows) {
+  var sheet = getMetricsSheet();
+  var today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  var data = sheet.getDataRange().getValues();
+  var rowIndexByListing = {};
+  for (var r = 1; r < data.length; r++) {
+    if (formatDate(data[r][0]) === today && data[r][9] === 'ebay-api') rowIndexByListing[data[r][1]] = r + 1;
+  }
+  var appends = [];
+  rows.forEach(function (m) {
+    var values = [today, m.listingId, m.itemId, 'eBay', m.impressions, m.views, m.watchers, m.clicks, m.price, 'ebay-api'];
+    var at = rowIndexByListing[m.listingId];
+    if (at) sheet.getRange(at, 1, 1, values.length).setValues([values]);
+    else appends.push(values);
+  });
+  if (appends.length) sheet.getRange(sheet.getLastRow() + 1, 1, appends.length, appends[0].length).setValues(appends);
+  invalidateBootCache();
+}
+
+/**
+ * Sync Active eBay queue rows into Metrics.
  * Returns { ok, synced, skipped, errors: [...] } for the client / Refresh UI.
  */
 function syncEbayMetrics() {
@@ -1179,7 +1370,7 @@ function syncEbayMetrics() {
       ok: false,
       synced: 0,
       skipped: 0,
-      errors: ['no token — set EBAY_CLIENT_ID, EBAY_CLIENT_SECRET, EBAY_REFRESH_TOKEN (or EBAY_OAUTH_TOKEN)'],
+      errors: ['no token — set EBAY_CLIENT_ID, EBAY_CLIENT_SECRET, EBAY_RUNAME and run startEbayConnect() (see SETUP.md)'],
     };
   }
 
@@ -1219,7 +1410,7 @@ function syncEbayMetrics() {
   var dateRange = '[' + ebayYmdPacific_(start) + '..' + ebayYmdPacific_(end) + ']';
   var metricList = 'LISTING_IMPRESSION_TOTAL,LISTING_VIEWS_TOTAL,LISTING_VIEWS_SOURCE_DIRECT,CLICK_THROUGH_RATE';
   var batchSize = 100;
-  var metricRows = [];
+  var traffic = {};
 
   for (var i = 0; i < ids.length; i += batchSize) {
     var batch = ids.slice(i, i + batchSize);
@@ -1250,8 +1441,7 @@ function syncEbayMetrics() {
       (report.records || []).forEach(function (rec) {
         var dimCell = (rec.dimensionValues && rec.dimensionValues[0]) || null;
         var ebayId = String(ebayPrimitive_(dimCell) || '');
-        var row = byEbayId[ebayId];
-        if (!row) return;
+        if (!byEbayId[ebayId]) return;
 
         var values = rec.metricValues || [];
         var map = {};
@@ -1269,28 +1459,38 @@ function syncEbayMetrics() {
             ? Math.round(ctr * impressions)
             : Math.round(impressions * ctr / 100);
         }
-
-        metricRows.push({
-          listingId: row.listingId,
-          itemId: row.itemId,
-          platform: 'eBay',
-          impressions: impressions,
-          views: views,
-          watchers: 0,
-          clicks: clicks,
-          source: 'ebay-api',
-        });
+        traffic[ebayId] = { impressions: impressions, views: views, clicks: clicks };
       });
     } catch (err) {
       errors.push(String(err && err.message ? err.message : err));
     }
   }
 
-  if (metricRows.length) {
-    addMetricEntries({ rows: metricRows, source: 'ebay-api' });
-  } else {
-    invalidateBootCache();
-  }
+  // Watchers need the base api_scope; setups consented before it was added
+  // just keep watchers at 0 until startEbayConnect() is re-run.
+  var scopes = PropertiesService.getScriptProperties().getProperty('EBAY_GRANTED_SCOPES') || '';
+  var active = scopes.split(' ').indexOf('https://api.ebay.com/oauth/api_scope') !== -1
+    ? fetchEbayActiveListings_(token, errors)
+    : {};
+
+  var metricRows = [];
+  ids.forEach(function (ebayId) {
+    var t = traffic[ebayId], a = active[ebayId];
+    if (!t && !a) return;
+    var row = byEbayId[ebayId];
+    metricRows.push({
+      listingId: row.listingId,
+      itemId: row.itemId,
+      impressions: t ? t.impressions : 0,
+      views: t ? t.views : 0,
+      watchers: a ? a.watchers : 0,
+      clicks: t ? t.clicks : 0,
+      price: a ? a.price : '',
+    });
+  });
+
+  if (metricRows.length) writeEbayMetricRows_(metricRows);
+  PropertiesService.getScriptProperties().setProperty('EBAY_LAST_SYNC', new Date().toISOString());
 
   return {
     ok: errors.length === 0,
