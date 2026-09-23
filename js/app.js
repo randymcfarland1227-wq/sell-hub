@@ -3120,6 +3120,64 @@ async function dropPriceForAction(item, newPrice, btn) {
   renderPricingActions();
 }
 
+
+// When a pricing suggestion first shows up on Actions. Sheet fields for
+// metrics / Item Actions / Date listed are date-only (yyyy-MM-dd) and do not
+// record suggestion onset — so we seed the calendar day from the best
+// existing date, then keep a full date+time in localStorage the first time
+// this (item, label) appears so the chip can show both.
+function latestMetricsDateForItem(itemId) {
+  let best = '';
+  latestMetricsByItemPlatform().forEach(m => {
+    if (String(m.itemId) !== String(itemId)) return;
+    const d = String(m.date || '').trim();
+    if (d && d >= best) best = d;
+  });
+  return best;
+}
+function suggestionSeedDate(item, action) {
+  if (action && action.manual) {
+    const set = latestActionOfType(item.itemId, 'Action Set');
+    if (set && set.date) return String(set.date).trim();
+  }
+  return latestMetricsDateForItem(item.itemId) || String(item.dateListed || '').trim() || '';
+}
+function ensureSuggestionAddedAt(itemId, label, seedDateStr) {
+  const key = 'sellHub.paAdded.' + String(itemId) + '.' + String(label || '');
+  try {
+    const existing = localStorage.getItem(key);
+    if (existing) return existing;
+  } catch { /* private mode */ }
+  const seed = String(seedDateStr || '').trim();
+  const today = todayStr();
+  let iso;
+  if (/^\d{4}-\d{2}-\d{2}/.test(seed) && seed.slice(0, 10) !== today) {
+    // Prefer the sheet's calendar day; noon local so the displayed date matches.
+    const day = seed.slice(0, 10);
+    const hasTime = seed.length > 10 && /\d{1,2}:\d{2}/.test(seed);
+    iso = hasTime ? new Date(seed.replace(' ', 'T')).toISOString() : new Date(day + 'T12:00:00').toISOString();
+  } else {
+    iso = new Date().toISOString();
+  }
+  try { localStorage.setItem(key, iso); } catch { /* ignore */ }
+  return iso;
+}
+function formatSuggestionAddedChip(iso) {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const text = d.toLocaleString('en-US', {
+    timeZone: 'America/New_York',
+    month: 'short', day: 'numeric',
+    hour: 'numeric', minute: '2-digit',
+    hour12: true,
+  });
+  return `<span class="pa-added-chip" title="Suggestion added">${escapeHtml(text)}</span>`;
+}
+function suggestionAddedChipHTML(item, action) {
+  const iso = ensureSuggestionAddedAt(item.itemId, action.label, suggestionSeedDate(item, action));
+  return formatSuggestionAddedChip(iso);
+}
+
 // Pricing suggestions are shown in these sections, in this order. Anything
 // that needs a move from you is open; waiting/done sections start collapsed.
 const PRICING_GROUPS = [
@@ -3188,7 +3246,7 @@ function renderPricingActions() {
     <div class="card pricing-card action-row pa-${action.severity}" data-item-id="${escapeHtml(item.itemId)}">
       <div class="ar-title-row">
         <h3>${escapeHtml(title)}</h3>
-        <div class="card-top-actions">${actionStarHTML(item.itemId, [item.brand, item.item].filter(Boolean).join(' ') || item.itemId)}<span class="pa-badge pa-${action.severity}">${escapeHtml(action.label)}${action.manual ? ' · you' : ''}</span>${held ? '<span class="pa-badge pa-price-held" title="Price drops stay off this one until you release it">🔒</span>' : ''}</div>
+        <div class="card-top-actions">${actionStarHTML(item.itemId, [item.brand, item.item].filter(Boolean).join(' ') || item.itemId)}<span class="pa-badge pa-${action.severity}">${escapeHtml(action.label)}${action.manual ? ' · you' : ''}</span>${held ? '<span class="pa-badge pa-price-held" title="Price drops stay off this one until you release it">🔒</span>' : ''}${suggestionAddedChipHTML(item, action)}</div>
       </div>
       <div class="ar-meta-line">${metaBits.join(' · ')}</div>
       ${action.suggestedPrice ? `<div class="pa-callout"><b>Suggest ${fmtMoney(action.suggestedPrice)}</b></div>` : ''}

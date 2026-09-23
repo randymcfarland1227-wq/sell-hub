@@ -921,6 +921,20 @@ details.cat-section:not([open]) { margin-bottom: 14px; }
 .pa-badge { background: var(--cat); }
 .pa-badge.pa-no-data { color: var(--bg); }
 
+.pa-added-chip {
+  font-size: 0.55rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 2px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  color: var(--text-muted);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+}
+#action .pa-added-chip { font-size: .55rem; padding: 2px 7px; }
+
 .pa-callout {
   font-size: 0.82rem;
   color: var(--text);
