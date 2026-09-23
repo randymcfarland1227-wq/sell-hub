@@ -314,6 +314,13 @@ main.wrap,
 }
 .inventory-refresh-status.is-error { color: var(--bad); }
 
+/* List-only controls toggled via [hidden] in syncInventoryToolbar */
+#groupSwitch[hidden],
+#inventory .sort-control[hidden],
+#inventory .inventory-expand[hidden] {
+  display: none !important;
+}
+
 /* ---------- Category chips (list mode) ---------- */
 
 .chip-row {
@@ -399,8 +406,23 @@ main.wrap,
 .zoom-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 .zoom-pct { min-width: 40px; text-align: center; color: var(--text-muted); text-transform: none; letter-spacing: 0; }
 
-.wheel-scroll { overflow-x: auto; overflow-y: visible; padding: 4px 0 8px; }
-.wheel-wrap { position: relative; aspect-ratio: 1; margin: 24px auto 12px; }
+.wheel-scroll {
+  overflow-x: auto;
+  /* overflow-x:auto forces overflow-y to compute to auto (not visible),
+     which clipped the wheel to a ~padding-tall sliver when wrap height was 0.
+     Keep y scrolling off and rely on explicit wrap height from applyZoom. */
+  overflow-y: hidden;
+  padding: 4px 0 8px;
+  min-height: 0;
+}
+.wheel-wrap {
+  position: relative;
+  aspect-ratio: 1;
+  margin: 24px auto 12px;
+  min-width: 200px;
+  min-height: 200px;
+  flex-shrink: 0;
+}
 .wheel-spokes { position: absolute; inset: 0; width: 100%; height: 100%; }
 .spoke-line { stroke: var(--border); stroke-width: 0.5; stroke-dasharray: 1.5 2; }
 
