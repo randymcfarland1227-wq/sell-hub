@@ -48,16 +48,21 @@ This is a one-time setup. The push needs your own GitHub login, so it has to hap
 
 ## 3. Optional: eBay live stats (no eBay account needed to skip this)
 
-Poshmark and Depop have no public API, so their stats are always logged manually from the Stats tab's "Log a stat update" form — that works today with no setup. eBay *can* sync automatically instead, but needs your own developer credentials since eBay doesn't hand out API access per-site:
+Poshmark and Depop have no public metrics API, so their stats stay manual from the Stats tab's "Log a stat update" form. eBay *can* pull live traffic into Metrics (and the Inventory Refresh button does that first), but it needs your own developer credentials — eBay does not hand out API access per-site.
 
-1. Create a free account at **developer.ebay.com** and register an application to get an **App ID** and generate a **User Access Token** (OAuth) with the `sell.analytics` scope. eBay's own docs walk through this — it involves a one-time authorization flow in your eBay seller account.
+**Lasting setup (recommended)** — refresh-token OAuth so access tokens renew themselves:
+
+1. Create a free account at **developer.ebay.com**, register an application (App ID / Cert ID), and complete the one-time user consent flow for a **User refresh token** with scope `https://api.ebay.com/oauth/api_scope/sell.analytics.readonly` (add other sell scopes only if you use them elsewhere).
 2. In the Apps Script editor (Extensions → Apps Script, same project as above): **Project Settings** (gear icon) → **Script Properties** → **Add script property**. Add:
-   - `EBAY_OAUTH_TOKEN` = the access token from step 1.
-3. Back in the editor's **Run** menu, select the `setupEbayTrigger` function and run it once (authorize if prompted). This installs a timer that calls `syncEbayMetrics` every 6 hours from then on — nothing further to click.
-4. **Note on data availability:** eBay's per-listing view/impression numbers depend on your account tier — some data (like detailed traffic reports) may require an eBay Store subscription. `syncEbayMetrics()` in `Code.gs` is written as a starting point against eBay's Traffic Report API; you may need to adjust the response field names once you see what your account actually returns.
-5. OAuth tokens expire — when eBay stops returning data, generate a fresh token and update the Script Property. (A refresh-token flow can be added to `Code.gs` later if this becomes annoying enough to automate.)
+   - `EBAY_CLIENT_ID` = App ID (Client ID)
+   - `EBAY_CLIENT_SECRET` = Cert ID (Client Secret)
+   - `EBAY_REFRESH_TOKEN` = the user refresh token from step 1
+3. Optional short-lived fallback: `EBAY_OAUTH_TOKEN` = a user access token. Used only when the three properties above are missing; it expires in ~2 hours. With the refresh trio set, Code.gs refreshes and caches a fresh access token into `EBAY_OAUTH_TOKEN` automatically.
+4. Back in the editor's **Run** menu, select `setupEbayTrigger` and run it once (authorize if prompted). That installs a timer calling `syncEbayMetrics` every 6 hours.
+5. On the site, **Inventory → Refresh** now best-effort POSTs `syncEbayMetrics` (timeout ~90s), then reloads inventory/metrics. Status shows e.g. `Updated · eBay: 12 listings updated` or `Updated · eBay sync skipped (no token)` — a missing/failed eBay sync never blocks the rest of Refresh.
+6. **Store / tier:** which traffic metrics eBay returns can depend on your seller tier or Store subscription. Watchers are not in the Traffic Report API (left at 0). Poshmark and Depop stay manual.
 
-Until this is set up, log eBay stats manually from the Stats tab — the same form used for Poshmark/Depop.
+Until credentials are set, log eBay stats manually from the Stats tab — same form as Poshmark/Depop. Never commit secrets to the repo; Script Properties only.
 
 ## 4. Acquire — sourcing intelligence
 
