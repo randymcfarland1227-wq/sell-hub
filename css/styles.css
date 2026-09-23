@@ -576,7 +576,7 @@ details.cat-section:not([open]) { margin-bottom: 14px; }
 
 
 .card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 7px; min-width: 0; }
-.card-top-actions { display:flex; align-items:center; gap:7px; flex-shrink:0; }
+.card-top-actions { display:flex; align-items:center; gap:7px; flex-shrink:0; flex-wrap:wrap; justify-content:flex-end; max-width:100%; }
 .action-star { width:31px; height:31px; display:grid; place-items:center; border:1px solid var(--border); border-radius:999px; background:var(--bg-elevated); color:var(--text-faint); font-size:1.08rem; line-height:1; cursor:pointer; }
 .action-star:hover, .action-star.starred { border-color:var(--gold); background:color-mix(in srgb,var(--gold) 15%,var(--bg-elevated)); color:var(--gold-deep); }
 .card h3,
@@ -1484,11 +1484,14 @@ body.acq-drawer-open { overflow: hidden; }
 }
 .ar-title-row {
   display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
-  margin-bottom: 2px; min-width: 0;
+  margin-bottom: 2px; min-width: 0; flex-wrap: wrap;
 }
+/* The chips on the right can outgrow a narrow card. Let them wrap to their own
+   line rather than squeezing the title to nothing — with overflow-wrap:anywhere
+   a squeezed title breaks one letter per line. */
 .ar-title-row h3 {
   font-size: .92rem; line-height: 1.25; margin: 0;
-  flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere;
+  flex: 1 1 60%; min-width: 10ch; overflow-wrap: anywhere;
 }
 .ar-meta-line {
   font-size: .72rem; color: var(--text-faint); line-height: 1.35;
@@ -2304,6 +2307,10 @@ details[open] > summary ~ * { animation: view-in .25s var(--ease); }
 .icon-btn { appearance: none; border: none; background: transparent; color: var(--text-muted); font-size: 1.1rem; cursor: pointer; padding: 4px 8px; }
 @media (max-width: 1100px) {
   .stocking-board { grid-template-columns: repeat(6, minmax(200px, 1fr)); }
+}
+
+.subhead-note {
+  margin: -4px 0 10px; font-size: .74rem; color: var(--text-faint);
 }
 
 /* ---------- Stocking: paste-first intake ---------- */

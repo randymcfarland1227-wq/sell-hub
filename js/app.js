@@ -3306,13 +3306,12 @@ function ensureSuggestionAddedAt(itemId, label, seedDateStr) {
 function formatSuggestionAddedChip(iso) {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return '';
-  const text = d.toLocaleString('en-US', {
-    timeZone: 'America/New_York',
-    month: 'short', day: 'numeric',
-    hour: 'numeric', minute: '2-digit',
-    hour12: true,
-  });
-  return `<span class="pa-added-chip" title="Suggestion added">${escapeHtml(text)}</span>`;
+  const opts = { timeZone: 'America/New_York', month: 'short', day: 'numeric' };
+  // Short on the chip, exact in the tooltip: the date is when the suggestion
+  // first appeared, not when the stats behind it were pulled.
+  const text = d.toLocaleDateString('en-US', opts);
+  const full = d.toLocaleString('en-US', { ...opts, hour: 'numeric', minute: '2-digit', hour12: true });
+  return `<span class="pa-added-chip" title="Suggestion first appeared ${escapeHtml(full)}">Added ${escapeHtml(text)}</span>`;
 }
 function suggestionAddedChipHTML(item, action) {
   const iso = ensureSuggestionAddedAt(item.itemId, action.label, suggestionSeedDate(item, action));
@@ -3344,11 +3343,37 @@ function pricingReasonHTML(reason, limit) {
 }
 function pricingGroupId(label) { return 'pa-group-' + categoryId(label); }
 
+// Says which day's numbers these suggestions were worked out from — the
+// per-card chip is the day the suggestion appeared, which reads as stale.
+function renderPricingStatsNote() {
+  const head = document.getElementById('sec-pricing');
+  if (!head) return;
+  let note = document.getElementById('pricingStatsNote');
+  if (!note) {
+    note = document.createElement('p');
+    note.id = 'pricingStatsNote';
+    note.className = 'subhead-note';
+    head.insertAdjacentElement('afterend', note);
+  }
+  let latest = '';
+  (state.metrics || []).forEach(m => {
+    const d = String(m.date || '').slice(0, 10);
+    if (d && d > latest) latest = d;
+  });
+  const when = latest
+    ? new Date(latest + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+    : '';
+  note.textContent = when
+    ? `Worked out from listing stats through ${when}. The date on a card is when that suggestion first appeared.`
+    : 'The date on a card is when that suggestion first appeared.';
+}
+
 function renderPricingActions() {
   const container = document.getElementById('pricingActions');
   if (!container) return;
   const items = state.inventory.filter(it => !isSold(it));
   setActionSectionVisible('section-pricing', true);
+  renderPricingStatsNote();
   if (!items.length) { container.innerHTML = '<div class="empty-state">No active listings yet.</div>'; return; }
 
   const rows = items.map(it => ({ item: it, action: pricingActionFor(it) }))
