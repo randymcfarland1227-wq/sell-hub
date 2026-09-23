@@ -8,6 +8,7 @@ const state = {
   expandedCats: new Set(),   // category sections open in list view (default: none)
   expandedSizes: new Set(),  // size-band rows open in By size view (default: none)
   expandedRanked: new Set(), // ranked item rows open in By views view (default: none)
+  expandedWheelItems: new Set(), // wheel category drill-down item rows (default: none)
   showCompletedActions: true,
   showSkippedListings: false,
   inventory: [],          // from Listing Hub (read-only, sourced from the Sheet)
@@ -545,6 +546,9 @@ function showCategory(catId) {
   const count = state.inventory.filter(it => categoryMeta(it.category).id === catId).length;
   document.getElementById('catBlurb').textContent = `${count} item${count === 1 ? '' : 's'} in this category`;
 
+  // Fresh entry into a category always starts collapsed; in-session toggles
+  // (show sold, mark sold) keep expand choices via renderCategoryCards alone.
+  state.expandedWheelItems = new Set();
   renderCategoryCards(cat);
 }
 
@@ -903,7 +907,34 @@ function renderCategoryCards(cat) {
   if (!state.showSold) items = items.filter(it => !isSold(it));
   items = items.slice().sort((a, b) => (a.item || a.brand || '').localeCompare(b.item || b.brand || ''));
 
-  grid.innerHTML = items.length ? items.map(it => itemCardHTML(it, cat)).join('') : '<div class="empty-state">Nothing here yet.</div>';
+  if (!items.length) {
+    grid.className = 'card-grid';
+    grid.innerHTML = '<div class="empty-state">Nothing here yet.</div>';
+    return;
+  }
+
+  // Same compact header pattern as By views: short name (+ size when present);
+  // full card only after expand. Uses ranked-row styles for visual consistency.
+  grid.className = 'ranked-list';
+  grid.innerHTML = items.map(it => {
+    const id = String(it.itemId);
+    const open = state.expandedWheelItems.has(id) ? ' open' : '';
+    const label = itemShortName(it) + (it.size ? ` · ${it.size}` : '');
+    return `
+    <details class="ranked-row" data-wheel-id="${escapeHtml(id)}"${open}>
+      <summary class="ranked-row-head">
+        <span class="ranked-row-title">${escapeHtml(label)}</span>
+      </summary>
+      <div class="card-grid ranked-card">${itemCardHTML(it, cat)}</div>
+    </details>`;
+  }).join('');
+  grid.querySelectorAll('details.ranked-row').forEach(row => {
+    row.addEventListener('toggle', () => {
+      const id = row.dataset.wheelId;
+      if (!id) return;
+      if (row.open) state.expandedWheelItems.add(id); else state.expandedWheelItems.delete(id);
+    });
+  });
   wireItemCards(grid, () => renderCategoryCards(cat));
 }
 
@@ -3076,6 +3107,7 @@ state.listGroup = localGet('sellHub.listGroup', 'category');
 state.expandedCats = new Set();
 state.expandedSizes = new Set();
 state.expandedRanked = new Set();
+state.expandedWheelItems = new Set();
 document.querySelectorAll('#groupSwitch button').forEach(b => b.classList.toggle('active', b.dataset.group === state.listGroup));
 
 renderWheel();

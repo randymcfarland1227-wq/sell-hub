@@ -1956,7 +1956,7 @@ details[open] > summary ~ * { animation: view-in .25s var(--ease); }
 .size-pick-all { padding: 5px 10px; font-size: .72rem; flex: none; }
 .size-row > .card-grid { padding: 0 14px 14px; }
 
-/* Ranked / Most views — collapsed header rows */
+/* Ranked / Most views + wheel category drill-down — collapsed header rows */
 .ranked-list { display: grid; gap: 8px; margin-top: 8px; }
 .ranked-row { border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-card); box-shadow: var(--shadow-soft); max-width: 100%; min-width: 0; }
 .ranked-row-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; cursor: pointer; list-style: none; width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; }
