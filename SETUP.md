@@ -127,3 +127,27 @@ Add or change one from Actions → Local deals; clearing a deal deletes the row 
 ## 8. Holding a price
 
 When you know a listing is priced right and just needs time — lots of interest, no rush — hit **Hold this price** on its pricing card. Suggestions that would lower the price ("Try a price drop", "Refresh listing") stop for that item and it moves to **On hold** with your reason; offers and visibility suggestions keep coming, since neither costs you anything off the asking price. **Release price** puts it back on automatic. Both are logged to Item Actions, so the Sheet keeps the history.
+
+
+## 9. Stocking (intake → drafts → ready to post)
+
+Stocking is the front door for new inventory. It writes **only** into the existing workbook `selling_inventory_updated` (never a new spreadsheet):
+
+- **Stocking** tab — stage board (`needs_analysis` → `details_needed` → `ready_for_drafts` → `ready_to_post` → `done`)
+- **Clothing Sell Inventory** / **Non Clothing Sell Inventory** — new rows with Status `Identify`
+- **Listing Hub** — formula row linked to the source row
+- **Listing Questions** — reused for the details-needed Q&A (answered from the Stocking page)
+- **Listing Descriptions** / **Platform Posting Queue** — draft upserts (usually filled by Grok Bot)
+- **Item Actions** — audit log
+- Optional row on **Adding to Selling Inventory**
+
+### Deploy Apps Script
+
+1. Open the spreadsheet → **Extensions → Apps Script**.
+2. Replace `Code.gs` with this repo’s `Code.gs` (or paste from `sell-hub-code-paste.html`).
+3. **Deploy → Manage deployments → Edit (pencil) → New version → Deploy**. URL stays the same; `js/config.js` needs no change if it’s already set.
+4. Optional: **Project Settings → Script properties** → add `STOCKING_WEBHOOK_URL` = your Grok Bot webhook. Apps Script best-effort `UrlFetchApp` pings it on `needs_analysis` and `ready_for_drafts`. Analysis/drafts are **not** generated inside Apps Script.
+
+### Site
+
+After GitHub Pages picks up `main`, open **Stocking** in the nav. Cache-bust query is `?v=20260922-stk1`.

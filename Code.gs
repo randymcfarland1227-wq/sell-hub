@@ -51,6 +51,23 @@
  *   POST {action:'setListingStatus', itemId, sourceTab, status} -> writes Status back into
  *        the source tab (same row-lookup as markSold), e.g. "Photograph" -> "Listed"
  *
+ *   GET  ?action=stocking      -> [{stockingId, itemId, stage, created, updated, product, brand,
+ *                                   model, version, notes, sourceTab, analysisSummary, error}]
+ *   GET  ?action=listingQuestions&itemId=CLO-001 -> questions rows for one item (or all if omitted)
+ *   POST {action:'createStocking', product, brand, model, version, notes, category, clothingType,
+ *        size, condition, platforms, listPrice, estValue, floorPrice, isClothing, addIntakeRow}
+ *        -> creates inventory row (Status=Identify) + Listing Hub formulas + Stocking row
+ *        (stage needs_analysis) + optional Adding to Selling Inventory row + Item Action log;
+ *        best-effort UrlFetchApp ping to Script Property STOCKING_WEBHOOK_URL
+ *   POST {action:'updateStocking', stockingId|itemId, stage, product, brand, model, version, notes,
+ *        analysisSummary, error, answers:[{row|question, answer}]} -> updates Stocking + optional
+ *        Listing Questions answers; stage ready_for_drafts also pings the webhook
+ *   POST {action:'upsertDescription', itemId, platform, listingId, suggestedTitle, description,
+ *        listPrice, floorPrice, listingStatus, ...} -> upsert Listing Descriptions by Item ID + Platform
+ *   POST {action:'upsertQueue', itemId, platform, listingId, status, suggestedTitle, listPrice, ...}
+ *        -> upsert Platform Posting Queue (same shape as setListingLink, status defaults Draft)
+ *   POST {action:'createInventoryItem', ...} -> shared helper used by createStocking
+ *
  * Poshmark's side of market data (Acquire Watchlist comps + Market Trends tab)
  * refreshes itself daily via a time trigger — run setupMarketDataTrigger() once
  * from this editor's Run menu to turn it on. eBay's side is NOT automatic (eBay
@@ -88,6 +105,8 @@ function doGet(e) {
   if (action === 'debugHeaders') return jsonOut(debugHeaders());
   if (action === 'debugFormulas') return jsonOut(debugFormulas(e.parameter.sheet, Number(e.parameter.start) || 1, Number(e.parameter.n) || 5));
   if (action === 'debugRows') return jsonOut(debugRows(e.parameter.sheet, Number(e.parameter.start) || 1, Number(e.parameter.n) || 20));
+  if (action === 'stocking') return jsonOut(getStocking());
+  if (action === 'listingQuestions') return jsonOut(getListingQuestions(e.parameter.itemId));
   return jsonOut({ error: 'unknown action' });
 }
 
@@ -179,6 +198,12 @@ function doPost(e) {
   if (action === 'updateItem') return jsonOut(updateItem(body));
   if (action === 'setQueueStatus') return jsonOut(setQueueStatus(body));
   if (action === 'debugRestoreRow') return jsonOut(debugRestoreRow(body.sheet, body.row, body.values));
+  if (action === 'createStocking') return jsonOut(createStocking(body));
+  if (action === 'updateStocking') return jsonOut(updateStocking(body));
+  if (action === 'upsertDescription') return jsonOut(upsertDescription(body));
+  if (action === 'upsertQueue') return jsonOut(upsertQueue(body));
+  if (action === 'createInventoryItem') return jsonOut(createInventoryItem(body));
+  if (action === 'saveListingAnswers') return jsonOut(saveListingAnswers(body));
 
   return jsonOut({ error: 'unknown action' });
 }
@@ -2403,4 +2428,603 @@ function addMetricEntries(body) {
   sheet.getRange(sheet.getLastRow() + 1, 1, values.length, values[0].length).setValues(values);
   invalidateBootCache();
   return { ok: true, added: values.length, date: date };
+}
+
+
+
+// ---------------------------------------------------------------------
+// Stocking — intake front door into the existing sell pipeline.
+// Data lives ONLY in this workbook (getActiveSpreadsheet). Grok Bot does
+// analysis/drafts externally; Apps Script never calls AI. Set Script
+// Property STOCKING_WEBHOOK_URL for a best-effort ping on
+// needs_analysis / ready_for_drafts.
+// ---------------------------------------------------------------------
+
+var STOCKING_SHEET_NAME = 'Stocking';
+var STOCKING_HEADERS = [
+  'Stocking ID', 'Item ID', 'Stage', 'Created', 'Updated', 'Product', 'Brand', 'Model',
+  'Version', 'Notes', 'Source Tab', 'Analysis Summary', 'Error'
+];
+var STOCKING_STAGES = {
+  NEEDS_ANALYSIS: 'needs_analysis',
+  DETAILS_NEEDED: 'details_needed',
+  READY_FOR_DRAFTS: 'ready_for_drafts',
+  READY_TO_POST: 'ready_to_post',
+  DONE: 'done'
+};
+var CLOTHING_INVENTORY_SHEET = 'Clothing Sell Inventory';
+var NON_CLOTHING_INVENTORY_SHEET = 'Non Clothing Sell Inventory';
+var LISTING_QUESTIONS_ALIASES = ['Listing Questions', 'Listing Questions'];
+var ADDING_INVENTORY_ALIASES = ['Adding to Selling Inventory', 'Adding to Selling Inventory'];
+
+function findSheetByAliases_(aliases) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var i, s, sheets, want;
+  for (i = 0; i < aliases.length; i++) {
+    s = ss.getSheetByName(aliases[i]);
+    if (s) return s;
+  }
+  want = aliases.map(function (a) { return String(a).toLowerCase(); });
+  sheets = ss.getSheets();
+  for (i = 0; i < sheets.length; i++) {
+    if (want.indexOf(String(sheets[i].getName()).toLowerCase()) !== -1) return sheets[i];
+  }
+  return null;
+}
+
+function getStockingSheet() {
+  return getOrCreateSheet(STOCKING_SHEET_NAME, STOCKING_HEADERS);
+}
+
+function getListingQuestionsSheet_() {
+  return findSheetByAliases_(LISTING_QUESTIONS_ALIASES);
+}
+
+function getAddingInventorySheet_() {
+  return findSheetByAliases_(ADDING_INVENTORY_ALIASES);
+}
+
+function nowStamp_() {
+  return Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss');
+}
+
+function nextPrefixedId_(prefix) {
+  var hub = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(LISTING_HUB_SHEET);
+  var max = 0;
+  var t, i, id, m, records;
+  if (hub) {
+    t = readTable(hub, ['Item ID']);
+    for (i = 0; i < t.rows.length; i++) {
+      id = String(val(t.rows[i], t.colMap, 'Item ID') || '');
+      m = id.match(new RegExp('^' + prefix + '-(\\d+)$', 'i'));
+      if (m) max = Math.max(max, Number(m[1]));
+    }
+  }
+  records = readRecords(getStockingSheet());
+  records.forEach(function (r) {
+    id = String(r['Item ID'] || '');
+    m = id.match(new RegExp('^' + prefix + '-(\\d+)$', 'i'));
+    if (m) max = Math.max(max, Number(m[1]));
+  });
+  return prefix + '-' + ('000' + (max + 1)).slice(-3);
+}
+
+function nextStockingId_() {
+  var records = readRecords(getStockingSheet());
+  var max = 0;
+  records.forEach(function (r) {
+    var m = String(r['Stocking ID'] || '').match(/^STK-(\d+)$/i);
+    if (m) max = Math.max(max, Number(m[1]));
+  });
+  return 'STK-' + ('000' + (max + 1)).slice(-3);
+}
+
+function pingStockingWebhook_(eventName, payload) {
+  try {
+    var url = PropertiesService.getScriptProperties().getProperty('STOCKING_WEBHOOK_URL');
+    if (!url) return { skipped: true, reason: 'STOCKING_WEBHOOK_URL not set' };
+    UrlFetchApp.fetch(url, {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify({
+        event: eventName,
+        spreadsheetId: SpreadsheetApp.getActiveSpreadsheet().getId(),
+        at: new Date().toISOString(),
+        payload: payload || {}
+      }),
+      muteHttpExceptions: true,
+      followRedirects: true
+    });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+function getStocking() {
+  return readRecords(getStockingSheet()).filter(function (r) {
+    return r['Stocking ID'] || r['Item ID'];
+  }).map(function (r) {
+    return {
+      stockingId: String(r['Stocking ID'] || ''),
+      itemId: String(r['Item ID'] || ''),
+      stage: String(r['Stage'] || ''),
+      created: String(r['Created'] || ''),
+      updated: String(r['Updated'] || ''),
+      product: String(r['Product'] || ''),
+      brand: String(r['Brand'] || ''),
+      model: String(r['Model'] || ''),
+      version: String(r['Version'] || ''),
+      notes: String(r['Notes'] || ''),
+      sourceTab: String(r['Source Tab'] || ''),
+      analysisSummary: String(r['Analysis Summary'] || ''),
+      error: String(r['Error'] || '')
+    };
+  });
+}
+
+function findStockingRow_(stockingId, itemId) {
+  var sheet = getStockingSheet();
+  var data = sheet.getDataRange().getValues();
+  if (data.length < 2) return null;
+  var headers = data[0].map(function (h) { return String(h).trim().toLowerCase(); });
+  var idCol = headers.indexOf('stocking id');
+  var itemCol = headers.indexOf('item id');
+  var r;
+  for (r = 1; r < data.length; r++) {
+    if (stockingId && idCol !== -1 && String(data[r][idCol]) === String(stockingId)) {
+      return { sheet: sheet, row: r + 1, headers: headers, values: data[r] };
+    }
+    if (itemId && itemCol !== -1 && String(data[r][itemCol]) === String(itemId)) {
+      return { sheet: sheet, row: r + 1, headers: headers, values: data[r] };
+    }
+  }
+  return null;
+}
+
+function setStockingCell_(located, headerName, value) {
+  var col = located.headers.indexOf(String(headerName).toLowerCase());
+  if (col === -1) return;
+  located.sheet.getRange(located.row, col + 1).setValue(value);
+}
+
+function appendInventoryRow_(isClothing, body) {
+  var tabName = isClothing ? CLOTHING_INVENTORY_SHEET : NON_CLOTHING_INVENTORY_SHEET;
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(tabName);
+  if (!sheet) return { error: 'Could not find "' + tabName + '" tab.' };
+  var header = findHeaderRow(sheet, ['Status']);
+  if (!header) return { error: 'Could not find Status header in ' + tabName + '.' };
+  var headerRow = header.rowIndex + 1;
+  var lastCol = sheet.getLastColumn();
+  var headers = sheet.getRange(headerRow, 1, 1, lastCol).getValues()[0];
+  var colMap = buildColMap(headers);
+  var targetRow = Math.max(sheet.getLastRow() + 1, headerRow + 1);
+  var rowVals = [];
+  var c;
+  for (c = 0; c < lastCol; c++) rowVals.push('');
+  function set(name, value) {
+    var idx = colIndex(colMap, name);
+    if (idx !== -1) rowVals[idx] = value;
+  }
+  set('Status', 'Identify');
+  set('Category', body.category || (isClothing ? 'Clothing' : ''));
+  if (isClothing) {
+    set('Clothing Type', body.clothingType || body.type || '');
+    set('Brand', body.brand || '');
+    set('Size', body.size || '');
+    set('Item # (if possible)', body.itemNumber || body.model || '');
+  }
+  set('Item', body.product || body.item || '');
+  set('Condition', body.condition || '');
+  set('Est. value', body.estValue || '');
+  set('List price', body.listPrice || '');
+  set('Floor price', body.floorPrice || '');
+  set('Platform / venue', body.platforms || body.platform || '');
+  sheet.getRange(targetRow, 1, 1, lastCol).setValues([rowVals]);
+  return { tabName: tabName, row: targetRow, sheet: sheet };
+}
+
+function hubIfFormula_(tabName, colLetter, sourceRow) {
+  return "=IF('" + tabName + "'!" + colLetter + sourceRow + '="","",\'' + tabName + "'!" + colLetter + sourceRow + ')';
+}
+
+function buildHubRowValues_(itemId, tabName, sourceRow, hubRow) {
+  var row = [];
+  var i;
+  for (i = 0; i < 25; i++) row.push('');
+  row[0] = itemId;
+  row[1] = tabName;
+  row[2] = sourceRow;
+  var isClothing = tabName === CLOTHING_INVENTORY_SHEET;
+  if (isClothing) {
+    [[3,'A'],[4,'B'],[5,'C'],[6,'D'],[7,'E'],[8,'F'],[9,'G'],[10,'H'],[11,'I'],[12,'J'],[13,'K'],[14,'L'],[17,'M'],[18,'N'],[19,'O'],[20,'P']].forEach(function (pair) {
+      row[pair[0]] = hubIfFormula_(tabName, pair[1], sourceRow);
+    });
+  } else {
+    row[3] = hubIfFormula_(tabName, 'A', sourceRow);
+    row[4] = hubIfFormula_(tabName, 'B', sourceRow);
+    row[8] = hubIfFormula_(tabName, 'C', sourceRow);
+    row[10] = hubIfFormula_(tabName, 'D', sourceRow);
+    row[11] = hubIfFormula_(tabName, 'E', sourceRow);
+    row[12] = hubIfFormula_(tabName, 'F', sourceRow);
+    row[13] = hubIfFormula_(tabName, 'G', sourceRow);
+    row[14] = hubIfFormula_(tabName, 'H', sourceRow);
+    row[17] = hubIfFormula_(tabName, 'I', sourceRow);
+    row[18] = hubIfFormula_(tabName, 'J', sourceRow);
+    row[19] = hubIfFormula_(tabName, 'K', sourceRow);
+    row[20] = hubIfFormula_(tabName, 'L', sourceRow);
+  }
+  row[15] = "=COUNTIF('Listing Descriptions'!$B$2:$B$500,A" + hubRow + ')';
+  row[16] = "=COUNTIFS('Listing Descriptions'!$B$2:$B$500,A" + hubRow +
+    ",'Listing Descriptions'!$T$2:$T$500,\"Listed\",'Listing Descriptions'!$V$2:$V$500,\"<>\")";
+  row[22] = '=IF(OR(LEFT(V' + hubRow + ',7)="REVIEW:",COUNTIFS(\'Listing Descriptions\'!$B$2:$B$500,A' + hubRow +
+    ',\'Listing Descriptions\'!$W$2:$W$500,"DUPLICATE:*")>0,X' + hubRow + '="Review",Y' + hubRow +
+    '="Review"),"Review","OK")';
+  row[23] = '=IF(P' + hubRow + '=0,IF(AND(D' + hubRow + '="Listed",OR(ISNUMBER(SEARCH("eBay",O' + hubRow +
+    ')),ISNUMBER(SEARCH("Poshmark",O' + hubRow + ')),ISNUMBER(SEARCH("Depop",O' + hubRow +
+    ')))),"Review","N/A"),IF(Q' + hubRow + '=P' + hubRow + ',"Confirmed","Review"))';
+  row[24] = '=IF(P' + hubRow + '=0,"N/A",IF(COUNTIFS(\'Listing Descriptions\'!$B$2:$B$500,A' + hubRow +
+    ',\'Listing Descriptions\'!$W$2:$W$500,"REVIEW:*")>0,"Review","Confirmed"))';
+  return row;
+}
+
+function appendListingHubRow_(itemId, tabName, sourceRow) {
+  var hub = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(LISTING_HUB_SHEET);
+  if (!hub) return { error: 'Could not find "' + LISTING_HUB_SHEET + '" tab.' };
+  var t = readTable(hub, ['Item ID']);
+  var idCol = colIndex(t.colMap, 'Item ID');
+  var lastWithId = t.headerSheetRow;
+  var i;
+  for (i = 0; i < t.rows.length; i++) {
+    if (String(t.rows[i][idCol] || '').trim()) lastWithId = t.headerSheetRow + 1 + i;
+  }
+  var newHubRow = lastWithId + 1;
+  if (newHubRow <= hub.getLastRow()) hub.insertRowAfter(lastWithId);
+  var values = buildHubRowValues_(itemId, tabName, sourceRow, newHubRow);
+  hub.getRange(newHubRow, 1, 1, values.length).setValues([values]);
+  return { hubRow: newHubRow };
+}
+
+function appendAddingInventoryRow_(body) {
+  var sheet = getAddingInventorySheet_();
+  if (!sheet) return { skipped: true };
+  var header = findHeaderRow(sheet, ['Category', 'Item']);
+  var startRow = header ? header.rowIndex + 2 : 2;
+  var target = Math.max(sheet.getLastRow() + 1, startRow);
+  var details = [body.brand, body.model, body.version, body.itemNumber].filter(function (x) {
+    return String(x || '').trim();
+  }).join('; ');
+  var sizeCond = [body.size, body.condition].filter(function (x) {
+    return String(x || '').trim();
+  }).join(' / ');
+  sheet.getRange(target, 1, 1, 7).setValues([[
+    body.category || (body.isClothing === false ? '' : 'Clothing'),
+    body.clothingType || body.subcategory || '',
+    body.product || body.item || '',
+    details || body.notes || '',
+    sizeCond,
+    body.listPrice || '',
+    body.estValue || body.realisticSale || ''
+  ]]);
+  return { row: target };
+}
+
+function createInventoryItem(body) {
+  body = body || {};
+  var isClothing = true;
+  if (Object.prototype.hasOwnProperty.call(body, 'isClothing')) isClothing = !!body.isClothing;
+  var cat = String(body.category || '').toLowerCase();
+  if (cat.indexOf('non') !== -1 || cat === 'electronics' || cat === 'other') isClothing = false;
+  if (String(body.inventoryTab || '').toLowerCase().indexOf('non') !== -1) isClothing = false;
+
+  var prefix = isClothing ? 'CLO' : 'MISC';
+  var itemId = String(body.itemId || '').trim() || nextPrefixedId_(prefix);
+  var inv = appendInventoryRow_(isClothing, body);
+  if (inv.error) return { ok: false, error: inv.error };
+  var hub = appendListingHubRow_(itemId, inv.tabName, inv.row);
+  if (hub.error) return { ok: false, error: hub.error };
+  return {
+    ok: true,
+    itemId: itemId,
+    sourceTab: inv.tabName,
+    sourceRow: inv.row,
+    hubRow: hub.hubRow,
+    isClothing: isClothing
+  };
+}
+
+function createStocking(body) {
+  body = body || {};
+  if (!String(body.product || body.item || '').trim()) {
+    return { ok: false, error: 'Product / item name is required.' };
+  }
+  var created = createInventoryItem(body);
+  if (!created.ok) return created;
+
+  var stockingId = nextStockingId_();
+  var stamp = nowStamp_();
+  var stage = STOCKING_STAGES.NEEDS_ANALYSIS;
+  getStockingSheet().appendRow([
+    stockingId, created.itemId, stage, stamp, stamp,
+    body.product || body.item || '', body.brand || '', body.model || '', body.version || '',
+    body.notes || '', created.sourceTab, '', ''
+  ]);
+
+  var intake = { skipped: true };
+  if (body.addIntakeRow !== false) {
+    intake = appendAddingInventoryRow_({
+      category: body.category,
+      clothingType: body.clothingType || body.subcategory,
+      subcategory: body.subcategory,
+      product: body.product || body.item,
+      brand: body.brand,
+      model: body.model,
+      version: body.version,
+      itemNumber: body.itemNumber,
+      notes: body.notes,
+      size: body.size,
+      condition: body.condition,
+      listPrice: body.listPrice,
+      estValue: body.estValue,
+      realisticSale: body.realisticSale,
+      isClothing: created.isClothing
+    });
+  }
+
+  logItemAction(created.itemId, 'Stocking Intake', stockingId + ' -> ' + stage);
+  invalidateBootCache();
+
+  var webhook = pingStockingWebhook_('needs_analysis', {
+    stockingId: stockingId,
+    itemId: created.itemId,
+    product: body.product || body.item || '',
+    brand: body.brand || '',
+    model: body.model || '',
+    version: body.version || '',
+    notes: body.notes || '',
+    sourceTab: created.sourceTab,
+    sourceRow: created.sourceRow
+  });
+
+  return {
+    ok: true,
+    stockingId: stockingId,
+    itemId: created.itemId,
+    stage: stage,
+    sourceTab: created.sourceTab,
+    sourceRow: created.sourceRow,
+    hubRow: created.hubRow,
+    intakeRow: intake.row || null,
+    webhook: webhook
+  };
+}
+
+function updateStocking(body) {
+  body = body || {};
+  var located = findStockingRow_(body.stockingId, body.itemId);
+  if (!located) return { ok: false, error: 'Stocking row not found.' };
+
+  var fields = {
+    stage: 'Stage', product: 'Product', brand: 'Brand', model: 'Model', version: 'Version',
+    notes: 'Notes', analysisSummary: 'Analysis Summary', error: 'Error',
+    sourceTab: 'Source Tab', itemId: 'Item ID'
+  };
+  Object.keys(fields).forEach(function (key) {
+    if (Object.prototype.hasOwnProperty.call(body, key)) {
+      setStockingCell_(located, fields[key], body[key]);
+    }
+  });
+  setStockingCell_(located, 'Updated', nowStamp_());
+
+  var itemIdCol = located.headers.indexOf('item id');
+  var stockingIdCol = located.headers.indexOf('stocking id');
+  var itemId = body.itemId || (itemIdCol === -1 ? '' : located.values[itemIdCol]);
+  var stockingId = body.stockingId || (stockingIdCol === -1 ? '' : located.values[stockingIdCol]);
+  var stage = body.stage || '';
+
+  var answersSaved = null;
+  if (body.answers && body.answers.length) {
+    answersSaved = saveListingAnswers({ itemId: itemId, answers: body.answers });
+  }
+  if (stage) logItemAction(itemId, 'Stocking Stage', stage);
+
+  var webhook = { skipped: true };
+  if (stage === STOCKING_STAGES.NEEDS_ANALYSIS || stage === STOCKING_STAGES.READY_FOR_DRAFTS) {
+    webhook = pingStockingWebhook_(stage, {
+      stockingId: stockingId, itemId: itemId, stage: stage,
+      product: body.product, analysisSummary: body.analysisSummary
+    });
+  }
+
+  if (body.promoteIfDrafts && itemId) {
+    var descs = getDescriptions().filter(function (d) {
+      return String(d.itemId) === String(itemId) && String(d.suggestedTitle || d.description || '').trim();
+    });
+    if (descs.length) {
+      setStockingCell_(located, 'Stage', STOCKING_STAGES.READY_TO_POST);
+      setStockingCell_(located, 'Updated', nowStamp_());
+      stage = STOCKING_STAGES.READY_TO_POST;
+    }
+  }
+
+  invalidateBootCache();
+  return {
+    ok: true, stockingId: String(stockingId), itemId: String(itemId),
+    stage: stage || undefined, answersSaved: answersSaved, webhook: webhook
+  };
+}
+
+function getListingQuestions(itemId) {
+  var sheet = getListingQuestionsSheet_();
+  if (!sheet) return [];
+  var t = readTable(sheet, ['Item ID', 'Item']);
+  if (!t.rows.length) return [];
+  var out = [];
+  var i;
+  for (i = 0; i < t.rows.length; i++) {
+    var row = t.rows[i];
+    var id = String(val(row, t.colMap, 'Item ID') || '');
+    if (!id) continue;
+    if (itemId && String(itemId) !== id) continue;
+    out.push({
+      sheetRow: t.headerSheetRow + 1 + i,
+      itemId: id,
+      item: String(val(row, t.colMap, 'Item') || ''),
+      questions: String(val(row, t.colMap, 'Questions / missing details') || val(row, t.colMap, 'Questions') || ''),
+      answer: String(val(row, t.colMap, 'Your Answer(s)') || val(row, t.colMap, 'Your Answer') || ''),
+      draftPlaceholder: String(val(row, t.colMap, 'Draft placeholder currently used') || val(row, t.colMap, 'Draft placeholder') || ''),
+      status: String(val(row, t.colMap, 'Status') || '')
+    });
+  }
+  return out;
+}
+
+function saveListingAnswers(body) {
+  body = body || {};
+  var itemId = String(body.itemId || '').trim();
+  var answers = body.answers || [];
+  if (!itemId || !answers.length) return { ok: false, error: 'Missing itemId or answers.' };
+  var sheet = getListingQuestionsSheet_();
+  if (!sheet) return { ok: false, error: 'Listing Questions tab not found.' };
+  var t = readTable(sheet, ['Item ID']);
+  var answerCol = colIndex(t.colMap, 'Your Answer(s)');
+  if (answerCol === -1) answerCol = colIndex(t.colMap, 'Your Answer');
+  if (answerCol === -1) return { ok: false, error: 'Could not find Your Answer(s) column.' };
+  var updated = 0;
+  var a, i, ans, targetRow, id, q;
+  for (a = 0; a < answers.length; a++) {
+    ans = answers[a];
+    targetRow = Number(ans.row || ans.sheetRow || 0);
+    if (!targetRow) {
+      for (i = 0; i < t.rows.length; i++) {
+        id = String(val(t.rows[i], t.colMap, 'Item ID') || '');
+        q = String(val(t.rows[i], t.colMap, 'Questions / missing details') || val(t.rows[i], t.colMap, 'Questions') || '');
+        if (id === itemId && (!ans.question || q === ans.question)) {
+          targetRow = t.headerSheetRow + 1 + i;
+          break;
+        }
+      }
+    }
+    if (!targetRow) continue;
+    sheet.getRange(targetRow, answerCol + 1).setValue(ans.answer || '');
+    updated++;
+  }
+  if (updated) {
+    logItemAction(itemId, 'Listing Answers Saved', updated + ' answer(s)');
+    invalidateBootCache();
+  }
+  return { ok: true, updated: updated };
+}
+
+function upsertDescription(body) {
+  body = body || {};
+  var itemId = String(body.itemId || '').trim();
+  var platform = String(body.platform || '').trim();
+  if (!itemId || !platform) return { ok: false, error: 'Missing itemId or platform.' };
+
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(DESCRIPTIONS_SHEET);
+  if (!sheet) return { ok: false, error: 'Could not find "' + DESCRIPTIONS_SHEET + '" tab.' };
+  var t = readTable(sheet, ['Item ID', 'Platform', 'Suggested title']);
+  var startRow = t.headerSheetRow + 1;
+  var target = -1;
+  var platLc = platform.toLowerCase();
+  var i, rowItem, rowPlat;
+  for (i = 0; i < t.rows.length; i++) {
+    rowItem = String(val(t.rows[i], t.colMap, 'Item ID') || '');
+    rowPlat = String(val(t.rows[i], t.colMap, 'Platform') || '').trim().toLowerCase();
+    if (rowItem === itemId && rowPlat === platLc) { target = startRow + i; break; }
+  }
+
+  var listingId = body.listingId || (itemId + '-' + platform.replace(/[^A-Za-z0-9]+/g, '').slice(0, 6).toUpperCase());
+  if (target === -1) {
+    target = Math.max(sheet.getLastRow() + 1, startRow);
+    var width = Math.max(sheet.getLastColumn(), 23);
+    var blank = [];
+    for (i = 0; i < width; i++) blank.push('');
+    sheet.getRange(target, 1, 1, width).setValues([blank]);
+  }
+
+  function write(headerNames, value) {
+    if (value === undefined) return;
+    var h, c;
+    for (h = 0; h < headerNames.length; h++) {
+      c = colIndex(t.colMap, headerNames[h]);
+      if (c !== -1) { sheet.getRange(target, c + 1).setValue(value); return; }
+    }
+  }
+
+  write(['Listing ID'], listingId);
+  write(['Item ID'], itemId);
+  write(['Platform'], platform);
+  write(['Suggested title'], body.suggestedTitle || body.title);
+  write(['Listing description', 'Description'], body.description);
+  write(['List price'], body.listPrice);
+  write(['Floor price'], body.floorPrice);
+  write(['Listing status', 'Status'], body.listingStatus || body.status || 'Draft');
+  write(['Brand'], body.brand);
+  write(['Size'], body.size);
+  write(['Item number'], body.itemNumber);
+  write(['Condition statement'], body.conditionStatement);
+  write(['Suggested category'], body.suggestedCategory);
+  write(['Tags / keywords'], body.tags);
+  write(['Notes'], body.notes);
+  write(['Posting priority'], body.postingPriority);
+  write(['Readiness'], body.readiness || 'Needs review');
+
+  invalidateBootCache();
+  return { ok: true, row: target, listingId: listingId };
+}
+
+function upsertQueue(body) {
+  body = body || {};
+  var itemId = String(body.itemId || '').trim();
+  var platform = String(body.platform || '').trim();
+  if (!itemId || !platform) return { ok: false, error: 'Missing itemId or platform.' };
+  var listingId = body.listingId || (itemId + '-' + platform.replace(/[^A-Za-z0-9]+/g, '').slice(0, 6).toUpperCase());
+
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(POSTING_QUEUE_SHEET);
+  if (!sheet) return { ok: false, error: 'Could not find "' + POSTING_QUEUE_SHEET + '" tab.' };
+  var header = findHeaderRow(sheet, ['Listing ID']);
+  if (!header) return { ok: false, error: 'Could not find a header row in ' + POSTING_QUEUE_SHEET + '.' };
+  var colMap = header.colMap;
+  var listingIdCol = colIndex(colMap, 'Listing ID');
+  if (listingIdCol === -1) return { ok: false, error: 'Could not find a "Listing ID" column.' };
+
+  var startRow = header.rowIndex + 2;
+  var lastRow = sheet.getLastRow();
+  var numCols = sheet.getLastColumn();
+  var targetRow = -1;
+  var trueLastContentRow = header.rowIndex + 1;
+  var i, idsRange, rowIsBlank;
+  if (lastRow >= startRow) {
+    idsRange = sheet.getRange(startRow, 1, lastRow - startRow + 1, numCols).getValues();
+    for (i = 0; i < idsRange.length; i++) {
+      rowIsBlank = idsRange[i].every(function (c) { return c === '' || c === null; });
+      if (!rowIsBlank) trueLastContentRow = startRow + i;
+      if (String(idsRange[i][listingIdCol] || '') === listingId) targetRow = startRow + i;
+    }
+  }
+  if (targetRow === -1) targetRow = trueLastContentRow + 1;
+
+  function setCol(name, value) {
+    if (value === undefined || value === null) return;
+    var c = colIndex(colMap, name);
+    if (c !== -1) sheet.getRange(targetRow, c + 1).setValue(value);
+  }
+
+  setCol('Listing ID', listingId);
+  setCol('Item ID', itemId);
+  setCol('Platform', platform);
+  setCol('Status', body.status || 'Draft');
+  setCol('Suggested title', body.suggestedTitle || body.title);
+  setCol('List price', body.listPrice);
+  setCol('Listing description', body.description);
+  setCol('Listing URL', body.url || body.listingUrl);
+  setCol('Notes', body.notes);
+  setCol('Posting order', body.postingOrder);
+  setCol('Readiness', body.readiness);
+  setCol('Photo checklist', body.photoChecklist);
+
+  invalidateBootCache();
+  return { ok: true, row: targetRow, listingId: listingId };
 }

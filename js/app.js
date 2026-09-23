@@ -400,6 +400,9 @@ function showView(view) {
     syncInventoryToolbar();
     requestAnimationFrame(() => applyZoom());
   }
+  if (view === 'stocking' && typeof refreshStocking === 'function') {
+    refreshStocking();
+  }
   if (changed) window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 document.querySelectorAll('nav.tabs button').forEach(btn => {
