@@ -67,6 +67,10 @@
           <option value="name">Name</option>
         </select>
       </label>
+      <div class="inventory-expand" role="group" aria-label="Expand or collapse inventory sections">
+        <button type="button" class="btn secondary inventory-expand-btn" id="inventoryExpandAllBtn" title="Expand every section or row in this view">Expand all</button>
+        <button type="button" class="btn secondary inventory-expand-btn" id="inventoryCollapseAllBtn" title="Collapse every section or row in this view">Collapse all</button>
+      </div>
       <div class="inventory-refresh">
         <button type="button" class="btn secondary inventory-refresh-btn" id="inventoryRefreshBtn" title="Reload inventory from your Sheet">Refresh</button>
         <span class="inventory-refresh-status" id="inventoryRefreshStatus" aria-live="polite"></span>

@@ -453,6 +453,59 @@ function setListGroup(group) {
   renderList();
 }
 
+// Expand / Collapse all — acts on whichever Inventory collapse set is on screen
+// (list by category / size / views, or wheel category drill-down item rows).
+function inventoryListModeActive() {
+  const el = document.getElementById('listMode');
+  return !!(el && el.style.display !== 'none');
+}
+function inventoryWheelCategoryActive() {
+  const wheel = document.getElementById('wheelMode');
+  const cat = document.getElementById('categoryView');
+  return !!(wheel && wheel.style.display !== 'none' && cat && cat.style.display !== 'none');
+}
+function setInventoryExpandedAll(expand) {
+  if (inventoryWheelCategoryActive()) {
+    if (expand) {
+      const ids = [...document.querySelectorAll('#categoryCards details.ranked-row[data-wheel-id]')]
+        .map(el => el.dataset.wheelId).filter(Boolean);
+      state.expandedWheelItems = new Set(ids);
+    } else {
+      state.expandedWheelItems = new Set();
+    }
+    const catId = (location.hash.match(/^#\/category\/(.+)$/) || [])[1];
+    const cat = activeCategories().find(c => c.id === catId);
+    if (cat) renderCategoryCards(cat);
+    return;
+  }
+  if (!inventoryListModeActive()) return;
+
+  if (state.listGroup === 'size') {
+    if (expand) {
+      const keys = [...document.querySelectorAll('#catSections details.size-row[data-size-key]')]
+        .map(el => el.dataset.sizeKey).filter(Boolean);
+      state.expandedSizes = new Set(keys);
+    } else {
+      state.expandedSizes = new Set();
+    }
+  } else if (state.listGroup === 'ranked') {
+    if (expand) {
+      const ids = [...document.querySelectorAll('#catSections details.ranked-row[data-rank-id]')]
+        .map(el => el.dataset.rankId).filter(Boolean);
+      state.expandedRanked = new Set(ids);
+    } else {
+      state.expandedRanked = new Set();
+    }
+  } else if (expand) {
+    state.expandedCats = new Set(
+      activeCategories().filter(c => state.listActiveCats.has(c.id)).map(c => c.id)
+    );
+  } else {
+    state.expandedCats = new Set();
+  }
+  renderList();
+}
+
 function setMode(mode, resetHash) {
   document.querySelectorAll('#modeSwitch button').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
   document.getElementById('wheelMode').style.display = mode === 'wheel' ? '' : 'none';
@@ -3178,6 +3231,13 @@ renderStats();
 state.featuredActions = new Set(localGet('sellHub.featuredActions', []));
 renderAction();
 populateMetricForm();
+
+(function wireInventoryExpandCollapse() {
+  const expandBtn = document.getElementById('inventoryExpandAllBtn');
+  const collapseBtn = document.getElementById('inventoryCollapseAllBtn');
+  if (expandBtn) expandBtn.addEventListener('click', () => setInventoryExpandedAll(true));
+  if (collapseBtn) collapseBtn.addEventListener('click', () => setInventoryExpandedAll(false));
+})();
 
 (function wireInventoryRefresh() {
   const btn = document.getElementById('inventoryRefreshBtn');
