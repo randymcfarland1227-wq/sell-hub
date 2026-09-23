@@ -296,6 +296,7 @@
       <div class="mode-switch acq-section-switch" role="group">
         <button type="button" class="active" data-scroll="acq-lanes">Shelves</button>
         <button type="button" data-scroll="acq-media">Media</button>
+        <button type="button" data-scroll="acq-emerging">Emerging</button>
         <button type="button" data-scroll="acq-categories">Categories</button>
         <button type="button" data-scroll="acq-explorer">Explorer</button>
         <button type="button" data-scroll="acq-hunt">Hunt list</button>
@@ -309,43 +310,61 @@
     <p class="section-intro" style="margin-top:0">Shelves and a Media run you scan sideways — best money, fastest turns, what's heating up, and the bins most thrift trips actually have. Everything researched is still in the explorer below.</p>
     <div class="acq-lanes" id="acqLanes"></div>
 
-    <h3 class="subhead" id="acq-media">Media run</h3>
-    <p class="section-intro">Books, CDs, DVDs, Blu-rays, vinyl and VHS — the bins and shelves most thrift trips actually have.</p>
-    <div class="acq-rail">
-      <button type="button" class="acq-rail-btn" data-rail="-1" aria-label="Scroll left">‹</button>
-      <div class="acq-carousel" id="acqMediaShelf"></div>
-      <button type="button" class="acq-rail-btn" data-rail="1" aria-label="Scroll right">›</button>
-    </div>
-    <div class="lane-foot" id="acqMediaFoot" hidden></div>
+    <details class="acq-bucket" id="acq-media" data-bucket="media" open>
+      <summary class="acq-bucket-summary">
+        <span class="acq-bucket-title">Media run</span>
+      </summary>
+      <p class="section-intro">Books, CDs, DVDs, Blu-rays, vinyl and VHS — the bins and shelves most thrift trips actually have.</p>
+      <div class="acq-rail">
+        <button type="button" class="acq-rail-btn" data-rail="-1" aria-label="Scroll left">‹</button>
+        <div class="acq-carousel" id="acqMediaShelf"></div>
+        <button type="button" class="acq-rail-btn" data-rail="1" aria-label="Scroll right">›</button>
+      </div>
+      <div class="lane-foot" id="acqMediaFoot" hidden></div>
+    </details>
 
-    <div class="acq-explorer-head">
-      <h3 class="subhead" id="acq-explorer">Opportunity explorer</h3>
-      <label class="acq-quick-toggle"><input type="checkbox" id="acqQuickSource"> <span>Quick Source</span></label>
-    </div>
-    <div class="acq-toolbar">
-      <input type="search" id="acqSearch" placeholder="Search opportunities..." aria-label="Search opportunities by item, brand, model or category" autocomplete="off">
-      <label class="sort-control">Sort
-        <select id="acqSort" aria-label="Sort opportunities"></select>
-      </label>
-      <button type="button" class="btn secondary acq-filter-toggle" id="acqFilterToggle" aria-expanded="false" aria-controls="acqFilters">Filters</button>
-    </div>
-    <div class="acq-cat-chips" id="acqCategoryChips" role="group" aria-label="Filter by category"></div>
-    <div class="acq-filters" id="acqFilters"></div>
-    <div class="acq-active-filters" id="acqActiveFilters" aria-live="polite"></div>
-    <div class="acq-results" id="acqResults"></div>
+    <div class="acq-lanes acq-emerging-slot" id="acqEmerging"></div>
 
-    <h3 class="subhead" id="acq-categories">Explore by category</h3>
-    <div class="acq-categories" id="acqCategories"></div>
+    <details class="acq-bucket" id="acq-explorer" data-bucket="explorer" open>
+      <summary class="acq-bucket-summary acq-explorer-summary">
+        <span class="acq-bucket-title">Opportunity explorer</span>
+      </summary>
+      <div class="acq-explorer-tools">
+        <label class="acq-quick-toggle"><input type="checkbox" id="acqQuickSource"> <span>Quick Source</span></label>
+      </div>
+      <div class="acq-toolbar">
+        <input type="search" id="acqSearch" placeholder="Search opportunities..." aria-label="Search opportunities by item, brand, model or category" autocomplete="off">
+        <label class="sort-control">Sort
+          <select id="acqSort" aria-label="Sort opportunities"></select>
+        </label>
+        <button type="button" class="btn secondary acq-filter-toggle" id="acqFilterToggle" aria-expanded="false" aria-controls="acqFilters">Filters</button>
+      </div>
+      <div class="acq-cat-chips" id="acqCategoryChips" role="group" aria-label="Filter by category"></div>
+      <div class="acq-filters" id="acqFilters"></div>
+      <div class="acq-active-filters" id="acqActiveFilters" aria-live="polite"></div>
+      <div class="acq-results" id="acqResults"></div>
+    </details>
 
-    <h3 class="subhead" id="acq-hunt">My hunt list</h3>
-    <p class="status-msg" id="acqHuntStatus" role="status"></p>
-    <div id="acquireList" class="card-grid"></div>
+    <details class="acq-bucket" id="acq-categories" data-bucket="categories" open>
+      <summary class="acq-bucket-summary">
+        <span class="acq-bucket-title">Explore by category</span>
+      </summary>
+      <div class="acq-categories" id="acqCategories"></div>
+    </details>
 
-    <button type="button" class="btn add-toggle-btn" id="acquireAddToggle" aria-expanded="false" aria-controls="acquireAddPanel">+ Add to hunt list</button>
-    <div class="panel" id="acquireAddPanel" style="display:none">
-      <h3>Add to hunt list</h3>
-      <div id="acqHuntForm"></div>
-    </div>
+    <details class="acq-bucket" id="acq-hunt" data-bucket="hunt" open>
+      <summary class="acq-bucket-summary">
+        <span class="acq-bucket-title">My hunt list</span>
+      </summary>
+      <p class="status-msg" id="acqHuntStatus" role="status"></p>
+      <div id="acquireList" class="card-grid"></div>
+
+      <button type="button" class="btn add-toggle-btn" id="acquireAddToggle" aria-expanded="false" aria-controls="acquireAddPanel">+ Add to hunt list</button>
+      <div class="panel" id="acquireAddPanel" style="display:none">
+        <h3>Add to hunt list</h3>
+        <div id="acqHuntForm"></div>
+      </div>
+    </details>
     <datalist id="acqSubcategoryList"></datalist>
   </section>
 
