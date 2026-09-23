@@ -191,8 +191,14 @@ function localGet(key, fallback) {
 }
 function localSet(key, value) { localStorage.setItem(key, JSON.stringify(value)); }
 
-const WORKROOM_ORIGIN = 'https://frontier-work-room.randymcfarland1227.workers.dev';
+const WORKROOM_ORIGINS = [
+  'https://randymcfarland1227-wq.github.io',
+  'https://frontier-work-room.randymcfarland1227.workers.dev',
+];
+const WORKROOM_ORIGIN = WORKROOM_ORIGINS[0];
+const LIFE_HUB_PAGES_URL = 'https://randymcfarland1227-wq.github.io/frontier/';
 const RESALE_ORIGIN_URL = 'https://randymcfarland1227-wq.github.io/sell-hub/';
+function isWorkroomOrigin(origin) { return WORKROOM_ORIGINS.includes(origin); }
 // Posting tasks are starred per site, separately from the item's pricing/shipping star.
 function postingTaskKey(itemId, platformIdValue) { return `list:${itemId}:${platformIdValue}`; }
 function isFeaturedAction(itemId) { return state.featuredActions.has(String(itemId)); }
@@ -325,14 +331,16 @@ function resaleWorkroomSnapshot() {
 }
 function notifyWorkroom() {
   const message = { type: 'randys-workroom:snapshot', payload: resaleWorkroomSnapshot() };
-  if (window.opener && !window.opener.closed) window.opener.postMessage(message, WORKROOM_ORIGIN);
-  if (window.parent !== window) window.parent.postMessage(message, WORKROOM_ORIGIN);
+  for (const origin of WORKROOM_ORIGINS) {
+    try { if (window.opener && !window.opener.closed) window.opener.postMessage(message, origin); } catch {}
+    try { if (window.parent !== window) window.parent.postMessage(message, origin); } catch {}
+  }
 }
 function syncWorkroomFromStar() {
   notifyWorkroom();
   const encoded = btoa(encodeURIComponent(JSON.stringify(resaleWorkroomSnapshot())));
   // Prefer Life Hub window name; keep legacy name as fallback for older tabs.
-  window.open(`${WORKROOM_ORIGIN}/#sync=${encoded}`, 'randys-life-hub');
+  window.open(`${LIFE_HUB_PAGES_URL}#sync=${encoded}`, 'randys-life-hub');
 }
 async function completeResaleWorkroomItem(id) {
   const key = String(id || '');
@@ -377,7 +385,7 @@ function starResaleWorkroomItem(id, starred) {
   notifyWorkroom();
 }
 window.addEventListener('message', event => {
-  if (event.origin !== WORKROOM_ORIGIN) return;
+  if (!isWorkroomOrigin(event.origin)) return;
   const type = event.data?.type;
   if (type === 'randys-workroom:request') {
     event.source?.postMessage({ type: 'randys-workroom:snapshot', payload: resaleWorkroomSnapshot() }, event.origin);
