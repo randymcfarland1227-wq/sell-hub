@@ -847,18 +847,20 @@ function platformStatsHTML(item) {
   const platforms = splitPlatforms(item.platform);
   if (!platforms.length) return '';
   const latestByPlatform = latestMetricsByItemPlatform();
-  const price = priceLineHTML(item);
+  // One line per site — site, price, views, clicks — so a card with three
+  // platforms costs three lines rather than six. The "was" price is left to
+  // the List price row above; repeating it here is what broke the line.
+  const raw = item.listPrice == null ? '' : String(item.listPrice).trim();
+  const price = !raw ? '—' : (raw.startsWith('$') ? raw : '$' + raw);
   const rows = platforms.map(p => {
     const m = platformMeta(p);
     const snap = latestByPlatform.get(item.itemId + '|' + m.id);
     const views = Number(snap && (snap.views || snap.impressions)) || 0;
     const clicks = Number(snap && snap.clicks) || 0;
     return `
-      <div class="ps-row">
+      <div class="ps-row" title="${escapeHtml(`${m.label} — ${price}, ${views} views, ${clicks} clicks`)}">
         <span class="ps-plat" style="background:${m.color}">${escapeHtml(m.label)}</span>
-        <span class="ps-metric"><b>${price}</b><i>price</i></span>
-        <span class="ps-metric"><b>${views}</b><i>views</i></span>
-        <span class="ps-metric"><b>${clicks}</b><i>clicks</i></span>
+        <span class="ps-line"><b>${escapeHtml(price)}</b><span class="ps-sep">·</span><b>${views}</b><i>views</i><span class="ps-sep">·</span><b>${clicks}</b><i>clicks</i></span>
       </div>
     `;
   }).join('');

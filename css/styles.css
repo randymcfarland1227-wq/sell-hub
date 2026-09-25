@@ -702,9 +702,10 @@ details.cat-section:not([open]) { margin-bottom: 14px; }
 .ps-row {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 9px;
-  padding: 6px 9px;
+  flex-wrap: nowrap;
+  gap: 6px;
+  padding: 4px 8px;
+  overflow: hidden;
   border-radius: var(--radius-sm);
   border: 1px solid color-mix(in srgb, var(--cat) 20%, var(--border));
   background: color-mix(in srgb, var(--cat) 8%, var(--bg-elevated));
@@ -722,6 +723,17 @@ details.cat-section:not([open]) { margin-bottom: 14px; }
 .ps-metric { display: flex; align-items: baseline; gap: 3px; }
 .ps-metric b { color: var(--text); font-size: 0.8rem; font-weight: 700; }
 .ps-metric i { font-style: normal; color: var(--text-faint); font-size: 0.66rem; }
+/* Site, price, views, clicks on a single line — it stays on one line even on a
+   narrow card, trimming the labels first and the numbers last. */
+.ps-line {
+  display: flex; align-items: baseline; gap: 4px; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ps-line b { color: var(--text); font-size: .78rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.ps-line i { font-style: normal; color: var(--text-faint); font-size: .64rem; }
+.ps-sep { color: var(--text-faint); font-size: .64rem; }
+.ps-plat { font-size: .55rem; padding: 2px 6px; }
+@media (max-width: 420px) { .ps-line i { display: none; } }
 
 .mark-sold-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .mark-sold-row input { width: 90px; font: inherit; font-size: 0.8rem; padding: 7px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text); }
