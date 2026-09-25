@@ -1713,6 +1713,36 @@ function renderCompilation() {
   }));
 }
 
+// The By views list is for scanning, so an opened row shows a compact panel
+// rather than the full inventory card — thumbnail, the facts you'd act on, and
+// one line per site. The whole card is a click away under By category.
+function rankedDetailHTML(item) {
+  const photo = photoForItem(item.itemId);
+  const posted = postedLabel(item.itemId);
+  const focused = !!focusedFor(item.itemId);
+  const facts = [
+    item.size ? `Size ${escapeHtml(item.size)}` : '',
+    item.condition ? escapeHtml(item.condition) : '',
+    item.floorPrice ? `floor ${escapeHtml(item.floorPrice)}` : '',
+    posted ? escapeHtml(posted) : 'not posted',
+  ].filter(Boolean).join(' · ');
+  return `
+    <div class="rr-detail-grid">
+      <div class="rr-thumb">${photo ? `<img src="${escapeHtml(photo)}" alt="" loading="lazy" onerror="this.remove()">` : `<span>${escapeHtml(photoPendingLabel(item))}</span>`}</div>
+      <div class="rr-body">
+        <div class="rr-controls">
+          <label class="pick-box" title="Select this item"><input type="checkbox" data-pick="${escapeHtml(item.itemId)}"${state.picked.has(String(item.itemId)) ? ' checked' : ''}><span></span></label>
+          <button type="button" class="focus-btn${focused ? ' on' : ''}" data-focus="${escapeHtml(item.itemId)}" data-on="${focused ? '1' : ''}" title="${focused ? 'In Focused inventory' : 'Add to Focused inventory'}">${focused ? '◉' : '◎'}</button>
+          <span class="status-badge ${statusClass(item.sourceStatus)}">${escapeHtml(item.sourceStatus || '—')}</span>
+        </div>
+        <div class="rr-facts">${facts}</div>
+        ${actionBadgesHTML(item.itemId)}
+        ${siteStatusChipsHTML(item)}
+        ${platformStatsHTML(item)}
+      </div>
+    </div>`;
+}
+
 function renderList() {
   const container = document.getElementById('catSections');
   container.innerHTML = '';
@@ -1741,16 +1771,22 @@ function renderList() {
       <div class="cat-section ranked-section">
         <div class="cat-heading"><span class="rank-mark">#</span><h2>${labels[state.listSort]}</h2><span class="count">${ranked.length} items</span></div>
         <div class="ranked-list">
-          ${ranked.map(({ it }, i) => {
+          ${ranked.map(({ it, stats }, i) => {
             const rank = i + 1;
             const id = String(it.itemId);
             const open = state.expandedRanked.has(id) ? ' open' : '';
             return `
             <details class="ranked-row" data-rank-id="${escapeHtml(id)}"${open}>
               <summary class="ranked-row-head">
-                <span class="ranked-row-title">${escapeHtml(itemShortName(it))} / ${rank}</span>
+                <span class="rr-rank">${rank}</span>
+                <span class="ranked-row-title">${escapeHtml(itemShortName(it))}</span>
+                <span class="rr-quick">
+                  <b>${escapeHtml(it.listPrice == null || it.listPrice === '' ? '—' : (String(it.listPrice).trim().startsWith('$') ? String(it.listPrice).trim() : '$' + String(it.listPrice).trim()))}</b>
+                  <i>${stats.views} views</i>
+                  <i>${stats.clicks} clicks</i>
+                </span>
               </summary>
-              <div class="card-grid ranked-card">${itemCardHTML(it, categoryMeta(it.category))}</div>
+              <div class="ranked-detail">${rankedDetailHTML(it)}</div>
             </details>`;
           }).join('')}
         </div>
