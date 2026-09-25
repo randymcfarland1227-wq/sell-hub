@@ -234,6 +234,7 @@ function collectResaleActions() {
       detail: 'Ship this sold item.',
       meta: item.soldPrice ? `Sold for ${item.soldPrice}` : 'Sold',
       kind: 'ship',
+      tag: 'Ship',
       completable: true,
     });
   });
@@ -244,6 +245,7 @@ function collectResaleActions() {
       detail: `It sold — take the ${t.meta.label} listing down.`,
       meta: t.item.soldPrice ? `Sold for ${t.item.soldPrice}` : 'Sold',
       kind: 'end',
+      tag: `End Listing · ${t.meta.label}`,
       platformLabel: t.meta.label,
       listingId: (t.entry && t.entry.listingId) || '',
       itemId: t.item.itemId,
@@ -258,6 +260,7 @@ function collectResaleActions() {
         detail: `Post it on ${m.meta.label}.`,
         meta: item.listPrice ? `List price ${fmtMoney(parseMoney(item.listPrice))}` : 'No list price yet',
         kind: 'list',
+        tag: `List · ${m.meta.label}`,
         platformLabel: m.meta.label,
         itemId: item.itemId,
         completable: true,
@@ -274,6 +277,7 @@ function collectResaleActions() {
       detail: `${action.label}: ${action.reason}`,
       meta: `${action.views || 0} views · ${action.clicks || 0} clicks`,
       kind: 'pricing',
+      tag: action.label,
       actionLabel: action.label,
       completable: true,
     });
@@ -288,6 +292,7 @@ function collectResaleActions() {
       detail: deal.note || `${meta.label}${deal.when ? ` · ${deal.when}` : ''}`,
       meta: platformMeta(deal.platform).label,
       kind: 'deal',
+      tag: 'Local Deal',
       completable: false,
     });
   });
@@ -346,6 +351,8 @@ function resaleWorkroomSnapshot() {
     status: 'open',
     starred: isFeaturedAction(a.id),
     originUrl: RESALE_ORIGIN_URL,
+    // Task type shown before the title on Life Hub ("Ship", "End Listing · Depop", …)
+    tag: a.tag,
   }));
   const featured = actions.filter(a => isFeaturedAction(a.id)).map(a => ({
     id: a.id,
@@ -354,6 +361,7 @@ function resaleWorkroomSnapshot() {
     meta: a.meta,
     originUrl: RESALE_ORIGIN_URL,
     completable: a.completable !== false,
+    tag: a.tag,
   }));
   return {
     source: 'resale',
