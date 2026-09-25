@@ -3286,11 +3286,13 @@ function naturalPricingAction(item) {
     const withWatchers = perPlatform.filter(p => p.watchers > 0).sort((a, b) => b.watchers - a.watchers);
     const where = withWatchers.map(p => `${p.watchers} on ${p.meta.label}`).join(', ');
     const hint = withWatchers[0].meta.offerHint || DEFAULT_PLATFORM_META.offerHint;
+    const window = offerWindowFor(item.itemId, withWatchers[0].meta.id, withWatchers[0].meta.label);
     return {
       severity: 'opportunity', label: 'Send an offer',
       reason: `${where} — send an offer to close the sale instead of waiting.`,
       offerWhere: `${withWatchers[0].meta.label}: ${hint}`,
       offerPlatformLabel: withWatchers[0].meta.label,
+      offerWindow: window,
       views, clicks, watchers,
     };
   }
@@ -3358,6 +3360,58 @@ function applyActionOverride(item, natural, override) {
     delete out.suggestedPrice;
   }
   return out;
+}
+
+// eBay only lets you offer to buyers who showed interest recently, so an offer
+// left too long quietly becomes impossible to send. Walk this item's metric
+// history back to the start of the current unbroken run of watchers: that is
+// when the oldest of them arrived, and the clock starts there.
+const OFFER_WINDOW_DAYS = 30;
+function interestSinceFor(itemId, platformId) {
+  const rows = state.metrics
+    .filter(m => String(m.itemId) === String(itemId) && platformMeta(m.platform).id === platformId)
+    .map(m => ({ date: String(m.date || '').slice(0, 10), watchers: Number(m.watchers || 0) }))
+    .filter(r => /^\d{4}-\d{2}-\d{2}$/.test(r.date))
+    .sort((a, b) => a.date.localeCompare(b.date));
+  if (!rows.length) return '';
+  // One row per day — later pulls of the same day win.
+  const byDay = new Map();
+  rows.forEach(r => byDay.set(r.date, r));
+  const days = [...byDay.values()].sort((a, b) => a.date.localeCompare(b.date));
+  if (!days.length || !days[days.length - 1].watchers) return '';
+  let since = days[days.length - 1].date;
+  for (let i = days.length - 1; i >= 0; i--) {
+    if (!days[i].watchers) break;
+    since = days[i].date;
+  }
+  return since;
+}
+function addDays(dateStr, n) {
+  const d = new Date(dateStr + 'T12:00:00');
+  d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+function prettyDay(dateStr) {
+  return new Date(dateStr + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+// Poshmark likers don't lapse the way eBay watchers do — there the limit is
+// the price of your own last offer, not a clock.
+function offerWindowFor(itemId, platformId, platformLabel) {
+  const since = interestSinceFor(itemId, platformId);
+  if (!since) return null;
+  if (platformId !== 'ebay') {
+    return { platform: platformLabel, since: since, expires: false,
+      text: `${platformLabel} likers don't expire — but each new offer has to be at least 10% under your last one.` };
+  }
+  const deadline = addDays(since, OFFER_WINDOW_DAYS);
+  const left = Math.round((new Date(deadline + 'T12:00:00') - new Date(todayStr() + 'T12:00:00')) / 86400000);
+  return {
+    platform: platformLabel, since: since, deadline: deadline, daysLeft: left, expires: true,
+    lapsed: left < 0,
+    text: left < 0
+      ? `Too late on ${platformLabel} — those watchers have been there since ${prettyDay(since)}, past eBay's ${OFFER_WINDOW_DAYS}-day offer window.`
+      : `Send by ${prettyDay(deadline)} — ${left === 0 ? 'today is the last day' : `${left} day${left === 1 ? '' : 's'} left`}. eBay stops letting you offer ${OFFER_WINDOW_DAYS} days after someone starts watching (watching since ${prettyDay(since)}).`,
+  };
 }
 
 function pricingActionFor(item) {
@@ -3707,6 +3761,25 @@ function pricingGroupId(label) { return 'pa-group-' + categoryId(label); }
 
 // Says which day's numbers these suggestions were worked out from — the
 // per-card chip is the day the suggestion appeared, which reads as stale.
+// Only worth showing where an offer is still on the table: on a live
+// suggestion it's the deadline, on one already sent it's when you could go
+// again. Everywhere else it would just be noise.
+function offerDeadlineHTML(action) {
+  const w = action && action.offerWindow;
+  if (!w) return '';
+  if (action.label !== 'Send an offer' && action.label !== 'Offer sent') return '';
+  let text = w.text;
+  let cls = '';
+  if (w.expires) {
+    if (w.lapsed) cls = ' lapsed';
+    else if (w.daysLeft <= 7) cls = ' soon';
+    if (action.label === 'Offer sent' && !w.lapsed) {
+      text = `Window closes ${prettyDay(w.deadline)} — ${w.daysLeft} day${w.daysLeft === 1 ? '' : 's'} left to offer these watchers again if they don't bite.`;
+    }
+  }
+  return `<div class="pa-callout pa-deadline${cls}">${w.lapsed ? '⚠️' : '⏳'} ${escapeHtml(text)}</div>`;
+}
+
 function renderPricingStatsNote() {
   const head = document.getElementById('sec-pricing');
   if (!head) return;
@@ -3778,6 +3851,7 @@ function renderPricingActions() {
       </div>
       <div class="ar-meta-line">${metaBits.join(' · ')}</div>
       ${action.suggestedPrice ? `<div class="pa-callout"><b>Suggest ${fmtMoney(action.suggestedPrice)}</b></div>` : ''}
+      ${offerDeadlineHTML(action)}
       ${action.offerWhere ? `<div class="pa-callout"><b>${escapeHtml(action.offerWhere)}</b></div>` : ''}
       ${pricingReasonHTML(action.reason)}
       <div class="ar-actions pa-actions">
