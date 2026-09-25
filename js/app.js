@@ -4051,6 +4051,14 @@ setInventoryMode(state.inventoryMode);
 setMode(localGet('sellHub.mode', 'list'));
 renderStats();
 state.featuredActions = new Set(localGet('sellHub.featuredActions', []));
+// Stars set in another tab (or in Life Hub's embedded copy of this site) show up here too,
+// and Life Hub hears about them right away.
+window.addEventListener('storage', event => {
+  if (event.key !== 'sellHub.featuredActions') return;
+  state.featuredActions = new Set(localGet('sellHub.featuredActions', []));
+  try { renderAction(); } catch { /* views not ready yet */ }
+  notifyWorkroom();
+});
 renderAction();
 populateMetricForm();
 
