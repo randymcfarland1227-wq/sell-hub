@@ -1611,9 +1611,11 @@ function compilationPickerHTML(query) {
     const where = status.done.length
       ? status.done.map(d => d.meta.label).join(', ')
       : (status.missing.length ? `to post: ${status.missing.map(m => m.meta.label).join(', ')}` : 'not listed');
+    const photo = photoForItem(it.itemId);
     return `
       <label class="cp-pick${on ? ' on' : ''}">
         <input type="checkbox" data-compile-pick="${escapeHtml(it.itemId)}"${on ? ' checked' : ''}>
+        <span class="cp-thumb">${photo ? `<img src="${escapeHtml(photo)}" alt="" loading="lazy" onerror="this.remove()">` : ''}</span>
         <span class="cp-pick-main">${escapeHtml(itemShortName(it))}<small>${escapeHtml(where)}</small></span>
         <span class="cp-pick-price">${escapeHtml(String(it.listPrice ?? '—'))}</span>
       </label>`;
@@ -1658,6 +1660,7 @@ function renderCompilation() {
     const live = status.done.map(d => `<span class="cp-site live" style="--plat:${d.meta.color}">${escapeHtml(d.meta.label)}</span>`).join('');
     const todo = status.missing.map(m => `<span class="cp-site" style="--plat:${m.meta.color}">${escapeHtml(m.meta.label)}</span>`).join('');
     const posted = postedLabel(it.itemId);
+    const photo = photoForItem(it.itemId);
     const taskBits = [
       tasks.posts ? `${tasks.posts} to post` : '',
       tasks.suggestion,
@@ -1666,8 +1669,13 @@ function renderCompilation() {
     return `
       <tr>
         <td class="cp-name">
-          <b>${escapeHtml(itemShortName(it))}</b>
-          <small>${escapeHtml(it.size || '—')}${posted ? ` · ${escapeHtml(posted)}` : ' · not posted'}</small>
+          <div class="cp-name-wrap">
+            <span class="cp-thumb">${photo ? `<img src="${escapeHtml(photo)}" alt="" loading="lazy" onerror="this.remove()">` : ''}</span>
+            <span>
+              <b>${escapeHtml(itemShortName(it))}</b>
+              <small>${escapeHtml(it.size || '—')}${posted ? ` · ${escapeHtml(posted)}` : ' · not posted'}</small>
+            </span>
+          </div>
         </td>
         <td class="cp-price">${escapeHtml(String(it.listPrice ?? '—'))}</td>
         <td class="cp-sites">${live}${todo}</td>

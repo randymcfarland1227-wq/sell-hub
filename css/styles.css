@@ -2370,6 +2370,23 @@ details.stocking-intake[open] > summary::before { content: '- '; }
   #action .ar-primary { min-height: 44px; width: 100%; font-size: .88rem; }
 }
 
+/* The pick box, focus dot and status badge never shrink, so on a narrow card
+   they can squeeze the title to nothing — and since it wraps anywhere, it
+   breaks one word (or letter) per line. Let the row wrap instead. */
+.card-top { flex-wrap: wrap; }
+.card-top h3 { flex: 1 1 60%; min-width: 9ch; }
+.card-top .pick-box, .card-top .focus-btn, .card-top .status-badge { flex: none; }
+
+/* Thumbnails in compilations, so you can see what you're picking. */
+.cp-thumb {
+  width: 34px; height: 34px; flex: none; border-radius: 8px; overflow: hidden;
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  display: grid; place-items: center;
+}
+.cp-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cp-name-wrap { display: flex; align-items: flex-start; gap: 10px; }
+.cp-name-wrap .cp-thumb { width: 44px; height: 44px; border-radius: 10px; }
+
 /* ---------- Focused inventory + compilations (2026-09-24) ---------- */
 .focus-btn {
   appearance: none; border: 1px solid var(--border); background: var(--bg-elevated);
