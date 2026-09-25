@@ -15,7 +15,7 @@
   // Apply the saved theme before first paint so the page never flashes the wrong one.
   try { var t = localStorage.getItem('sellHub.theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
 </script>
-<link rel="stylesheet" href="css/styles.css?v=20260923-cards">
+<link rel="stylesheet" href="css/styles.css?v=20260924-focus">
 </head>
 <body>
 
@@ -30,6 +30,7 @@
   <div class="wrap tabs-scroll">
     <nav class="tabs" role="tablist" aria-label="Sections">
       <button data-view="action" class="active" role="tab" aria-selected="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 11l3 3 8-8"/><path d="M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9"/></svg><span>Actions</span></button>
+      <button data-view="focus" role="tab" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg><span>Focus</span></button>
       <button data-view="inventory" role="tab" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg><span>Inventory</span></button>
       <button data-view="stats" role="tab" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span>Stats</span></button>
       <button data-view="acquire" role="tab" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg><span>Acquire</span></button>
@@ -43,6 +44,19 @@
   <section class="pulse-bar" id="pulseBar" aria-label="Headline numbers" aria-live="polite"></section>
 
   <!-- ===================== INVENTORY ===================== -->
+  <!-- ===================== FOCUS ===================== -->
+  <section id="focus" class="view">
+    <div class="section-head">
+      <div>
+        <h2 class="section-title">Focused inventory <span class="fi-count" id="focusCount">0</span></h2>
+        <p class="section-intro">The shortlist you're actively pushing. Tap ◎ on any inventory card to add it here — it stays in Inventory too, and unfocusing only removes it from this page.</p>
+      </div>
+    </div>
+    <div class="stat-tiles" id="focusTiles"></div>
+    <div class="fi-suggest" id="focusSuggest"></div>
+    <div id="focusList"></div>
+  </section>
+
   <section id="inventory" class="view">
 
     <div id="inventorySetupNote" class="setup-note" style="display:none">
@@ -73,11 +87,31 @@
         <button type="button" class="btn secondary inventory-expand-btn" id="inventoryCollapseAllBtn" title="Collapse every section or row in this view">Collapse all</button>
       </div>
       <div class="inventory-refresh">
+        <button type="button" class="btn secondary" id="compileOpenBtn" title="Build a list from selected items">Compilations</button>
         <button type="button" class="btn secondary inventory-refresh-btn" id="inventoryRefreshBtn" title="Reload inventory from your Sheet">Refresh</button>
         <span class="inventory-refresh-status" id="inventoryRefreshStatus" aria-live="polite"></span>
       </div>
     </div>
 
+    <!-- ---------- COMPILATIONS SUB-PAGE ---------- -->
+    <div id="inventoryCompile" hidden>
+      <div class="section-head">
+        <div>
+          <h2 class="section-title">Inventory compilation</h2>
+          <p class="section-intro">Pick any items — listed or not — and see them as one list with what they're worth, where they are, how they're doing, and what's still owed on them.</p>
+        </div>
+      </div>
+      <div class="cp-layout">
+        <div class="cp-side">
+          <label class="sr-only" for="compileSearch">Search inventory</label>
+          <input type="search" id="compileSearch" placeholder="Search inventory…" autocomplete="off">
+          <div class="cp-picker" id="compilePicker"></div>
+        </div>
+        <div class="cp-main" id="compileBody"></div>
+      </div>
+    </div>
+
+    <div id="inventoryBrowse">
     <p class="stl-note">Site tags on each card: filled = live there, dashed = still to post, grey = not posting or ended.</p>
 
     <!-- ---------- WHEEL MODE ---------- -->
@@ -124,6 +158,8 @@
       </div>
       <div id="catSections"></div>
     </div>
+
+    </div><!-- /inventoryBrowse -->
 
     <details class="saved-section" id="savedSection">
       <summary><span class="saved-title">Saved for later</span> <span class="saved-count" id="savedCount"></span></summary>
@@ -269,6 +305,10 @@
               <option value="">All platforms</option>
             </select>
           </label>
+          <div class="mode-switch" id="stlGroupSwitch" aria-label="Still to list grouping">
+            <button type="button" data-stl-group="site" class="active">By site</button>
+            <button type="button" data-stl-group="item">By item</button>
+          </div>
           <label class="chip-toggle"><input type="checkbox" id="showSkippedListings"> show not posting</label>
         </div>
       </div>
@@ -516,12 +556,12 @@
   <div class="acq-drawer-body" id="acqDrawerBody"></div>
 </aside>
 
-<script src="js/config.js?v=20260923-cards"></script>
-<script src="js/data.js?v=20260923-cards"></script>
-<script src="js/app.js?v=20260923-cards"></script>
-<script src="js/acquire-config.js?v=20260923-cards"></script>
-<script src="js/acquire-model.js?v=20260923-cards"></script>
-<script src="js/acquire.js?v=20260923-cards"></script>
-<script src="js/stocking.js?v=20260923-cards"></script>
+<script src="js/config.js?v=20260924-focus"></script>
+<script src="js/data.js?v=20260924-focus"></script>
+<script src="js/app.js?v=20260924-focus"></script>
+<script src="js/acquire-config.js?v=20260924-focus"></script>
+<script src="js/acquire-model.js?v=20260924-focus"></script>
+<script src="js/acquire.js?v=20260924-focus"></script>
+<script src="js/stocking.js?v=20260924-focus"></script>
 </body>
 </html>

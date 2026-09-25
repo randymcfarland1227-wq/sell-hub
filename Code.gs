@@ -111,6 +111,8 @@ function doGet(e) {
   if (action === 'debugHeaders') return jsonOut(debugHeaders());
   if (action === 'debugFormulas') return jsonOut(debugFormulas(e.parameter.sheet, Number(e.parameter.start) || 1, Number(e.parameter.n) || 5));
   if (action === 'debugRows') return jsonOut(debugRows(e.parameter.sheet, Number(e.parameter.start) || 1, Number(e.parameter.n) || 20));
+  if (action === 'ebayAuthCheck') return jsonOut(ebayAuthCheck());
+  if (action === 'ebayExchangeCode') return jsonOut(ebayExchangeCode());
   if (action === 'stocking') return jsonOut(getStocking());
   if (action === 'listingQuestions') return jsonOut(getListingQuestions(e.parameter.itemId));
   if (action === 'syncEbayMetrics') {
@@ -1171,8 +1173,130 @@ function ebayYmdPacific_(d) {
  * Sync Active eBay queue rows into Metrics via traffic_report.
  * Returns { ok, synced, skipped, errors: [...] } for the client / Refresh UI.
  */
+/**
+ * Diagnose the eBay OAuth setup without revealing any secret: reports which
+ * properties exist (length only) and what eBay says about the refresh call.
+ */
+/**
+ * One-time: swap the authorization code from the consent redirect for a
+ * long-lived refresh token, and store it. Reads EBAY_AUTH_CODE and
+ * EBAY_RUNAME from Script Properties so no secret ever travels in a URL,
+ * and clears the code afterwards since it is single-use.
+ */
+function ebayExchangeCode() {
+  var props = PropertiesService.getScriptProperties();
+  var code = props.getProperty('EBAY_AUTH_CODE');
+  var ru = props.getProperty('EBAY_RUNAME');
+  var id = props.getProperty('EBAY_CLIENT_ID');
+  var secret = props.getProperty('EBAY_CLIENT_SECRET');
+  if (!code) return { ok: false, error: 'Add EBAY_AUTH_CODE (the code= value from the redirect URL) first.' };
+  if (!ru) return { ok: false, error: 'Add EBAY_RUNAME (your RuName) first.' };
+  if (!id || !secret) return { ok: false, error: 'EBAY_CLIENT_ID / EBAY_CLIENT_SECRET are missing.' };
+  code = String(code).trim();
+  // The address bar hands it over percent-encoded; eBay wants it decoded.
+  if (code.indexOf('%') !== -1) {
+    try { code = decodeURIComponent(code); } catch (err) { /* use as-is */ }
+  }
+  var resp = UrlFetchApp.fetch('https://api.ebay.com/identity/v1/oauth2/token', {
+    method: 'post',
+    contentType: 'application/x-www-form-urlencoded',
+    headers: { Authorization: 'Basic ' + Utilities.base64Encode(String(id).trim() + ':' + String(secret).trim()) },
+    payload: { grant_type: 'authorization_code', code: code, redirect_uri: String(ru).trim() },
+    muteHttpExceptions: true,
+  });
+  var status = resp.getResponseCode();
+  var body = resp.getContentText();
+  if (status !== 200) {
+    return { ok: false, status: status, body: body.slice(0, 400) };
+  }
+  var data = JSON.parse(body);
+  if (!data.refresh_token) return { ok: false, status: status, error: 'No refresh_token in the response.' };
+  props.setProperty('EBAY_REFRESH_TOKEN', data.refresh_token);
+  if (data.access_token) props.setProperty('EBAY_OAUTH_TOKEN', data.access_token);
+  props.deleteProperty('EBAY_AUTH_CODE');
+  return {
+    ok: true,
+    refreshTokenLength: String(data.refresh_token).length,
+    refreshTokenExpiresInDays: data.refresh_token_expires_in ? Math.round(data.refresh_token_expires_in / 86400) : null,
+  };
+}
+
+function ebayAuthCheck() {
+  var props = PropertiesService.getScriptProperties();
+  var names = ['EBAY_CLIENT_ID', 'EBAY_CLIENT_SECRET', 'EBAY_REFRESH_TOKEN', 'EBAY_OAUTH_TOKEN'];
+  var present = {};
+  names.forEach(function (n) {
+    var v = props.getProperty(n);
+    present[n] = v ? { set: true, length: String(v).length, trimmedDiffers: String(v) !== String(v).trim() } : { set: false };
+  });
+  var out = { properties: present, allNames: props.getKeys().sort() };
+  var id = props.getProperty('EBAY_CLIENT_ID');
+  var secret = props.getProperty('EBAY_CLIENT_SECRET');
+  var refresh = props.getProperty('EBAY_REFRESH_TOKEN');
+  if (!(id && secret && refresh)) {
+    out.tokenCall = 'skipped - one of the three is missing';
+    return out;
+  }
+  var resp = UrlFetchApp.fetch('https://api.ebay.com/identity/v1/oauth2/token', {
+    method: 'post',
+    contentType: 'application/x-www-form-urlencoded',
+    headers: { Authorization: 'Basic ' + Utilities.base64Encode(String(id).trim() + ':' + String(secret).trim()) },
+    payload: {
+      grant_type: 'refresh_token',
+      refresh_token: String(refresh).trim(),
+      scope: 'https://api.ebay.com/oauth/api_scope/sell.analytics.readonly',
+    },
+    muteHttpExceptions: true,
+  });
+  var body = resp.getContentText();
+  out.tokenCall = { status: resp.getResponseCode(), body: body.slice(0, 400).replace(/"access_token":"[^"]*"/, '"access_token":"<hidden>"') };
+  return out;
+}
+
+// eBay's traffic report has no watcher count, so a synced row would wipe the
+// last hand-entered one. Carry the most recent known watchers forward instead.
+// The trigger runs every 6 hours, so today's synced rows get replaced rather
+// than stacked up - otherwise Metrics grows by 240 rows a day.
+function clearTodaysEbayApiRows_() {
+  var sheet = getMetricsSheet();
+  var data = sheet.getDataRange().getValues();
+  if (data.length < 2) return 0;
+  var headers = data[0].map(function (h) { return String(h).trim().toLowerCase(); });
+  var dateCol = headers.indexOf('date');
+  var srcCol = headers.indexOf('source');
+  if (dateCol === -1 || srcCol === -1) return 0;
+  var today = todayIso();
+  var doomed = [];
+  for (var r = 1; r < data.length; r++) {
+    var d = data[r][dateCol];
+    if (Object.prototype.toString.call(d) === '[object Date]') d = formatDate(d);
+    if (String(d).slice(0, 10) !== today) continue;
+    if (String(data[r][srcCol]).trim().toLowerCase() !== 'ebay-api') continue;
+    doomed.push(r + 1);
+  }
+  for (var i = doomed.length - 1; i >= 0; i--) sheet.deleteRow(doomed[i]);
+  return doomed.length;
+}
+
+// eBay's traffic report carries no watcher count, so a synced row would wipe
+// the hand-entered one. Carry the most recent MANUAL value forward: api rows
+// are skipped so the number can't echo itself, and a zero counts, otherwise a
+// listing that lost its last watcher would keep showing the old count.
+function lastKnownWatchersByListing_() {
+  var out = {};
+  getMetrics().forEach(function (m) {
+    var id = String(m.listingId || '');
+    if (!id) return;
+    if (String(m.source || '').toLowerCase() === 'ebay-api') return;
+    var d = String(m.date || '');
+    if (!out[id] || d >= out[id].date) out[id] = { date: d, watchers: Number(m.watchers || 0) };
+  });
+  return out;
+}
+
 function syncEbayMetrics() {
   var errors = [];
+  var knownWatchers = lastKnownWatchersByListing_();
   var token = getEbayAccessToken_();
   if (!token) {
     return {
@@ -1276,7 +1400,7 @@ function syncEbayMetrics() {
           platform: 'eBay',
           impressions: impressions,
           views: views,
-          watchers: 0,
+          watchers: knownWatchers[row.listingId] ? knownWatchers[row.listingId].watchers : 0,
           clicks: clicks,
           source: 'ebay-api',
         });
@@ -1287,6 +1411,7 @@ function syncEbayMetrics() {
   }
 
   if (metricRows.length) {
+    clearTodaysEbayApiRows_();
     addMetricEntries({ rows: metricRows, source: 'ebay-api' });
   } else {
     invalidateBootCache();

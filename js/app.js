@@ -585,8 +585,10 @@ function showView(view) {
   // The wheel sizes itself from its container, which measures 0 while hidden.
   if (view === 'inventory') {
     syncInventoryToolbar();
+    setInventoryMode(state.inventoryMode);
     requestAnimationFrame(() => applyZoom());
   }
+  if (view === 'focus') renderFocusView();
   if (view === 'stocking' && typeof refreshStocking === 'function') {
     refreshStocking();
   }
@@ -905,6 +907,8 @@ function itemCardHTML(item, cat) {
   const titleParts = [item.brand, item.item].filter(Boolean);
   const photo = photoForItem(item.itemId);
   const title = titleParts.join(' — ') || item.itemId;
+  const focused = !!focusedFor(item.itemId);
+  const posted = postedLabel(item.itemId);
   return `
     <div class="card${sold ? ' sold' : ''}" style="--cat:${cat.color}">
       <div class="card-media${photo ? '' : ' photo-pending'}">
@@ -914,6 +918,7 @@ function itemCardHTML(item, cat) {
       <div class="card-top">
         <label class="pick-box" title="Select this item"><input type="checkbox" data-pick="${escapeHtml(item.itemId)}"${state.picked.has(String(item.itemId)) ? ' checked' : ''}><span></span></label>
         <h3>${escapeHtml(title)}</h3>
+        <button type="button" class="focus-btn${focused ? ' on' : ''}" data-focus="${escapeHtml(item.itemId)}" data-on="${focused ? '1' : ''}" title="${focused ? 'In Focused inventory — click to remove' : 'Add to Focused inventory'}" aria-label="${focused ? 'Remove from Focused inventory' : 'Add to Focused inventory'}">${focused ? '◉' : '◎'}</button>
         <span class="status-badge ${statusClass(item.sourceStatus)}">${escapeHtml(item.sourceStatus || '—')}</span>
       </div>
       ${actionBadgesHTML(item.itemId)}
@@ -923,6 +928,7 @@ function itemCardHTML(item, cat) {
         ${item.size ? `<span><b>Size —</b> ${escapeHtml(item.size)}</span>` : ''}
         ${item.condition ? `<span><b>Condition —</b> ${escapeHtml(item.condition)}</span>` : ''}
         <span><b>List price —</b> ${priceLineHTML(item)}${item.floorPrice ? ` (floor ${escapeHtml(item.floorPrice)})` : ''}</span>
+        ${posted ? `<span><b>Posted —</b> ${escapeHtml(posted)}</span>` : ''}
         ${sold ? `<span><b>Sold —</b> ${escapeHtml(item.soldPrice || '—')}</span>` : ''}
       </div>
       ${platformStatsHTML(item)}
@@ -969,6 +975,11 @@ function itemDetailHTML(item) {
 }
 
 function wireItemCards(container, onChange) {
+  container.querySelectorAll('button[data-focus]').forEach(btn => btn.addEventListener('click', event => {
+    event.preventDefault();
+    event.stopPropagation();
+    toggleFocus(btn.dataset.focus, !!btn.dataset.on);
+  }));
   container.querySelectorAll('input[data-pick]').forEach(box => box.addEventListener('change', () => {
     const id = String(box.dataset.pick);
     if (box.checked) state.picked.add(id); else state.picked.delete(id);
@@ -1124,6 +1135,7 @@ function refreshInventoryViews() {
   renderListChips();
   renderList();
   renderPickPanel();
+  renderFocusView();
   renderStats();
   renderAction();
 }
@@ -1511,6 +1523,185 @@ function renderPickPanel() {
   }));
 }
 function persistPicked() { localSet('sellHub.picked', [...state.picked]); }
+
+// ---------------------------------------------------------------------
+// Focused inventory — the shortlist you're actively working. Same cards as
+// Inventory, so anything you can do there you can do here.
+// ---------------------------------------------------------------------
+function renderFocusView() {
+  const container = document.getElementById('focusList');
+  if (!container) return;
+  const items = focusedItems();
+  const latestByPlatform = latestMetricsByItemPlatform();
+  const count = document.getElementById('focusCount');
+  if (count) count.textContent = String(items.length);
+
+  const tiles = document.getElementById('focusTiles');
+  if (tiles) {
+    const stats = items.map(it => itemSortStats(it, latestByPlatform));
+    const views = stats.reduce((n, x) => n + x.views, 0);
+    const clicks = stats.reduce((n, x) => n + x.clicks, 0);
+    const value = items.reduce((n, it) => n + parseMoney(it.listPrice), 0);
+    const tasks = items.reduce((n, it) => n + itemTasks(it).total, 0);
+    tiles.innerHTML = items.length ? `
+      <div class="stat-tile"><div class="num">${items.length}</div><div class="lbl">Focused</div></div>
+      <div class="stat-tile"><div class="num">${fmtMoney(value)}</div><div class="lbl">Asking</div></div>
+      <div class="stat-tile"><div class="num">${views.toLocaleString()}</div><div class="lbl">Views</div></div>
+      <div class="stat-tile"><div class="num">${clicks.toLocaleString()}</div><div class="lbl">Clicks</div></div>
+      <div class="stat-tile"><div class="num">${tasks}</div><div class="lbl">Open tasks</div></div>` : '';
+  }
+
+  // Worth a look: getting clicked but not focused yet.
+  const suggestBox = document.getElementById('focusSuggest');
+  if (suggestBox) {
+    const candidates = state.inventory
+      .filter(it => !isSold(it) && !focusedFor(it.itemId))
+      .map(it => ({ it, stats: itemSortStats(it, latestByPlatform) }))
+      .filter(r => r.stats.clicks > 0)
+      .sort((a, b) => b.stats.clicks - a.stats.clicks)
+      .slice(0, 5);
+    suggestBox.innerHTML = candidates.length ? `
+      <span class="fi-suggest-label">Getting interest — add to focus?</span>
+      ${candidates.map(({ it, stats }) => `
+        <button type="button" class="fi-suggest-chip" data-focus-add="${escapeHtml(it.itemId)}">
+          ${escapeHtml(itemShortName(it))} <small>${stats.clicks} clicks</small>
+        </button>`).join('')}` : '';
+    suggestBox.querySelectorAll('[data-focus-add]').forEach(btn => btn.addEventListener('click', () => {
+      toggleFocus(btn.dataset.focusAdd, false);
+    }));
+  }
+
+  if (!items.length) {
+    container.innerHTML = `<div class="empty-state">Nothing focused yet. Tap ◎ on any inventory card to put it here — it stays in Inventory too.</div>`;
+    return;
+  }
+  const ranked = items
+    .map(it => ({ it, stats: itemSortStats(it, latestByPlatform) }))
+    .sort((a, b) => b.stats.clicks - a.stats.clicks || b.stats.views - a.stats.views);
+  container.innerHTML = `<div class="card-grid">${ranked.map(({ it }) => itemCardHTML(it, categoryMeta(it.category))).join('')}</div>`;
+  wireItemCards(container, renderFocusView);
+}
+
+// ---------------------------------------------------------------------
+// Inventory compilations — pick any items, posted or not, and see them as one
+// list with the totals that matter: asking price, views, and what's still owed.
+// ---------------------------------------------------------------------
+function setInventoryMode(mode) {
+  state.inventoryMode = mode === 'compile' ? 'compile' : 'browse';
+  localSet('sellHub.inventoryMode', state.inventoryMode);
+  const browse = document.getElementById('inventoryBrowse');
+  const compile = document.getElementById('inventoryCompile');
+  if (browse) browse.hidden = state.inventoryMode === 'compile';
+  if (compile) compile.hidden = state.inventoryMode !== 'compile';
+  const btn = document.getElementById('compileOpenBtn');
+  if (btn) btn.textContent = state.inventoryMode === 'compile' ? '← Back to inventory' : 'Compilations';
+  if (state.inventoryMode === 'compile') renderCompilation();
+}
+
+function compilationPickerHTML(query) {
+  const q = String(query || '').trim().toLowerCase();
+  const items = state.inventory
+    .filter(it => !isSold(it) || state.picked.has(String(it.itemId)))
+    .filter(it => !q || `${it.brand || ''} ${it.item || ''} ${it.itemId} ${it.size || ''}`.toLowerCase().includes(q))
+    .sort((a, b) => (a.item || a.brand || '').localeCompare(b.item || b.brand || ''));
+  if (!items.length) return '<p class="muted">Nothing matches that.</p>';
+  return items.map(it => {
+    const on = state.picked.has(String(it.itemId));
+    const status = platformsStatusFor(it);
+    const where = status.done.length
+      ? status.done.map(d => d.meta.label).join(', ')
+      : (status.missing.length ? `to post: ${status.missing.map(m => m.meta.label).join(', ')}` : 'not listed');
+    return `
+      <label class="cp-pick${on ? ' on' : ''}">
+        <input type="checkbox" data-compile-pick="${escapeHtml(it.itemId)}"${on ? ' checked' : ''}>
+        <span class="cp-pick-main">${escapeHtml(itemShortName(it))}<small>${escapeHtml(where)}</small></span>
+        <span class="cp-pick-price">${escapeHtml(String(it.listPrice ?? '—'))}</span>
+      </label>`;
+  }).join('');
+}
+
+function renderCompilation() {
+  const wrap = document.getElementById('inventoryCompile');
+  if (!wrap || wrap.hidden) return;
+  const picker = document.getElementById('compilePicker');
+  const search = document.getElementById('compileSearch');
+  if (picker) {
+    picker.innerHTML = compilationPickerHTML(search ? search.value : '');
+    picker.querySelectorAll('input[data-compile-pick]').forEach(box => box.addEventListener('change', () => {
+      const id = String(box.dataset.compilePick);
+      if (box.checked) state.picked.add(id); else state.picked.delete(id);
+      persistPicked();
+      renderCompilation();
+      renderList();
+    }));
+  }
+
+  const body = document.getElementById('compileBody');
+  if (!body) return;
+  const items = pickedItems();
+  if (!items.length) {
+    body.innerHTML = '<div class="empty-state">Tick items on the left to build a compilation.</div>';
+    return;
+  }
+  const latestByPlatform = latestMetricsByItemPlatform();
+  let sumPrice = 0, sumViews = 0, sumClicks = 0, sumPosts = 0, sumSuggest = 0, sumOther = 0;
+  const rows = items.map(it => {
+    const stats = itemSortStats(it, latestByPlatform);
+    const tasks = itemTasks(it);
+    const status = platformsStatusFor(it);
+    sumPrice += parseMoney(it.listPrice);
+    sumViews += stats.views;
+    sumClicks += stats.clicks;
+    sumPosts += tasks.posts;
+    if (tasks.suggestion) sumSuggest += 1;
+    sumOther += tasks.other.length;
+    const live = status.done.map(d => `<span class="cp-site live" style="--plat:${d.meta.color}">${escapeHtml(d.meta.label)}</span>`).join('');
+    const todo = status.missing.map(m => `<span class="cp-site" style="--plat:${m.meta.color}">${escapeHtml(m.meta.label)}</span>`).join('');
+    const posted = postedLabel(it.itemId);
+    const taskBits = [
+      tasks.posts ? `${tasks.posts} to post` : '',
+      tasks.suggestion,
+      ...tasks.other,
+    ].filter(Boolean);
+    return `
+      <tr>
+        <td class="cp-name">
+          <b>${escapeHtml(itemShortName(it))}</b>
+          <small>${escapeHtml(it.size || '—')}${posted ? ` · ${escapeHtml(posted)}` : ' · not posted'}</small>
+        </td>
+        <td class="cp-price">${escapeHtml(String(it.listPrice ?? '—'))}</td>
+        <td class="cp-sites">${live}${todo}</td>
+        <td class="cp-stats">${status.done.length ? `${stats.views} views · ${stats.clicks} clicks` : '<span class="muted">not live</span>'}</td>
+        <td class="cp-tasks">${taskBits.length ? escapeHtml(taskBits.join(' · ')) : '<span class="muted">clear</span>'}</td>
+        <td><button type="button" class="icon-btn cp-drop" data-id="${escapeHtml(it.itemId)}" aria-label="Remove">✕</button></td>
+      </tr>`;
+  }).join('');
+
+  body.innerHTML = `
+    <div class="cp-head">
+      <h3>${items.length} item${items.length === 1 ? '' : 's'} selected</h3>
+      <button type="button" class="icon-btn" id="compileClear">Clear all</button>
+    </div>
+    <table class="cp-table">
+      <thead><tr><th>Item</th><th>Price</th><th>Sites</th><th>Stats</th><th>Tasks</th><th></th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <hr class="cp-rule">
+    <div class="stat-tiles cp-totals">
+      <div class="stat-tile"><div class="num">${fmtMoney(sumPrice)}</div><div class="lbl">Asking total</div></div>
+      <div class="stat-tile"><div class="num">${sumViews.toLocaleString()}</div><div class="lbl">Views</div></div>
+      <div class="stat-tile"><div class="num">${sumClicks.toLocaleString()}</div><div class="lbl">Clicks</div></div>
+      <div class="stat-tile"><div class="num">${sumPosts + sumSuggest + sumOther}</div><div class="lbl">Tasks</div></div>
+    </div>
+    <p class="cp-task-breakdown">${sumPosts} post${sumPosts === 1 ? '' : 's'} to make · ${sumSuggest} suggestion${sumSuggest === 1 ? '' : 's'} to deploy · ${sumOther} other task${sumOther === 1 ? '' : 's'}</p>`;
+
+  body.querySelector('#compileClear').addEventListener('click', () => {
+    state.picked.clear(); persistPicked(); renderCompilation(); renderList();
+  });
+  body.querySelectorAll('.cp-drop').forEach(b => b.addEventListener('click', () => {
+    state.picked.delete(String(b.dataset.id)); persistPicked(); renderCompilation(); renderList();
+  }));
+}
 
 function renderList() {
   const container = document.getElementById('catSections');
@@ -2637,6 +2828,65 @@ function priceHoldFor(itemId) {
 }
 const PRICE_HOLD_LABELS = ['Try a price drop', 'Refresh listing'];
 
+// Focus — a hand-picked shortlist of listings worth pushing. Kept in Item
+// Actions so it follows the Sheet rather than one browser: the latest "Focus"
+// wins unless a later "Unfocus" clears it. Focusing never takes an item out of
+// Inventory; the Focus tab is a second window onto the same items.
+function focusedFor(itemId) {
+  const on = latestActionOfType(itemId, 'Focus');
+  if (!on) return null;
+  const off = latestActionOfType(itemId, 'Unfocus');
+  if (off && off.date >= on.date && state.itemActions.indexOf(off) > state.itemActions.indexOf(on)) return null;
+  return on;
+}
+function focusedItems() {
+  return state.inventory.filter(it => !isSold(it) && focusedFor(it.itemId));
+}
+async function toggleFocus(itemId, isOn) {
+  await recordItemAction(itemId, isOn ? 'Unfocus' : 'Focus', isOn ? 'Back to regular inventory.' : 'Pushing this one.');
+  renderList();
+  renderFocusView();
+  renderPickPanel();
+}
+
+// When an item first went up anywhere, and how long it has been sitting.
+function postedInfoFor(itemId) {
+  const dates = state.postingQueue
+    .filter(r => String(r.itemId) === String(itemId))
+    .map(r => String(r.datePosted || '').slice(0, 10))
+    .filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d))
+    .sort();
+  if (!dates.length) return null;
+  const first = dates[0];
+  const days = Math.max(0, Math.round(
+    (new Date(todayStr() + 'T12:00:00') - new Date(first + 'T12:00:00')) / 86400000));
+  return { date: first, days };
+}
+function postedLabel(itemId) {
+  const p = postedInfoFor(itemId);
+  if (!p) return '';
+  const when = new Date(p.date + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const age = p.days === 0 ? 'today' : `${p.days} day${p.days === 1 ? '' : 's'} old`;
+  return `${when} · ${age}`;
+}
+
+// Everything still owed on one item, so a compilation can total them up.
+function itemTasks(item) {
+  const posts = platformsStatusFor(item).missing.length;
+  const action = pricingActionFor(item);
+  const suggests = action && !action.hidden && ['urgent', 'attention', 'opportunity'].includes(action.severity);
+  const other = [];
+  if (!photoForItem(item.itemId)) other.push('needs a photo');
+  const note = postingNoteFor(item.itemId);
+  if (note) other.push(note);
+  return {
+    posts: posts,
+    suggestion: suggests ? action.label : '',
+    other: other,
+    total: posts + (suggests ? 1 : 0) + other.length,
+  };
+}
+
 function stillToListRows() {
   return state.inventory
     .filter(function (it) { return !isSold(it); })
@@ -2784,6 +3034,62 @@ function renderStillToList() {
   const byName = function (a, b) { return (a.item.item || a.item.brand || '').localeCompare(b.item.item || b.item.brand || ''); };
   const itemTitle = function (item) { return [item.brand, item.item].filter(Boolean).join(' — ') || item.itemId; };
 
+  // By item: one card per thing you own, with every site it still owes. Better
+  // for "what have I got left to do" than the by-site view, which repeats an
+  // item once per platform.
+  if (state.stlGroup === 'item') {
+    const itemRows = rows
+      .filter(function (r) { return r.status.missing.some(function (m) { return !siteFilter || m.meta.id === siteFilter; }); })
+      .slice()
+      .sort(function (a, b) {
+        return (postingNoteFor(a.item.itemId) ? 1 : 0) - (postingNoteFor(b.item.itemId) ? 1 : 0) || byName(a, b);
+      });
+    const onHoldCount = itemRows.filter(function (r) { return postingNoteFor(r.item.itemId); }).length;
+    const cards = itemRows.map(function ({ item, status }) {
+      const missing = status.missing.filter(function (m) { return !siteFilter || m.meta.id === siteFilter; });
+      const live = status.done.map(function (d) { return d.meta.label; });
+      const metaBits = [
+        priceLineHTML(item),
+        item.floorPrice ? `floor ${escapeHtml(item.floorPrice)}` : '',
+        live.length ? `Live: ${escapeHtml(live.join(', '))}` : 'Not live anywhere yet',
+        postedLabel(item.itemId) ? `Posted ${escapeHtml(postedLabel(item.itemId))}` : '',
+      ].filter(Boolean);
+      return `
+        <div class="card stl-card action-row${postingNoteFor(item.itemId) ? ' stl-on-hold' : ''}">
+          <div class="ar-title-row">
+            <h3>${escapeHtml(itemTitle(item))}</h3>
+            <span class="stl-need-count">${missing.length} site${missing.length === 1 ? '' : 's'}</span>
+          </div>
+          ${postingNoteHTML(item, missing.length ? missing[0].meta.id : '')}
+          ${metaBits.length ? `<div class="ar-meta-line">${metaBits.join(' · ')}</div>` : ''}
+          <div class="stl-site-rows">
+            ${missing.map(function (m) {
+              return `<div class="stl-site-row" style="--plat:${m.meta.color}">
+                <span class="stl-chip">${escapeHtml(m.meta.label)}</span>
+                <button class="btn small stl-listed-btn" data-id="${escapeHtml(item.itemId)}" data-platform="${escapeHtml(m.meta.label)}">Mark listed</button>
+                <button class="icon-btn stl-skip-btn" data-id="${escapeHtml(item.itemId)}" data-platform="${escapeHtml(m.meta.label)}">Not posting</button>
+              </div>`;
+            }).join('')}
+          </div>
+          <div class="ar-actions">
+            <div class="ar-secondary">
+              ${editToggleHTML(item).replace('btn secondary ie-toggle', 'icon-btn ie-toggle')}
+              ${postingNoteFor(item.itemId) || !missing.length ? '' : `<button class="icon-btn stl-note-add" data-key="${escapeHtml(`${item.itemId}|${missing[0].meta.id}`)}">+ Note</button>`}
+            </div>
+          </div>
+          ${itemEditPanelHTML(item)}
+          ${missing.length ? stlListingDetailsHTML(item, missing[0].meta) : ''}
+        </div>`;
+    }).join('');
+    container.innerHTML = `
+      <details class="action-group stl-group" open>
+        <summary><span class="ag-title">Every item still to list</span><span class="ag-count">${itemRows.length}</span>${onHoldCount ? `<span class="ag-hold">${onHoldCount} on hold</span>` : ''}</summary>
+        <div class="card-grid">${cards || '<div class="empty-state">Nothing outstanding.</div>'}</div>
+      </details>` + (skippedRows.length ? '' : '');
+    wireStillToListCards(container);
+    return;
+  }
+
   const groupHTML = Array.from(groups.values())
     .sort(function (a, b) { return platformRank(a.meta.id) - platformRank(b.meta.id) || a.meta.label.localeCompare(b.meta.label); })
     .map(function (g) {
@@ -2843,6 +3149,12 @@ function renderStillToList() {
     </details>` : '';
 
   container.innerHTML = groupHTML + skippedHTML;
+  wireStillToListCards(container);
+}
+
+// Shared by both groupings: the by-site columns and the by-item list render
+// the same buttons, so they wire up the same way.
+function wireStillToListCards(container) {
   wireActionStars(container);
   wireItemEditors(container);
   wireCopyButtons(container);
@@ -3621,6 +3933,8 @@ document.getElementById('saveBalanceBtn').addEventListener('click', saveBalance)
 // ---------------------------------------------------------------------
 
 state.picked = new Set(localGet('sellHub.picked', []));
+state.inventoryMode = localGet('sellHub.inventoryMode', 'browse');
+state.stlGroup = localGet('sellHub.stlGroup', 'site');
 state.listGroup = localGet('sellHub.listGroup', 'category');
 // Inventory sections always start collapsed; expand choices live only in-session.
 state.expandedCats = new Set();
@@ -3628,6 +3942,19 @@ state.expandedSizes = new Set();
 state.expandedRanked = new Set();
 state.expandedWheelItems = new Set();
 document.querySelectorAll('#groupSwitch button').forEach(b => b.classList.toggle('active', b.dataset.group === state.listGroup));
+document.querySelectorAll('#stlGroupSwitch button').forEach(b => {
+  b.classList.toggle('active', b.dataset.stlGroup === state.stlGroup);
+  b.addEventListener('click', () => {
+    state.stlGroup = b.dataset.stlGroup;
+    localSet('sellHub.stlGroup', state.stlGroup);
+    document.querySelectorAll('#stlGroupSwitch button').forEach(x => x.classList.toggle('active', x === b));
+    renderStillToList();
+  });
+});
+document.getElementById('compileOpenBtn')?.addEventListener('click', () => {
+  setInventoryMode(state.inventoryMode === 'compile' ? 'browse' : 'compile');
+});
+document.getElementById('compileSearch')?.addEventListener('input', () => renderCompilation());
 
 renderWheel();
 applyZoom();
@@ -3635,6 +3962,8 @@ routeOverview();
 renderListChips();
 renderList();
 renderPickPanel();
+renderFocusView();
+setInventoryMode(state.inventoryMode);
 setMode(localGet('sellHub.mode', 'list'));
 renderStats();
 state.featuredActions = new Set(localGet('sellHub.featuredActions', []));
