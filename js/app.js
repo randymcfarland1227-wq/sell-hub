@@ -85,8 +85,15 @@ function platformId(name) {
 }
 function platformMeta(name) {
   const id = platformId(name);
-  if (id && PLATFORM_META[id]) return { id, ...PLATFORM_META[id] };
-  return { id: id || categoryId(name) || 'other', label: name || DEFAULT_PLATFORM_META.label, color: DEFAULT_PLATFORM_META.color };
+  // short is for chips and buttons where the full name pushes a row onto two
+  // lines; it falls back to the full label everywhere it isn't set.
+  if (id && PLATFORM_META[id]) {
+    const meta = { id, ...PLATFORM_META[id] };
+    if (!meta.short) meta.short = meta.label;
+    return meta;
+  }
+  const label = name || DEFAULT_PLATFORM_META.label;
+  return { id: id || categoryId(name) || 'other', label, short: label, color: DEFAULT_PLATFORM_META.color };
 }
 function splitPlatforms(field) {
   return String(field || '').split(/[,/]/).map(s => s.trim()).filter(function (value) {
@@ -889,10 +896,10 @@ function siteStatusChipsHTML(item) {
   const chip = (row, cls, text, title) =>
     `<span class="stl-chip ${cls}" style="--plat:${row.meta.color}" title="${escapeHtml(title)}">${escapeHtml(text)}</span>`;
   const chips = status.done
-    .map(d => chip(d, 'stl-done', '✓ ' + d.meta.label, sold ? 'Still live on ' + d.meta.label + ' — needs ending' : 'Live on ' + d.meta.label))
-    .concat(status.ended.map(e => chip(e, 'stl-skipped', 'Ended · ' + e.meta.label, 'Listing ended on ' + e.meta.label)))
-    .concat(sold ? [] : status.missing.map(m => chip(m, 'stl-missing', m.meta.label, 'Still to post on ' + m.meta.label)))
-    .concat(sold ? [] : status.skipped.map(s => chip(s, 'stl-skipped', 'Not posting · ' + s.meta.label, 'Not posting on ' + s.meta.label)));
+    .map(d => chip(d, 'stl-done', '✓ ' + d.meta.short, sold ? 'Still live on ' + d.meta.label + ' — needs ending' : 'Live on ' + d.meta.label))
+    .concat(status.ended.map(e => chip(e, 'stl-skipped', 'Ended · ' + e.meta.short, 'Listing ended on ' + e.meta.label)))
+    .concat(sold ? [] : status.missing.map(m => chip(m, 'stl-missing', m.meta.short, 'Still to post on ' + m.meta.label)))
+    .concat(sold ? [] : status.skipped.map(s => chip(s, 'stl-skipped', 'Not posting · ' + s.meta.short, 'Not posting on ' + s.meta.label)));
   return chips.length ? `<div class="site-chips">${chips.join('')}</div>` : '';
 }
 
@@ -936,7 +943,7 @@ function itemCardHTML(item, cat) {
         <button type="button" class="focus-btn${focused ? ' on' : ''}" data-focus="${escapeHtml(item.itemId)}" data-on="${focused ? '1' : ''}" title="${focused ? 'In Focused inventory — click to remove' : 'Add to Focused inventory'}" aria-label="${focused ? 'Remove from Focused inventory' : 'Add to Focused inventory'}">${focused ? '◉' : '◎'}</button>
         <span class="status-badge ${statusClass(item.sourceStatus)}">${escapeHtml(item.sourceStatus || '—')}</span>
       </div>
-      ${sold ? '' : speedChipHTML(item)}
+      ${sold ? '' : `<div class="chip-pair">${expectedChipHTML(item)}${speedChipHTML(item)}</div>`}
       ${actionBadgesHTML(item.itemId)}
       ${localDealBadgesHTML(item.itemId)}
       ${siteStatusChipsHTML(item)}
@@ -1560,6 +1567,35 @@ const OPTIMIZE_LEVERS = [
   { id: 'bundle', label: 'Bundle with something', why: 'Turns two dead cheap items into one sale worth shipping.' },
   { id: 'promote', label: 'Promote it', why: 'General promoted listings only charge an ad fee when it sells.' },
 ];
+// A lagger is an item you've looked at and decided to leave alone. It stops
+// appearing in Optimize without pretending it's doing fine.
+function laggerFor(itemId) {
+  const on = latestActionOfType(itemId, 'Lagger');
+  if (!on) return null;
+  const off = latestActionOfType(itemId, 'Unlagger');
+  if (off && off.date >= on.date && state.itemActions.indexOf(off) > state.itemActions.indexOf(on)) return null;
+  return on;
+}
+// Tasks are the chosen levers, written out one per line so the Actions page
+// can tick them off individually.
+function openTasksFor(itemId) {
+  const done = new Set(state.itemActions
+    .filter(a => String(a.itemId) === String(itemId) && a.action === 'Task Done')
+    .map(a => String(a.detail || '').trim()));
+  const seen = new Set();
+  return state.itemActions
+    .filter(a => String(a.itemId) === String(itemId) && a.action === 'Task')
+    .map(a => String(a.detail || '').trim())
+    .filter(t => t && !done.has(t) && !seen.has(t) && seen.add(t));
+}
+function allOpenTasks() {
+  const out = [];
+  state.inventory.filter(it => !isSold(it)).forEach(it => {
+    openTasksFor(it.itemId).forEach(t => out.push({ item: it, task: t }));
+  });
+  return out;
+}
+
 function optimizePlanFor(itemId) {
   const latest = latestActionOfType(itemId, 'Optimize Plan');
   return latest ? String(latest.detail || '') : '';
@@ -1579,6 +1615,7 @@ function optimizeRowHTML(item, sp) {
           <b>${escapeHtml(itemShortName(item))}</b>
           <small>${escapeHtml(String(item.listPrice ?? '—'))} · floor ${escapeHtml(String(item.floorPrice ?? '—'))} · ${escapeHtml(sites)}</small>
           <small>${sp.views} views · ${sp.clicks} clicks · ${sp.watchers} watching · ${posted ? 'day ' + posted.days : 'not posted'}${sp.overdue ? ` · <b class="opt-over">past ${escapeHtml(sp.band.days)}</b>` : ''}</small>
+          <small>Expected ${escapeHtml(expectedSaleFor(item).label.toLowerCase())} (${escapeHtml(expectedSaleFor(item).days)}) · performing ${escapeHtml(sp.band.label.toLowerCase())}</small>
         </div>
       </div>
       <div class="opt-levers">
@@ -1586,7 +1623,9 @@ function optimizeRowHTML(item, sp) {
       </div>
       <textarea class="opt-notes" rows="2" placeholder="What's the plan? e.g. reshoot Saturday, then offer at $45 to the three watchers.">${escapeHtml(notes)}</textarea>
       <div class="opt-actions">
-        <button type="button" class="btn small opt-save">Save plan</button>
+        <button type="button" class="btn small opt-tasks">Add to tasks</button>
+        <button type="button" class="btn secondary small opt-save">Save plan only</button>
+        <button type="button" class="icon-btn opt-lagger" title="Not performing, and you don't want to do anything about it">Mark as lagger</button>
         <span class="status-msg opt-status"></span>
       </div>
     </div>`;
@@ -1597,8 +1636,18 @@ function renderOptimizeView() {
   const latestByPlatform = latestMetricsByItemPlatform();
   const live = state.inventory.filter(it => !isSold(it) && isRealItem(it));
   const scored = live.map(it => ({ it, sp: saleSpeedFor(it, latestByPlatform) }));
-  const overdue = scored.filter(r => r.sp.overdue).sort((a, b) => (b.sp.daysListed || 0) - (a.sp.daysListed || 0));
-  const focused = scored.filter(r => focusedFor(r.it.itemId) && !r.sp.overdue);
+  const laggers = scored.filter(r => laggerFor(r.it.itemId));
+  const active = scored.filter(r => !laggerFor(r.it.itemId));
+  const overdue = active.filter(r => r.sp.overdue).sort((a, b) => (b.sp.daysListed || 0) - (a.sp.daysListed || 0));
+  // Behind expectation: still inside its window, but the pace it is actually
+  // running at is slower than the kind of item suggested. This is the early
+  // warning; overdue is the deadline.
+  const behind = active.filter(r => !r.sp.overdue
+    && r.sp.expected && ['fast', 'medium', 'slow'].includes(r.sp.band.id)
+    && r.sp.band.order > r.sp.expected.order)
+    .sort((a, b) => (b.sp.daysListed || 0) - (a.sp.daysListed || 0));
+  const behindIds = new Set(behind.map(r => r.it.itemId));
+  const focused = active.filter(r => focusedFor(r.it.itemId) && !r.sp.overdue && !behindIds.has(r.it.itemId));
   const withPlan = scored.filter(r => optimizePlanFor(r.it.itemId));
 
   const tiles = document.getElementById('optimizeTiles');
@@ -1606,7 +1655,8 @@ function renderOptimizeView() {
     const atRisk = overdue.reduce((n, r) => n + parseMoney(r.it.listPrice), 0);
     tiles.innerHTML = `
       <div class="stat-tile"><div class="num">${overdue.length}</div><div class="lbl">Past their window</div></div>
-      <div class="stat-tile"><div class="num">${fmtMoney(atRisk)}</div><div class="lbl">Asking, stalled</div></div>
+      <div class="stat-tile"><div class="num">${behind.length}</div><div class="lbl">Behind expectation</div></div>
+      <div class="stat-tile"><div class="num">${fmtMoney(atRisk + behind.reduce((n, r) => n + parseMoney(r.it.listPrice), 0))}</div><div class="lbl">Asking, stalled</div></div>
       <div class="stat-tile"><div class="num">${focused.length}</div><div class="lbl">Focused</div></div>
       <div class="stat-tile"><div class="num">${withPlan.length}</div><div class="lbl">Have a plan</div></div>`;
   }
@@ -1619,12 +1669,56 @@ function renderOptimizeView() {
     </div>` : '';
 
   container.innerHTML =
-    section('Past their window', 'Listed longer than their own traffic suggested they would take. These are the ones going stale.', overdue)
+    section('Past their window', 'Listed longer than this kind of item was expected to take. These are going stale.', overdue)
+    + section('Behind expectation', 'Still inside the window, but running slower than this kind of item usually does. Cheapest time to fix it.', behind)
     + section('Focused', "Your shortlist. Still inside its window, but you wanted these pushed.", focused)
-    + (overdue.length || focused.length ? '' : '<div class="empty-state">Nothing is overdue and nothing is focused. Tap ◎ on an inventory card to work on something specific.</div>');
+    + (laggers.length ? `
+      <details class="opt-laggers">
+        <summary>Marked as laggers <span class="fi-count">${laggers.length}</span></summary>
+        <p class="subhead-note">Left alone on purpose. They still show in Inventory.</p>
+        ${laggers.map(r => `<div class="opt-lagger-row"><b>${escapeHtml(itemShortName(r.it))}</b><small>${escapeHtml(String(r.it.listPrice ?? '—'))} · ${r.sp.views} views · ${r.sp.clicks} clicks</small><button type="button" class="btn secondary small opt-unlagger" data-id="${escapeHtml(r.it.itemId)}">Work on it again</button></div>`).join('')}
+      </details>` : '')
+    + (overdue.length || behind.length || focused.length ? '' : '<div class="empty-state">Nothing is overdue and nothing is focused. Tap ◎ on an inventory card to work on something specific.</div>');
+
+  container.querySelectorAll('.opt-unlagger').forEach(btn => btn.addEventListener('click', async () => {
+    await recordItemAction(btn.dataset.id, 'Unlagger', 'Back in the optimize list.');
+    renderOptimizeView();
+  }));
 
   container.querySelectorAll('.opt-lever').forEach(btn => btn.addEventListener('click', () => {
     btn.classList.toggle('on');
+  }));
+  container.querySelectorAll('.opt-tasks').forEach(btn => btn.addEventListener('click', async () => {
+    const row = btn.closest('.opt-row');
+    const id = row.dataset.optId;
+    const chosen = [...row.querySelectorAll('.opt-lever.on')];
+    const notes = row.querySelector('.opt-notes').value.trim();
+    const status = row.querySelector('.opt-status');
+    if (!chosen.length) { status.textContent = 'Pick at least one option first.'; status.classList.add('error'); return; }
+    status.classList.remove('error');
+    status.textContent = 'Adding…';
+    try {
+      for (const b of chosen) await recordItemAction(id, 'Task', b.textContent.trim());
+      await recordItemAction(id, 'Optimize Plan', chosen.map(b => b.dataset.lever).join(', ') + (notes ? ' | ' + notes : ''));
+      status.textContent = `${chosen.length} task${chosen.length === 1 ? '' : 's'} added to Actions.`;
+      renderAction();
+    } catch (err) {
+      status.textContent = err.message || String(err);
+      status.classList.add('error');
+    }
+  }));
+  container.querySelectorAll('.opt-lagger').forEach(btn => btn.addEventListener('click', async () => {
+    const row = btn.closest('.opt-row');
+    const id = row.dataset.optId;
+    const status = row.querySelector('.opt-status');
+    status.textContent = 'Saving…';
+    try {
+      await recordItemAction(id, 'Lagger', 'Not performing; deliberately leaving it alone for now.');
+      renderOptimizeView();
+    } catch (err) {
+      status.textContent = err.message || String(err);
+      status.classList.add('error');
+    }
   }));
   container.querySelectorAll('.opt-save').forEach(btn => btn.addEventListener('click', async () => {
     const row = btn.closest('.opt-row');
@@ -1772,8 +1866,8 @@ function renderCompilation() {
     sumPosts += tasks.posts;
     if (tasks.suggestion) sumSuggest += 1;
     sumOther += tasks.other.length;
-    const live = status.done.map(d => `<span class="cp-site live" style="--plat:${d.meta.color}">${escapeHtml(d.meta.label)}</span>`).join('');
-    const todo = status.missing.map(m => `<span class="cp-site" style="--plat:${m.meta.color}">${escapeHtml(m.meta.label)}</span>`).join('');
+    const live = status.done.map(d => `<span class="cp-site live" style="--plat:${d.meta.color}">${escapeHtml(d.meta.short)}</span>`).join('');
+    const todo = status.missing.map(m => `<span class="cp-site" style="--plat:${m.meta.color}">${escapeHtml(m.meta.short)}</span>`).join('');
     const posted = postedLabel(it.itemId);
     const photo = photoForItem(it.itemId);
     const taskBits = [
@@ -1896,9 +1990,9 @@ function renderList() {
         <summary class="cat-heading">
           <span class="icon speed-dot speed-${escapeHtml(g.band.id)}"></span>
           <h2>${escapeHtml(g.band.label)}</h2>
-          <span class="speed-range">${escapeHtml(g.band.days)}</span>
+          <span class="speed-range">pace suggests ${escapeHtml(g.band.days)}</span>
           <span class="count">${g.rows.length}</span>
-          ${over ? `<span class="speed-over-count">${over} past window</span>` : ''}
+          ${over ? `<span class="speed-over-count">${over} past expected</span>` : ''}
         </summary>
         <div class="card-grid">${g.rows.map(r => itemCardHTML(r.it, categoryMeta(r.it.category))).join('')}</div>
       </details>`;
@@ -2908,11 +3002,41 @@ async function saveLocalDeal(body, btn) {
 
 function renderAction() {
   renderToShip();
+  renderTaskList();
   renderLocalDeals();
   renderSoldElsewhere();
   renderStillToList();
   renderPricingActions();
   renderActionSummary();
+}
+
+// The tasks you chose on Optimize, as a list you can tick off. Each one is a
+// row in Item Actions, so ticking it leaves a record rather than deleting it.
+function renderTaskList() {
+  const container = document.getElementById('taskList');
+  if (!container) return;
+  const tasks = allOpenTasks();
+  setActionSectionVisible('section-tasks', tasks.length > 0);
+  if (!tasks.length) { container.innerHTML = ''; return; }
+  const byItem = new Map();
+  tasks.forEach(({ item, task }) => {
+    if (!byItem.has(item.itemId)) byItem.set(item.itemId, { item, tasks: [] });
+    byItem.get(item.itemId).tasks.push(task);
+  });
+  container.innerHTML = `<div class="card-grid">${[...byItem.values()].map(({ item, tasks }) => `
+    <div class="card stl-card action-row">
+      <div class="ar-title-row"><h3>${escapeHtml(itemShortName(item))}</h3><span class="stl-need-count">${tasks.length} task${tasks.length === 1 ? '' : 's'}</span></div>
+      <div class="ar-meta-line">${priceLineHTML(item)} · ${escapeHtml(expectedSaleFor(item).label)} · ${escapeHtml(saleSpeedFor(item).band.label)}</div>
+      <ul class="task-lines">${tasks.map(t => `
+        <li><span>${escapeHtml(t)}</span><button type="button" class="btn small task-done" data-id="${escapeHtml(item.itemId)}" data-task="${escapeHtml(t)}">Done</button></li>`).join('')}</ul>
+    </div>`).join('')}</div>`;
+  container.querySelectorAll('.task-done').forEach(btn => btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    await recordItemAction(btn.dataset.id, 'Task Done', btn.dataset.task);
+    renderTaskList();
+    renderActionSummary();
+    renderOptimizeView();
+  }));
 }
 
 function renderActionSummary() {
@@ -3055,6 +3179,57 @@ function priceHoldFor(itemId) {
 }
 const PRICE_HOLD_LABELS = ['Try a price drop', 'Refresh listing'];
 
+// Expected sale window — what this KIND of thing usually takes, decided
+// before it has any traffic of its own. The speed band above grades how a
+// listing is actually doing; this one sets the expectation it is graded
+// against. Rules come from what has sold here plus how deep each buyer pool
+// is: shoes and named electronics move, plain basics and niche collectibles
+// sit.
+const SALE_EXPECTATIONS = {
+  quick:  { id: 'quick',  label: 'Quick mover', days: 'about 1-3 weeks', maxDays: 21, order: 1 },
+  steady: { id: 'steady', label: 'Steady',      days: 'about 3-6 weeks', maxDays: 42, order: 2 },
+  slow:   { id: 'slow',   label: 'Slow mover',  days: 'about 6-12 weeks', maxDays: 84, order: 3 },
+  tail:   { id: 'tail',   label: 'Long tail',   days: '3 months or more', maxDays: 365, order: 4 },
+};
+const QUICK_SHOE_BRANDS = ['nike', 'brooks', 'vans', 'adidas', 'new balance', 'converse', 'asics', 'hoka', 'jordan'];
+const KNOWN_ACTIVE_BRANDS = ['under armour', 'gymshark', 'lululemon', 'patagonia', 'north face', 'carhartt', 'peter millar'];
+function expectedSaleFor(item) {
+  const cat = String(item.category || '').toLowerCase();
+  const brand = String(item.brand || '').toLowerCase();
+  const name = String(item.item || '').toLowerCase();
+  const price = parseMoney(item.listPrice) || 0;
+  const hay = brand + ' ' + name;
+  const pick = (band, why) => ({ ...SALE_EXPECTATIONS[band], why });
+
+  if (cat === 'shoes') {
+    if (/boot/.test(hay)) return pick('quick', 'Boots in autumn - the season is the whole story.');
+    if (QUICK_SHOE_BRANDS.some(b => hay.includes(b))) {
+      return price <= 80 ? pick('quick', 'Named athletic shoes under $80 are the deepest buyer pool you have.')
+                         : pick('steady', 'Named shoes above $80 sell, but to a narrower set of buyers.');
+    }
+    return pick('steady', 'Shoes move, but an unfamiliar brand narrows the pool.');
+  }
+  if (cat === 'clothing') {
+    if (KNOWN_ACTIVE_BRANDS.some(b => hay.includes(b))) return pick('steady', 'A brand people search for, so it gets found - just not instantly.');
+    if (price <= 25) return pick('slow', 'Plain basics compete with thousands of identical listings.');
+    return pick('slow', 'Mid-priced clothing without a searched-for brand takes a while.');
+  }
+  if (cat === 'electronics') {
+    if (/\b([a-z]{1,4}[- ]?\d{2,}[a-z]?)\b/.test(name)) return pick('quick', 'People search electronics by model number, and this listing has one.');
+    return pick('steady', 'Electronics sell well when the buyer can name what they want.');
+  }
+  if (cat === 'kitchen') return pick('steady', 'Small appliances sell steadily, especially locally where shipping is not in the way.');
+  if (cat === 'collectibles') return pick('tail', 'Collectibles wait for the one buyer who wants exactly this - worth more, takes longer.');
+  if (cat === 'tools') return pick('steady', 'Tools hold value and sell to people searching for the exact one.');
+  if (cat === 'furniture') return pick('tail', 'Local pickup only, so it waits for someone nearby who wants it.');
+  if (/\b(dvd|cd|book|vinyl|record)\b/.test(hay)) return pick('tail', 'Media sells eventually; individual discs and books are a waiting game.');
+  return pick('steady', 'No strong signal either way from the category.');
+}
+function expectedChipHTML(item) {
+  const e = expectedSaleFor(item);
+  return `<span class="expect-chip expect-${e.id}" title="${escapeHtml(e.why)}">Expect: ${escapeHtml(e.label)} · ${escapeHtml(e.days)}</span>`;
+}
+
 // Estimated sale speed — how long this listing looks like it will take,
 // read off its own traffic rather than a guess about the category. Clicks are
 // the honest signal: an impression is eBay showing it to someone, a click is
@@ -3078,24 +3253,27 @@ function saleSpeedFor(item, latestByPlatform) {
     watchers += Number(snap && snap.watchers) || 0;
   });
   const out = { views: stats.views, clicks: stats.clicks, watchers, daysListed: posted ? posted.days : null };
-  if (days === null) return { ...out, band: SPEED_BANDS.nodata, overdue: false };
-  if (days < 4 && stats.clicks === 0) return { ...out, band: SPEED_BANDS.newish, overdue: false };
-  if (!stats.views && !stats.clicks) return { ...out, band: SPEED_BANDS.nodata, overdue: false };
+  if (days === null) return { ...out, band: SPEED_BANDS.nodata, expected: expectedSaleFor(item), overdue: false };
+  if (days < 4 && stats.clicks === 0) return { ...out, band: SPEED_BANDS.newish, expected: expectedSaleFor(item), overdue: false };
+  if (!stats.views && !stats.clicks) return { ...out, band: SPEED_BANDS.nodata, expected: expectedSaleFor(item), overdue: days > expectedSaleFor(item).maxDays };
   const clicksPerDay = stats.clicks / days;
   const viewsPerDay = stats.views / days;
   let band = SPEED_BANDS.slow;
   if (clicksPerDay >= 0.7 || watchers >= 3) band = SPEED_BANDS.fast;
   else if (clicksPerDay >= 0.15 || viewsPerDay >= 3 || watchers >= 1) band = SPEED_BANDS.medium;
-  return { ...out, band, clicksPerDay, overdue: days > band.max };
+  // Overdue is measured against what this KIND of item was expected to take,
+  // not against how it happens to be performing - otherwise a listing doing
+  // well gets flagged simply for being older than two weeks.
+  const expected = expectedSaleFor(item);
+  return { ...out, band, expected, clicksPerDay, overdue: days > expected.maxDays };
 }
 function speedChipHTML(item, latestByPlatform) {
   const s = saleSpeedFor(item, latestByPlatform);
   const cls = 'speed-chip speed-' + s.band.id + (s.overdue ? ' overdue' : '');
   const age = s.daysListed === null ? 'not posted' : `day ${s.daysListed}`;
-  const title = s.overdue
-    ? `Past its window - listed ${s.daysListed} days, this pace suggested ${s.band.days}`
-    : `${s.band.label}: ${s.band.days}. ${s.clicks} clicks over ${s.daysListed || 0} days`;
-  return `<span class="${cls}" title="${escapeHtml(title)}">${escapeHtml(s.band.label)} · ${escapeHtml(s.band.days)} · ${escapeHtml(age)}${s.overdue ? ' · OVER' : ''}</span>`;
+  const title = `Performing ${s.band.label.toLowerCase()} — ${s.clicks} clicks over ${s.daysListed || 0} days. At this pace it reads like ${s.band.days}.`
+    + (s.overdue ? ` Past the ${s.expected ? s.expected.days : ''} it was expected to take.` : '');
+  return `<span class="${cls}" title="${escapeHtml(title)}">Pace: ${escapeHtml(s.band.label)} · ${escapeHtml(age)}${s.overdue ? ' · OVERDUE' : ''}</span>`;
 }
 
 // Focus — a hand-picked shortlist of listings worth pushing. Kept in Item
@@ -3335,7 +3513,7 @@ function renderStillToList() {
           <div class="stl-site-rows">
             ${missing.map(function (m) {
               return `<div class="stl-site-row" style="--plat:${m.meta.color}">
-                <span class="stl-chip">${escapeHtml(m.meta.label)}</span>
+                <span class="stl-chip">${escapeHtml(m.meta.short)}</span>
                 <button class="btn small stl-listed-btn" data-id="${escapeHtml(item.itemId)}" data-platform="${escapeHtml(m.meta.label)}">Mark listed</button>
               </div>`;
             }).join('')}
@@ -3397,7 +3575,7 @@ function renderStillToList() {
       }).join('');
       return `
         <details class="action-group stl-group" id="stl-group-${escapeHtml(g.meta.id)}" style="--plat:${g.meta.color}" open>
-          <summary><span class="ag-title">${escapeHtml(g.meta.label)}</span><span class="ag-count">${g.rows.length}</span>${onHold ? `<span class="ag-hold">${onHold} on hold</span>` : ''}</summary>
+          <summary><span class="ag-title">${escapeHtml(g.meta.short)}</span><span class="ag-count">${g.rows.length}</span>${onHold ? `<span class="ag-hold">${onHold} on hold</span>` : ''}</summary>
           <div class="card-grid">${cards}</div>
         </details>`;
     }).join('');

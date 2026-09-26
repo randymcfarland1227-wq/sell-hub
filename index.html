@@ -15,7 +15,7 @@
   // Apply the saved theme before first paint so the page never flashes the wrong one.
   try { var t = localStorage.getItem('sellHub.theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
 </script>
-<link rel="stylesheet" href="css/styles.css?v=20260926-optimize">
+<link rel="stylesheet" href="css/styles.css?v=20260926-tasks">
 </head>
 <body>
 
@@ -301,6 +301,11 @@
       <div id="toShipList" class="card-grid"></div>
     </div>
 
+    <div class="action-section" id="section-tasks" hidden>
+      <h3 class="subhead" id="sec-tasks">Planned tasks</h3>
+      <div id="taskList"></div>
+    </div>
+
     <div class="action-section" id="section-local">
       <h3 class="subhead" id="sec-local">Local deals</h3>
       <div id="localDealsList" class="card-grid"></div>
@@ -571,12 +576,12 @@
   <div class="acq-drawer-body" id="acqDrawerBody"></div>
 </aside>
 
-<script src="js/config.js?v=20260926-optimize"></script>
-<script src="js/data.js?v=20260926-optimize"></script>
-<script src="js/app.js?v=20260926-optimize"></script>
-<script src="js/acquire-config.js?v=20260926-optimize"></script>
-<script src="js/acquire-model.js?v=20260926-optimize"></script>
-<script src="js/acquire.js?v=20260926-optimize"></script>
-<script src="js/stocking.js?v=20260926-optimize"></script>
+<script src="js/config.js?v=20260926-tasks"></script>
+<script src="js/data.js?v=20260926-tasks"></script>
+<script src="js/app.js?v=20260926-tasks"></script>
+<script src="js/acquire-config.js?v=20260926-tasks"></script>
+<script src="js/acquire-model.js?v=20260926-tasks"></script>
+<script src="js/acquire.js?v=20260926-tasks"></script>
+<script src="js/stocking.js?v=20260926-tasks"></script>
 </body>
 </html>

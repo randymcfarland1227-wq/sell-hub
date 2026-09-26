@@ -24,7 +24,7 @@ const CATEGORY_PALETTE = ['#2f5bff', '#087ea4', '#a447e8', '#16836a', '#df5b35',
 // offerHint: where/how to act on a watcher-has-interest signal on that
 // platform — surfaced by the Stats tab's "Send an offer" pricing action.
 const PLATFORM_META = {
-  facebook: { label: 'Facebook Marketplace',    color: '#1877f2', offerHint: 'Message the interested buyer directly from Your Listings.' },
+  facebook: { label: 'Facebook Marketplace', short: 'FB Marketplace', color: '#1877f2', offerHint: 'Message the interested buyer directly from Your Listings.' },
   ebay:     { label: 'eBay',                    color: '#3665f3', offerHint: "Seller Hub → Promotions → Offers to Buyers (or enable \"Best Offer\" on the listing)." },
   poshmark: { label: 'Poshmark',                color: '#822432', offerHint: 'Open the listing → the ⋯ menu → "Offer to Likes."' },
   depop:    { label: 'Depop',                   color: '#ff4655', offerHint: 'Open the listing → Offers → send a private offer to a liker.' },
