@@ -600,6 +600,7 @@ function showView(view) {
     requestAnimationFrame(() => applyZoom());
   }
   if (view === 'focus') renderFocusView();
+  if (view === 'optimize') renderOptimizeView();
   if (view === 'stocking' && typeof refreshStocking === 'function') {
     refreshStocking();
   }
@@ -701,6 +702,7 @@ function setInventoryExpandedAll(expand) {
       state.expandedRanked = new Set(ids);
     } else {
       state.expandedRanked = new Set();
+state.expandedSpeeds = new Set();
     }
   } else if (expand) {
     state.expandedCats = new Set(
@@ -934,6 +936,7 @@ function itemCardHTML(item, cat) {
         <button type="button" class="focus-btn${focused ? ' on' : ''}" data-focus="${escapeHtml(item.itemId)}" data-on="${focused ? '1' : ''}" title="${focused ? 'In Focused inventory — click to remove' : 'Add to Focused inventory'}" aria-label="${focused ? 'Remove from Focused inventory' : 'Add to Focused inventory'}">${focused ? '◉' : '◎'}</button>
         <span class="status-badge ${statusClass(item.sourceStatus)}">${escapeHtml(item.sourceStatus || '—')}</span>
       </div>
+      ${sold ? '' : speedChipHTML(item)}
       ${actionBadgesHTML(item.itemId)}
       ${localDealBadgesHTML(item.itemId)}
       ${siteStatusChipsHTML(item)}
@@ -1541,6 +1544,105 @@ function persistPicked() { localSet('sellHub.picked', [...state.picked]); }
 // Focused inventory — the shortlist you're actively working. Same cards as
 // Inventory, so anything you can do there you can do here.
 // ---------------------------------------------------------------------
+// ---------------------------------------------------------------------
+// Optimize — the page for making a slow listing move. It gathers the two
+// groups worth working (past their window, and whatever you've focused),
+// offers the levers that actually shift a listing, and keeps the plan you
+// chose on the item so next week you can see what you already tried.
+// ---------------------------------------------------------------------
+const OPTIMIZE_LEVERS = [
+  { id: 'share', label: 'Share on Poshmark', why: 'Biggest single-day lift you have - sharing put views up 30% in one day.' },
+  { id: 'offer', label: 'Send an offer', why: 'Goes straight to people already watching. Expires in 24-48h, so it needs doing while they are warm.' },
+  { id: 'price', label: 'Drop toward the floor', why: 'Only where clicks are healthy and nobody is buying - that is a price objection.' },
+  { id: 'photos', label: 'Reshoot the photos', why: 'For views with no clicks: the thumbnail is losing them, not the price.' },
+  { id: 'title', label: 'Rewrite the title', why: 'For low impressions: the words buyers search are missing.' },
+  { id: 'crosslist', label: 'Cross-list somewhere new', why: 'A fresh audience beats another price cut on a listing nobody is seeing.' },
+  { id: 'bundle', label: 'Bundle with something', why: 'Turns two dead cheap items into one sale worth shipping.' },
+  { id: 'promote', label: 'Promote it', why: 'General promoted listings only charge an ad fee when it sells.' },
+];
+function optimizePlanFor(itemId) {
+  const latest = latestActionOfType(itemId, 'Optimize Plan');
+  return latest ? String(latest.detail || '') : '';
+}
+function optimizeRowHTML(item, sp) {
+  const plan = optimizePlanFor(item.itemId);
+  const chosen = new Set(plan.split('|')[0].split(',').map(x => x.trim()).filter(Boolean));
+  const notes = plan.includes('|') ? plan.split('|').slice(1).join('|').trim() : '';
+  const posted = postedInfoFor(item.itemId);
+  const photo = photoForItem(item.itemId);
+  const sites = splitPlatforms(item.platform).map(p => platformMeta(p).label).join(', ') || 'not listed';
+  return `
+    <div class="opt-row" data-opt-id="${escapeHtml(item.itemId)}">
+      <div class="opt-head">
+        <span class="cp-thumb">${photo ? `<img src="${escapeHtml(photo)}" alt="" loading="lazy" onerror="this.remove()">` : ''}</span>
+        <div class="opt-title">
+          <b>${escapeHtml(itemShortName(item))}</b>
+          <small>${escapeHtml(String(item.listPrice ?? '—'))} · floor ${escapeHtml(String(item.floorPrice ?? '—'))} · ${escapeHtml(sites)}</small>
+          <small>${sp.views} views · ${sp.clicks} clicks · ${sp.watchers} watching · ${posted ? 'day ' + posted.days : 'not posted'}${sp.overdue ? ` · <b class="opt-over">past ${escapeHtml(sp.band.days)}</b>` : ''}</small>
+        </div>
+      </div>
+      <div class="opt-levers">
+        ${OPTIMIZE_LEVERS.map(l => `<button type="button" class="opt-lever${chosen.has(l.id) ? ' on' : ''}" data-lever="${l.id}" title="${escapeHtml(l.why)}">${escapeHtml(l.label)}</button>`).join('')}
+      </div>
+      <textarea class="opt-notes" rows="2" placeholder="What's the plan? e.g. reshoot Saturday, then offer at $45 to the three watchers.">${escapeHtml(notes)}</textarea>
+      <div class="opt-actions">
+        <button type="button" class="btn small opt-save">Save plan</button>
+        <span class="status-msg opt-status"></span>
+      </div>
+    </div>`;
+}
+function renderOptimizeView() {
+  const container = document.getElementById('optimizeList');
+  if (!container) return;
+  const latestByPlatform = latestMetricsByItemPlatform();
+  const live = state.inventory.filter(it => !isSold(it) && isRealItem(it));
+  const scored = live.map(it => ({ it, sp: saleSpeedFor(it, latestByPlatform) }));
+  const overdue = scored.filter(r => r.sp.overdue).sort((a, b) => (b.sp.daysListed || 0) - (a.sp.daysListed || 0));
+  const focused = scored.filter(r => focusedFor(r.it.itemId) && !r.sp.overdue);
+  const withPlan = scored.filter(r => optimizePlanFor(r.it.itemId));
+
+  const tiles = document.getElementById('optimizeTiles');
+  if (tiles) {
+    const atRisk = overdue.reduce((n, r) => n + parseMoney(r.it.listPrice), 0);
+    tiles.innerHTML = `
+      <div class="stat-tile"><div class="num">${overdue.length}</div><div class="lbl">Past their window</div></div>
+      <div class="stat-tile"><div class="num">${fmtMoney(atRisk)}</div><div class="lbl">Asking, stalled</div></div>
+      <div class="stat-tile"><div class="num">${focused.length}</div><div class="lbl">Focused</div></div>
+      <div class="stat-tile"><div class="num">${withPlan.length}</div><div class="lbl">Have a plan</div></div>`;
+  }
+
+  const section = (title, blurb, rows) => rows.length ? `
+    <div class="opt-section">
+      <h3 class="subhead">${escapeHtml(title)} <span class="fi-count">${rows.length}</span></h3>
+      <p class="subhead-note">${escapeHtml(blurb)}</p>
+      ${rows.map(r => optimizeRowHTML(r.it, r.sp)).join('')}
+    </div>` : '';
+
+  container.innerHTML =
+    section('Past their window', 'Listed longer than their own traffic suggested they would take. These are the ones going stale.', overdue)
+    + section('Focused', "Your shortlist. Still inside its window, but you wanted these pushed.", focused)
+    + (overdue.length || focused.length ? '' : '<div class="empty-state">Nothing is overdue and nothing is focused. Tap ◎ on an inventory card to work on something specific.</div>');
+
+  container.querySelectorAll('.opt-lever').forEach(btn => btn.addEventListener('click', () => {
+    btn.classList.toggle('on');
+  }));
+  container.querySelectorAll('.opt-save').forEach(btn => btn.addEventListener('click', async () => {
+    const row = btn.closest('.opt-row');
+    const id = row.dataset.optId;
+    const chosen = [...row.querySelectorAll('.opt-lever.on')].map(b => b.dataset.lever);
+    const notes = row.querySelector('.opt-notes').value.trim();
+    const status = row.querySelector('.opt-status');
+    status.textContent = 'Saving…';
+    try {
+      await recordItemAction(id, 'Optimize Plan', chosen.join(', ') + (notes ? ' | ' + notes : ''));
+      status.textContent = 'Saved.';
+    } catch (err) {
+      status.textContent = err.message || String(err);
+      status.classList.add('error');
+    }
+  }));
+}
+
 function renderFocusView() {
   const container = document.getElementById('focusList');
   if (!container) return;
@@ -1770,6 +1872,74 @@ function renderList() {
   if (state.listGroup === 'size') {
     renderSizeView(container, latestByPlatform, compareItems);
     wireItemCards(container, renderList);
+    return;
+  }
+
+  if (state.listGroup === 'speed') {
+    if (!state.expandedSpeeds) state.expandedSpeeds = new Set();
+    let items = state.inventory.filter(it => state.listActiveCats.has(categoryMeta(it.category).id));
+    if (!state.listShowSold) items = items.filter(it => !isSold(it));
+    const groups = new Map();
+    items.forEach(it => {
+      const sp = saleSpeedFor(it, latestByPlatform);
+      const key = sp.band.id;
+      if (!groups.has(key)) groups.set(key, { band: sp.band, rows: [] });
+      groups.get(key).rows.push({ it, stats: itemSortStats(it, latestByPlatform), sp });
+    });
+    const ordered = [...groups.values()].sort((a, b) => a.band.order - b.band.order);
+    container.innerHTML = ordered.length ? ordered.map(g => {
+      const over = g.rows.filter(r => r.sp.overdue).length;
+      // Anything past its window floats to the top of its band.
+      g.rows.sort((a, b) => (b.sp.overdue ? 1 : 0) - (a.sp.overdue ? 1 : 0) || b.stats.clicks - a.stats.clicks);
+      const open = state.expandedSpeeds.has(g.band.id) ? ' open' : '';
+      return `<details class="cat-section speed-section" data-speed-id="${escapeHtml(g.band.id)}"${open}>
+        <summary class="cat-heading">
+          <span class="icon speed-dot speed-${escapeHtml(g.band.id)}"></span>
+          <h2>${escapeHtml(g.band.label)}</h2>
+          <span class="speed-range">${escapeHtml(g.band.days)}</span>
+          <span class="count">${g.rows.length}</span>
+          ${over ? `<span class="speed-over-count">${over} past window</span>` : ''}
+        </summary>
+        <div class="card-grid">${g.rows.map(r => itemCardHTML(r.it, categoryMeta(r.it.category))).join('')}</div>
+      </details>`;
+    }).join('') : '<div class="empty-state">No inventory matches these filters.</div>';
+    container.querySelectorAll('details.speed-section').forEach(d => d.addEventListener('toggle', () => {
+      const id = d.dataset.speedId;
+      if (d.open) state.expandedSpeeds.add(id); else state.expandedSpeeds.delete(id);
+    }));
+    wireItemCards(container, renderList);
+    return;
+  }
+
+  if (state.listGroup === 'offers') {
+    const rows = state.inventory
+      .filter(it => !isSold(it))
+      .map(it => ({ it, offer: latestActionOfType(it.itemId, 'Offer Sent'), stats: itemSortStats(it, latestByPlatform) }))
+      .filter(r => r.offer)
+      .sort((a, b) => String(b.offer.date).localeCompare(String(a.offer.date)));
+    if (!rows.length) {
+      container.innerHTML = '<div class="empty-state">No offers sent yet. They show up here once you mark one sent on the Actions page.</div>';
+      return;
+    }
+    const today = todayStr();
+    container.innerHTML = `
+      <div class="cat-section">
+        <div class="cat-heading"><span class="icon">✉️</span><h2>Offers sent</h2><span class="count">${rows.length}</span></div>
+        <table class="offers-table">
+          <thead><tr><th>Item</th><th>Sent</th><th>Where</th><th>Since</th><th>Traffic since</th></tr></thead>
+          <tbody>${rows.map(({ it, offer, stats }) => {
+            const days = Math.max(0, Math.round((new Date(today + 'T12:00:00') - new Date(String(offer.date).slice(0, 10) + 'T12:00:00')) / 86400000));
+            return `<tr>
+              <td class="ot-name"><b>${escapeHtml(itemShortName(it))}</b><small>${escapeHtml(String(it.listPrice ?? '—'))}</small></td>
+              <td>${escapeHtml(String(offer.date))}</td>
+              <td>${escapeHtml(String(offer.detail || '—')).slice(0, 60)}</td>
+              <td>${days === 0 ? 'today' : days + 'd ago'}</td>
+              <td>${stats.views} views · ${stats.clicks} clicks</td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table>
+        <p class="cp-task-breakdown">An eBay offer expires after 24-48 hours; Poshmark's lasts 24. Anything older than a couple of days is a candidate to send again, lower.</p>
+      </div>`;
     return;
   }
 
@@ -2885,6 +3055,49 @@ function priceHoldFor(itemId) {
 }
 const PRICE_HOLD_LABELS = ['Try a price drop', 'Refresh listing'];
 
+// Estimated sale speed — how long this listing looks like it will take,
+// read off its own traffic rather than a guess about the category. Clicks are
+// the honest signal: an impression is eBay showing it to someone, a click is
+// someone choosing it. Bands are deliberately wide because the underlying
+// numbers are small.
+const SPEED_BANDS = {
+  fast:   { id: 'fast',   label: 'Fast',        days: '1-14 days',  max: 14,   order: 1 },
+  medium: { id: 'medium', label: 'Medium',      days: '15-45 days', max: 45,   order: 2 },
+  slow:   { id: 'slow',   label: 'Longer',      days: '45+ days',   max: 999,  order: 3 },
+  newish: { id: 'newish', label: 'Too new to tell', days: 'under 4 days up', max: 999, order: 4 },
+  nodata: { id: 'nodata', label: 'No data yet', days: 'no stats logged', max: 999, order: 5 },
+};
+function saleSpeedFor(item, latestByPlatform) {
+  const map = latestByPlatform || latestMetricsByItemPlatform();
+  const stats = itemSortStats(item, map);
+  const posted = postedInfoFor(item.itemId);
+  const days = posted ? Math.max(1, posted.days) : null;
+  let watchers = 0;
+  splitPlatforms(item.platform).forEach(p => {
+    const snap = map.get(item.itemId + '|' + platformMeta(p).id);
+    watchers += Number(snap && snap.watchers) || 0;
+  });
+  const out = { views: stats.views, clicks: stats.clicks, watchers, daysListed: posted ? posted.days : null };
+  if (days === null) return { ...out, band: SPEED_BANDS.nodata, overdue: false };
+  if (days < 4 && stats.clicks === 0) return { ...out, band: SPEED_BANDS.newish, overdue: false };
+  if (!stats.views && !stats.clicks) return { ...out, band: SPEED_BANDS.nodata, overdue: false };
+  const clicksPerDay = stats.clicks / days;
+  const viewsPerDay = stats.views / days;
+  let band = SPEED_BANDS.slow;
+  if (clicksPerDay >= 0.7 || watchers >= 3) band = SPEED_BANDS.fast;
+  else if (clicksPerDay >= 0.15 || viewsPerDay >= 3 || watchers >= 1) band = SPEED_BANDS.medium;
+  return { ...out, band, clicksPerDay, overdue: days > band.max };
+}
+function speedChipHTML(item, latestByPlatform) {
+  const s = saleSpeedFor(item, latestByPlatform);
+  const cls = 'speed-chip speed-' + s.band.id + (s.overdue ? ' overdue' : '');
+  const age = s.daysListed === null ? 'not posted' : `day ${s.daysListed}`;
+  const title = s.overdue
+    ? `Past its window - listed ${s.daysListed} days, this pace suggested ${s.band.days}`
+    : `${s.band.label}: ${s.band.days}. ${s.clicks} clicks over ${s.daysListed || 0} days`;
+  return `<span class="${cls}" title="${escapeHtml(title)}">${escapeHtml(s.band.label)} · ${escapeHtml(s.band.days)} · ${escapeHtml(age)}${s.overdue ? ' · OVER' : ''}</span>`;
+}
+
 // Focus — a hand-picked shortlist of listings worth pushing. Kept in Item
 // Actions so it follows the Sheet rather than one browser: the latest "Focus"
 // wins unless a later "Unfocus" clears it. Focusing never takes an item out of
@@ -3124,7 +3337,6 @@ function renderStillToList() {
               return `<div class="stl-site-row" style="--plat:${m.meta.color}">
                 <span class="stl-chip">${escapeHtml(m.meta.label)}</span>
                 <button class="btn small stl-listed-btn" data-id="${escapeHtml(item.itemId)}" data-platform="${escapeHtml(m.meta.label)}">Mark listed</button>
-                <button class="icon-btn stl-skip-btn" data-id="${escapeHtml(item.itemId)}" data-platform="${escapeHtml(m.meta.label)}">Not posting</button>
               </div>`;
             }).join('')}
           </div>
@@ -4094,6 +4306,7 @@ renderListChips();
 renderList();
 renderPickPanel();
 renderFocusView();
+renderOptimizeView();
 setInventoryMode(state.inventoryMode);
 setMode(localGet('sellHub.mode', 'list'));
 renderStats();

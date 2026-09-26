@@ -15,7 +15,7 @@
   // Apply the saved theme before first paint so the page never flashes the wrong one.
   try { var t = localStorage.getItem('sellHub.theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
 </script>
-<link rel="stylesheet" href="css/styles.css?v=20260925-stock2">
+<link rel="stylesheet" href="css/styles.css?v=20260926-optimize">
 </head>
 <body>
 
@@ -31,6 +31,7 @@
     <nav class="tabs" role="tablist" aria-label="Sections">
       <button data-view="action" class="active" role="tab" aria-selected="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 11l3 3 8-8"/><path d="M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9"/></svg><span>Actions</span></button>
       <button data-view="focus" role="tab" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg><span>Focus</span></button>
+      <button data-view="optimize" role="tab" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l5-5 4 3 8-8"/><path d="M16 7h5v5"/></svg><span>Optimize</span></button>
       <button data-view="inventory" role="tab" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg><span>Inventory</span></button>
       <button data-view="stats" role="tab" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span>Stats</span></button>
       <button data-view="acquire" role="tab" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg><span>Acquire</span></button>
@@ -57,6 +58,18 @@
     <div id="focusList"></div>
   </section>
 
+  <!-- ===================== OPTIMIZE ===================== -->
+  <section id="optimize" class="view">
+    <div class="section-head">
+      <div>
+        <h2 class="section-title">Optimize</h2>
+        <p class="section-intro">The listings worth working on: anything past the window its own traffic suggested, plus whatever you've focused. Pick the levers, write the plan, and it stays on the item so you can see what you already tried.</p>
+      </div>
+    </div>
+    <div class="stat-tiles" id="optimizeTiles"></div>
+    <div id="optimizeList"></div>
+  </section>
+
   <section id="inventory" class="view">
 
     <div id="inventorySetupNote" class="setup-note" style="display:none">
@@ -72,6 +85,8 @@
         <button data-group="category" class="active">By category</button>
         <button data-group="size">By size</button>
         <button data-group="ranked">By views</button>
+        <button data-group="speed">By sale speed</button>
+        <button data-group="offers">Offers sent</button>
       </div>
       <label class="sort-control">Sort by
         <select id="listSortSelect">
@@ -556,12 +571,12 @@
   <div class="acq-drawer-body" id="acqDrawerBody"></div>
 </aside>
 
-<script src="js/config.js?v=20260925-stock2"></script>
-<script src="js/data.js?v=20260925-stock2"></script>
-<script src="js/app.js?v=20260925-stock2"></script>
-<script src="js/acquire-config.js?v=20260925-stock2"></script>
-<script src="js/acquire-model.js?v=20260925-stock2"></script>
-<script src="js/acquire.js?v=20260925-stock2"></script>
-<script src="js/stocking.js?v=20260925-stock2"></script>
+<script src="js/config.js?v=20260926-optimize"></script>
+<script src="js/data.js?v=20260926-optimize"></script>
+<script src="js/app.js?v=20260926-optimize"></script>
+<script src="js/acquire-config.js?v=20260926-optimize"></script>
+<script src="js/acquire-model.js?v=20260926-optimize"></script>
+<script src="js/acquire.js?v=20260926-optimize"></script>
+<script src="js/stocking.js?v=20260926-optimize"></script>
 </body>
 </html>
