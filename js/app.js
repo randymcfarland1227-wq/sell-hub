@@ -222,6 +222,7 @@ function wireActionStars(root) {
 function itemTitle(item) {
   return [item.brand, item.item].filter(Boolean).join(' — ') || String(item.itemId);
 }
+const LIFE_HUB_TASK_SEVERITIES = new Set(['opportunity', 'urgent', 'attention']);
 /** All open Resale actions for Life Hub tasks[] (+ starred featured strip). */
 function collectResaleActions() {
   const active = state.inventory.filter(it => !isSold(it));
@@ -269,7 +270,9 @@ function collectResaleActions() {
   });
   active.forEach(item => {
     const action = pricingActionFor(item);
-    if (!action || action.severity === 'ok' || action.severity === 'dismissed' || action.severity === 'handled') return;
+    // Only real to-dos: offer, price drop, boost/refresh. Completed, Hold, No data yet, handled
+    // and dismissed are statuses, not tasks.
+    if (!action || !LIFE_HUB_TASK_SEVERITIES.has(action.severity)) return;
     // Skip if this itemId is already a ship task (sold items are filtered out of active).
     actions.push({
       id: String(item.itemId),
