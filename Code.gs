@@ -3046,7 +3046,9 @@ function createStocking(body) {
   if (!created.ok) return created;
 
   var stamp = nowStamp_();
-  var stage = STOCKING_STAGES.NEEDS_ANALYSIS;
+  // Anything waiting on information starts in details_needed — there is no
+  // separate analysis column on the board any more.
+  var stage = STOCKING_STAGES.DETAILS_NEEDED;
   var stockingId;
   // Processing a parked paste reuses its row, so the raw text stays attached
   // to the item it turned into instead of being orphaned.

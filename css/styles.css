@@ -2307,7 +2307,7 @@ details[open] > summary ~ * { animation: view-in .25s var(--ease); }
 }
 .stocking-form-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .stocking-board {
-  display: grid; grid-template-columns: repeat(6, minmax(180px, 1fr)); gap: 12px; overflow-x: auto;
+  display: grid; grid-template-columns: repeat(5, minmax(230px, 1fr)); gap: 10px; overflow-x: auto;
   padding-bottom: 8px;
 }
 .stocking-col {
@@ -2323,20 +2323,36 @@ details[open] > summary ~ * { animation: view-in .25s var(--ease); }
   font-size: .7rem; font-weight: 700; padding: 1px 8px; border-radius: 999px;
   background: var(--primary); color: #fff;
 }
-.stocking-col-body { padding: 10px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
+.stocking-col-body { padding: 8px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
 .stocking-card {
   background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-md);
-  padding: 10px 11px; display: flex; flex-direction: column; gap: 6px;
+  padding: 9px 10px; display: flex; flex-direction: column; gap: 4px; line-height: 1.3;
 }
-.stocking-card header { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
-.stocking-card header b { font-size: .9rem; }
+.stocking-card p { margin: 0; }
+.stocking-card header { display: flex; justify-content: space-between; gap: 6px; align-items: baseline; }
+.stocking-card header b { font-size: .86rem; line-height: 1.25; }
 .stocking-card .mono { font-size: .7rem; color: var(--text-faint); font-variant-numeric: tabular-nums; }
 .stocking-card-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
 .btn.small { padding: 5px 9px; font-size: .72rem; }
-.stk-summary { font-size: .8rem; color: var(--text-muted); }
+.stk-summary { font-size: .76rem; color: var(--text-muted); line-height: 1.35; }
+.stk-note-line { font-size: .74rem; color: var(--text); line-height: 1.35; }
+.stk-note-line b { color: var(--text-muted); }
+.stocking-card .muted { line-height: 1.3; }
+.stocking-card-actions { margin-top: 2px; }
+/* Somewhere to type the missing detail, whether or not the Sheet has
+   Listing Questions rows for this item. */
+.stk-meta { font-size: .74rem; color: var(--text-faint); margin: 0; }
+.stk-analysis { font-size: .84rem; line-height: 1.4; margin: 0; }
+.stk-detail-field { display: flex; flex-direction: column; gap: 5px; }
+.stk-detail-field label { font-size: .74rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); }
+.stk-detail-field textarea {
+  width: 100%; font: inherit; padding: 9px 11px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text); resize: vertical;
+}
+.stk-detail-field .muted { margin: 0; }
 .stocking-dialog { border: none; border-radius: var(--radius-lg); padding: 0; max-width: 560px; width: calc(100% - 24px); background: var(--bg-card); color: var(--text); box-shadow: var(--shadow-soft); }
 .stocking-dialog::backdrop { background: rgba(0,0,0,.45); }
-.stocking-dialog-inner { padding: 16px 18px 18px; display: flex; flex-direction: column; gap: 12px; }
+.stocking-dialog-inner { padding: 16px 18px 18px; display: flex; flex-direction: column; gap: 10px; }
 .stocking-dialog-inner header { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .stocking-dialog-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .stk-questions { display: flex; flex-direction: column; gap: 12px; }
@@ -2347,7 +2363,7 @@ details[open] > summary ~ * { animation: view-in .25s var(--ease); }
 .status-msg.error, .error { color: var(--danger, #c44); }
 .icon-btn { appearance: none; border: none; background: transparent; color: var(--text-muted); font-size: 1.1rem; cursor: pointer; padding: 4px 8px; }
 @media (max-width: 1100px) {
-  .stocking-board { grid-template-columns: repeat(6, minmax(200px, 1fr)); }
+  .stocking-board { grid-template-columns: repeat(5, minmax(240px, 1fr)); }
 }
 
 .subhead-note {

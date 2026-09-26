@@ -1,8 +1,9 @@
 /* Stocking — intake front door + stage board for the existing Sheet pipeline. */
 (function () {
+  // No separate "needs analysis" column: anything waiting on information —
+  // whether that's research or a measurement off the tag — is details needed.
   const STAGES = [
     { id: 'pasted', label: 'Pasted' },
-    { id: 'needs_analysis', label: 'Needs analysis' },
     { id: 'details_needed', label: 'Details needed' },
     { id: 'ready_for_drafts', label: 'Ready for drafts' },
     { id: 'ready_to_post', label: 'Ready to post' },
@@ -51,7 +52,7 @@
     if (!board) return;
     const byStage = Object.fromEntries(STAGES.map((s) => [s.id, []]));
     stockingRows.forEach((r) => {
-      const stage = byStage[r.stage] ? r.stage : (r.rawEntry && !r.itemId ? 'pasted' : 'needs_analysis');
+      const stage = byStage[r.stage] ? r.stage : (r.rawEntry && !r.itemId ? 'pasted' : 'details_needed');
       byStage[stage].push(r);
     });
     board.innerHTML = STAGES.map((stage) => {
@@ -117,6 +118,7 @@
       </header>
       ${meta ? `<p class="muted">${esc(meta)}</p>` : ''}
       ${r.analysisSummary ? `<p class="stk-summary">${esc(r.analysisSummary)}</p>` : ''}
+      ${r.notes ? `<p class="stk-note-line"><b>Details:</b> ${esc(r.notes)}</p>` : ''}
       ${r.error ? `<p class="error">${esc(r.error)}</p>` : ''}
       <div class="stocking-card-actions">
         <button type="button" class="btn secondary small" data-open-stocking="${esc(r.stockingId)}">Open</button>
@@ -182,11 +184,16 @@
     const status = document.getElementById('stkDetailStatus');
     setStatus(status, 'Loading Listing Questions…');
     title.textContent = row.product || row.itemId || stockingId;
-    body.innerHTML = `<p class="muted">${esc(row.itemId)} · ${esc(row.stage)} · ${esc(row.sourceTab || '')}</p>
-      ${row.analysisSummary ? `<p><b>Analysis</b> — ${esc(row.analysisSummary)}</p>` : ''}
-      <div id="stkQuestionsWrap"><p class="muted">Loading questions…</p></div>`;
+    body.innerHTML = `<p class="stk-meta">${esc(row.itemId)} · ${esc(row.stage)} · ${esc(row.sourceTab || '')}</p>
+      ${row.analysisSummary ? `<p class="stk-analysis"><b>Analysis</b> — ${esc(row.analysisSummary)}</p>` : ''}
+      <div class="stk-detail-field">
+        <label for="stkDetailNotes">What's still needed / your answers</label>
+        <textarea id="stkDetailNotes" rows="3" placeholder="e.g. Size L. Tested and working. Box included.">${esc(row.notes || '')}</textarea>
+        <p class="muted small">Saved onto this item, so it travels with it.</p>
+      </div>
+      <div id="stkQuestionsWrap"></div>`;
     dialog.showModal();
-    activeDetail = { stockingId: row.stockingId, itemId: row.itemId, questions: [] };
+    activeDetail = { stockingId: row.stockingId, itemId: row.itemId, notes: row.notes || '', questions: [] };
     try {
       const url = `${APPS_SCRIPT_URL}?action=listingQuestions&itemId=${encodeURIComponent(row.itemId)}`;
       const res = await fetch(url);
@@ -194,9 +201,7 @@
       activeDetail.questions = await res.json();
       if (!Array.isArray(activeDetail.questions)) activeDetail.questions = [];
       renderQuestions();
-      setStatus(status, activeDetail.questions.length
-        ? ''
-        : 'No Listing Questions rows for this Item ID yet.');
+      setStatus(status, '');
     } catch (err) {
       const wrap = document.getElementById('stkQuestionsWrap');
       if (wrap) wrap.innerHTML = `<p class="error">${esc(err.message || err)}</p>`;
@@ -208,7 +213,7 @@
     const wrap = document.getElementById('stkQuestionsWrap');
     if (!wrap) return;
     if (!activeDetail.questions.length) {
-      wrap.innerHTML = '<p class="muted">No questions yet.</p>';
+      wrap.innerHTML = '';
       return;
     }
     wrap.innerHTML = `<div class="stk-questions">${activeDetail.questions.map((q, i) => `
@@ -223,6 +228,24 @@
   async function saveAnswers() {
     if (!activeDetail) return;
     const status = document.getElementById('stkDetailStatus');
+    const notesBox = document.getElementById('stkDetailNotes');
+    const notes = notesBox ? notesBox.value.trim() : null;
+    if (notes !== null && notes !== (activeDetail.notes || '')) {
+      setStatus(status, 'Saving…');
+      try {
+        const res = await apiPost('updateStocking', { stockingId: activeDetail.stockingId, itemId: activeDetail.itemId, notes });
+        if (!res || res.ok === false) throw new Error((res && res.error) || 'Save failed');
+        activeDetail.notes = notes;
+        await refreshStocking();
+      } catch (err) {
+        setStatus(status, err.message || String(err), true);
+        return;
+      }
+    }
+    if (!activeDetail.questions.length) {
+      setStatus(status, 'Saved.');
+      return;
+    }
     const answers = activeDetail.questions.map((q, i) => {
       const ta = document.querySelector(`[data-q-answer="${i}"]`);
       return {
