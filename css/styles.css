@@ -2631,3 +2631,14 @@ details.stocking-intake[open] > summary::before { content: '- '; }
 .opt-lagger-row small { color: var(--text-faint); margin-right: auto; }
 .opt-lagger { color: var(--text-faint); font-size: .74rem; margin-left: auto; }
 .opt-lagger:hover { color: var(--warn, #a1752e); }
+
+/* Media run split into the shelves you actually walk. */
+.media-bucket { margin-bottom: 14px; }
+.media-bucket-head { display: flex; align-items: baseline; gap: 8px; margin: 0 0 6px 2px; }
+.media-bucket-head h4 { margin: 0; font-size: .82rem; letter-spacing: .02em; }
+.media-bucket-head .count {
+  font-size: .66rem; font-weight: 700; color: var(--text-muted);
+  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px;
+}
+#acqMediaShelf { display: block; }
+.media-bucket-row { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 6px; }

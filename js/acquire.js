@@ -430,7 +430,28 @@ function renderAcquireMediaShelf() {
   if (!visible.length) {
     el.innerHTML = `<div class="empty-state">All Media items are hidden from this shelf.</div>`;
   } else {
-    el.innerHTML = visible.map(o => oppCardHTML(o, { laneId: 'media' })).join('');
+    // Split the run the way the aisles are actually laid out, so a trip can be
+    // walked one shelf at a time instead of scanning one mixed carousel.
+    const BUCKETS = [
+      { id: 'Books', label: 'Books', test: /book|paperback|hardcover|cookbook|textbook|manga|magazine/i },
+      { id: 'CDs', label: 'CDs', test: /\bcds?\b/i },
+      { id: 'DVDs', label: 'DVDs & Blu-ray', test: /dvd|blu|vhs/i },
+      { id: 'Vinyl', label: 'Vinyl', test: /vinyl|lp|record/i },
+    ];
+    const bucketOf = o => {
+      const sub = String(o.category && o.category.subcategory || '');
+      const hit = BUCKETS.find(b => b.id.toLowerCase() === sub.toLowerCase())
+        || BUCKETS.find(b => b.test.test(sub))
+        || BUCKETS.find(b => b.test.test(String(o.searchTerm || '')));
+      return hit ? hit.id : 'Books';
+    };
+    const grouped = new Map(BUCKETS.map(b => [b.id, []]));
+    visible.forEach(o => grouped.get(bucketOf(o)).push(o));
+    el.innerHTML = BUCKETS.filter(b => grouped.get(b.id).length).map(b => `
+      <div class="media-bucket">
+        <div class="media-bucket-head"><h4>${escapeHtml(b.label)}</h4><span class="count">${grouped.get(b.id).length}</span></div>
+        <div class="acq-carousel media-bucket-row">${grouped.get(b.id).map(o => oppCardHTML(o, { laneId: 'media' })).join('')}</div>
+      </div>`).join('');
   }
   if (foot) {
     const again = laneShowAgainHTML('media', hiddenCount);
