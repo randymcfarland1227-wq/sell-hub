@@ -201,6 +201,10 @@ const RESALE_ORIGIN_URL = 'https://randymcfarland1227-wq.github.io/sell-hub/';
 function isWorkroomOrigin(origin) { return WORKROOM_ORIGINS.includes(origin); }
 // Posting tasks are starred per site, separately from the item's pricing/shipping star.
 function postingTaskKey(itemId, platformIdValue) { return `list:${itemId}:${platformIdValue}`; }
+// Life Hub gets one List task per item covering every site it still needs posting on.
+function listTaskKey(itemId) { return `list:${itemId}`; }
+const LIFE_HUB_SHORT_PLATFORM = { facebook: 'FB Mrkplc' };
+function shortPlatformLabel(meta) { return LIFE_HUB_SHORT_PLATFORM[meta.id] || meta.label; }
 function isFeaturedAction(itemId) { return state.featuredActions.has(String(itemId)); }
 function setFeaturedAction(id, starred) {
   const key = String(id);
@@ -246,7 +250,7 @@ function collectResaleActions() {
       detail: `It sold — take the ${t.meta.label} listing down.`,
       meta: t.item.soldPrice ? `Sold for ${t.item.soldPrice}` : 'Sold',
       kind: 'end',
-      tag: `End Listing · ${t.meta.label}`,
+      tag: `End Listing · ${shortPlatformLabel(t.meta)}`,
       platformLabel: t.meta.label,
       listingId: (t.entry && t.entry.listingId) || '',
       itemId: t.item.itemId,
@@ -254,18 +258,20 @@ function collectResaleActions() {
     });
   });
   active.forEach(item => {
-    platformsStatusFor(item).missing.forEach(m => {
-      actions.push({
-        id: postingTaskKey(item.itemId, m.meta.id),
-        title: itemTitle(item),
-        detail: `Post it on ${m.meta.label}.`,
-        meta: item.listPrice ? `List price ${fmtMoney(parseMoney(item.listPrice))}` : 'No list price yet',
-        kind: 'list',
-        tag: `List · ${m.meta.label}`,
-        platformLabel: m.meta.label,
-        itemId: item.itemId,
-        completable: true,
-      });
+    const missing = platformsStatusFor(item).missing;
+    if (!missing.length) return;
+    const key = listTaskKey(item.itemId);
+    actions.push({
+      id: key,
+      title: itemTitle(item),
+      detail: `Post it on ${missing.map(m => m.meta.label).join(', ')}.`,
+      meta: item.listPrice ? `List price ${fmtMoney(parseMoney(item.listPrice))}` : 'No list price yet',
+      kind: 'list',
+      tag: `List (${missing.map(m => shortPlatformLabel(m.meta)).join(', ')})`,
+      itemId: item.itemId,
+      // Starred here or on any one site's posting task
+      starred: isFeaturedAction(key) || missing.some(m => isFeaturedAction(postingTaskKey(item.itemId, m.meta.id))),
+      completable: true,
     });
   });
   active.forEach(item => {
@@ -352,12 +358,12 @@ function resaleWorkroomSnapshot() {
     title: a.title,
     detail: a.detail,
     status: 'open',
-    starred: isFeaturedAction(a.id),
+    starred: a.starred ?? isFeaturedAction(a.id),
     originUrl: RESALE_ORIGIN_URL,
     // Task type shown before the title on Life Hub ("Ship", "End Listing · Depop", …)
     tag: a.tag,
   }));
-  const featured = actions.filter(a => isFeaturedAction(a.id)).map(a => ({
+  const featured = actions.filter(a => a.starred ?? isFeaturedAction(a.id)).map(a => ({
     id: a.id,
     title: a.title,
     detail: a.detail,
@@ -403,6 +409,16 @@ async function completeResaleWorkroomItem(id) {
     const platformLabel = task ? task.meta.label : (platformMeta(platformIdValue).label || platformIdValue);
     const listingId = task && task.entry ? task.entry.listingId : '';
     await endListingElsewhere(itemId, platformLabel, listingId);
+  } else if (/^list:[^:]+$/.test(key)) {
+    // One List task per item: posted on every site it was still missing.
+    const itemId = key.slice('list:'.length);
+    const item = state.inventory.find(it => String(it.itemId) === itemId);
+    const missing = item ? platformsStatusFor(item).missing : [];
+    for (const m of missing) {
+      await recordItemAction(itemId, 'Listing Posted', m.meta.label);
+      setFeaturedAction(postingTaskKey(itemId, m.meta.id), false);
+    }
+    renderAction();
   } else if (key.startsWith('list:')) {
     const parts = key.split(':');
     const itemId = parts[1];
@@ -431,6 +447,12 @@ function starResaleWorkroomItem(id, starred) {
   if (!key) return;
   const next = typeof starred === 'boolean' ? starred : !isFeaturedAction(key);
   setFeaturedAction(key, next);
+  // Unstarring an item's List task also clears any per-site posting stars behind it.
+  if (!next && /^list:[^:]+$/.test(key)) {
+    const itemId = key.slice('list:'.length);
+    const item = state.inventory.find(it => String(it.itemId) === itemId);
+    (item ? platformsStatusFor(item).missing : []).forEach(m => setFeaturedAction(postingTaskKey(itemId, m.meta.id), false));
+  }
   renderAction();
   notifyWorkroom();
 }
