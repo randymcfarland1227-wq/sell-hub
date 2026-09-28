@@ -3156,6 +3156,39 @@ function platformsStatusFor(item) {
 // "taking photos"). Logged to Item Actions as "Posting Note"; the latest one
 // wins and an empty note clears it, so the Sheet keeps the full history.
 const POSTING_NOTE_PRESETS = ['Waiting on ', 'Taking photos', 'Need supplies: ', 'Need to test it', 'Need to identify model / details'];
+// A "Draft Created" action means the listing is built and sitting in that
+// site's drafts, waiting on a publish. It's the state between "still to list"
+// and "live", and without it a half-done listing looks identical to one that
+// hasn't been started. "Draft Discarded" clears it; going live supersedes it,
+// so a posted platform never shows a stale draft badge.
+function draftPlatformsFor(itemId) {
+  const byPlatform = new Map();
+  state.itemActions.forEach(function (a) {
+    if (String(a.itemId) !== String(itemId)) return;
+    if (a.action !== 'Draft Created' && a.action !== 'Draft Discarded' && a.action !== 'Listing Posted') return;
+    const pid = platformId(String(a.detail || '').trim());
+    if (!pid) return;
+    byPlatform.set(pid, a.action);
+  });
+  const out = new Set();
+  byPlatform.forEach(function (action, pid) { if (action === 'Draft Created') out.add(pid); });
+  return out;
+}
+function hasDraftFor(itemId, platformMetaId) {
+  return draftPlatformsFor(itemId).has(platformMetaId);
+}
+// Card-level summary so the badge is visible without reading every site row.
+function draftBadgeHTML(itemId) {
+  const ids = [...draftPlatformsFor(itemId)];
+  if (!ids.length) return '';
+  const names = ids.map(function (id) { const m = platformMeta[id]; return m ? (m.short || m.label) : id; });
+  return `<span class="draft-badge" title="Listing already drafted on ${escapeHtml(names.join(', '))}">Draft ready \u00b7 ${escapeHtml(names.join(', '))}</span>`;
+}
+function draftToggleHTML(itemId, meta) {
+  const on = hasDraftFor(itemId, meta.id);
+  return `<button class="icon-btn stl-draft-btn${on ? ' is-on' : ''}" data-id="${escapeHtml(itemId)}" data-platform="${escapeHtml(meta.label)}" data-on="${on ? '1' : '0'}" title="${on ? 'Drafted on ' + escapeHtml(meta.label) + ' \u2014 click to clear' : 'Mark that a draft exists on ' + escapeHtml(meta.label)}">${on ? '\u2713 Draft made' : '+ Draft made'}</button>`;
+}
+
 function postingNoteFor(itemId) {
   const latest = latestActionOfType(itemId, 'Posting Note');
   return latest ? String(latest.detail || '').trim() : '';
@@ -3528,15 +3561,17 @@ function renderStillToList() {
         <div class="card stl-card action-row${postingNoteFor(item.itemId) ? ' stl-on-hold' : ''}">
           <div class="ar-title-row">
             <h3>${escapeHtml(itemTitle(item))}</h3>
+            ${draftBadgeHTML(item.itemId)}
             <span class="stl-need-count">${missing.length} site${missing.length === 1 ? '' : 's'}</span>
           </div>
           ${postingNoteHTML(item, missing.length ? missing[0].meta.id : '')}
           ${metaBits.length ? `<div class="ar-meta-line">${metaBits.join(' · ')}</div>` : ''}
           <div class="stl-site-rows">
             ${missing.map(function (m) {
-              return `<div class="stl-site-row" style="--plat:${m.meta.color}">
+              return `<div class="stl-site-row${hasDraftFor(item.itemId, m.meta.id) ? ' has-draft' : ''}" style="--plat:${m.meta.color}">
                 <span class="stl-chip">${escapeHtml(m.meta.short)}</span>
                 <button class="btn small stl-listed-btn" data-id="${escapeHtml(item.itemId)}" data-platform="${escapeHtml(m.meta.label)}">Mark listed</button>
+                ${draftToggleHTML(item.itemId, m.meta)}
               </div>`;
             }).join('')}
           </div>
@@ -3579,6 +3614,7 @@ function renderStillToList() {
           <div class="card stl-card action-row${postingNoteFor(item.itemId) ? ' stl-on-hold' : ''}" style="--cat:${g.meta.color}">
             <div class="ar-title-row">
               <h3>${escapeHtml(itemTitle(item))}</h3>
+              ${draftBadgeHTML(item.itemId)}
               ${actionStarHTML(postingTaskKey(item.itemId, g.meta.id), `${itemTitle(item)} on ${g.meta.label}`)}
             </div>
             ${postingNoteHTML(item, g.meta.id)}
@@ -3586,6 +3622,7 @@ function renderStillToList() {
             <div class="ar-actions">
               <button class="btn ar-primary stl-listed-btn" data-id="${escapeHtml(item.itemId)}" data-platform="${escapeHtml(g.meta.label)}">Mark listed</button>
               <div class="ar-secondary">
+                ${draftToggleHTML(item.itemId, g.meta)}
                 <button class="icon-btn stl-skip-btn" data-id="${escapeHtml(item.itemId)}" data-platform="${escapeHtml(g.meta.label)}">Not posting</button>
                 ${editToggleHTML(item).replace('btn secondary ie-toggle', 'icon-btn ie-toggle')}
                 ${postingNoteFor(item.itemId) || state.editingPostingNote === `${item.itemId}|${g.meta.id}` ? '' : `<button class="icon-btn stl-note-add" data-key="${escapeHtml(`${item.itemId}|${g.meta.id}`)}">+ Note</button>`}
@@ -3630,6 +3667,14 @@ function wireStillToListCards(container) {
   container.querySelectorAll('.stl-listed-btn').forEach(function (btn) {
     btn.addEventListener('click', async function () {
       await recordItemAction(btn.dataset.id, 'Listing Posted', btn.dataset.platform);
+      renderStillToList();
+      renderActionSummary();
+    });
+  });
+  container.querySelectorAll('.stl-draft-btn').forEach(function (btn) {
+    btn.addEventListener('click', async function () {
+      const clearing = btn.dataset.on === '1';
+      await recordItemAction(btn.dataset.id, clearing ? 'Draft Discarded' : 'Draft Created', btn.dataset.platform);
       renderStillToList();
       renderActionSummary();
     });

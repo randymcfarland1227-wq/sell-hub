@@ -2642,3 +2642,38 @@ details.stocking-intake[open] > summary::before { content: '- '; }
 }
 #acqMediaShelf { display: block; }
 .media-bucket-row { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 6px; }
+
+/* Draft indicator — a listing that exists in a site's drafts but isn't live.
+   Distinct from "on hold": the work is done, it just needs publishing. */
+.draft-badge {
+  flex: 0 0 auto;
+  font-size: .68rem;
+  font-weight: 600;
+  letter-spacing: .01em;
+  padding: .12rem .44rem;
+  border-radius: 999px;
+  color: #0b5d3b;
+  background: #dff5e9;
+  border: 1px solid #a9dfc4;
+  white-space: nowrap;
+}
+.stl-site-row.has-draft { background: color-mix(in srgb, #dff5e9 42%, transparent); border-radius: 6px; }
+.stl-card .icon-btn.stl-draft-btn { font-size: .72rem; white-space: nowrap; }
+.icon-btn.stl-draft-btn.is-on {
+  color: #0b5d3b;
+  background: #dff5e9;
+  border-color: #a9dfc4;
+  font-weight: 600;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .draft-badge,
+  :root:not([data-theme="light"]) .icon-btn.stl-draft-btn.is-on {
+    color: #9fe8c2; background: #13351f; border-color: #2c6b45;
+  }
+  :root:not([data-theme="light"]) .stl-site-row.has-draft { background: rgba(19,53,31,.5); }
+}
+:root[data-theme="dark"] .draft-badge,
+:root[data-theme="dark"] .icon-btn.stl-draft-btn.is-on {
+  color: #9fe8c2; background: #13351f; border-color: #2c6b45;
+}
+:root[data-theme="dark"] .stl-site-row.has-draft { background: rgba(19,53,31,.5); }
