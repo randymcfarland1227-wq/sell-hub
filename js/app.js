@@ -114,15 +114,42 @@ function platformOptionsHTML(selected) {
 // logged entries is "use the most recent snapshot," never "sum every entry
 // ever logged" (summing would double-count the same rolling window repeatedly
 // every time stats get refreshed).
+// One listing gets written by more than one source on the same day, and each
+// source only measures part of the picture: the eBay API reports impressions
+// and clicks (leaving views and watchers at 0), while a manual Seller Hub pull
+// reports views, watchers and price (leaving impressions and clicks at 0).
+// Taking whichever row happened to be written last threw away the other half -
+// on 2026-09-29 a manual pull landing after the API run dropped eBay clicks
+// from 567 to 95 overnight, which looked like a collapse in traffic and was
+// really just the API's numbers being masked.
+//
+// So: rows from the newest date are merged field by field, and a field only
+// falls back to 0 when every source that day reported 0. Older dates are never
+// mixed in - a zero yesterday and a zero today are different facts.
+const METRIC_FIELDS = ['impressions', 'views', 'watchers', 'clicks', 'price'];
 function latestMetricsByItemPlatform() {
-  const latest = new Map();
+  const byKey = new Map();
   state.metrics.forEach(m => {
     if (!m.itemId) return;
     const key = m.itemId + '|' + platformMeta(m.platform).id;
-    const existing = latest.get(key);
-    if (!existing || (m.date || '') >= (existing.date || '')) latest.set(key, m);
+    if (!byKey.has(key)) byKey.set(key, []);
+    byKey.get(key).push(m);
   });
-  return latest;
+  const out = new Map();
+  byKey.forEach((rows, key) => {
+    let newestDate = '';
+    rows.forEach(r => { const d = String(r.date || '').slice(0, 10); if (d > newestDate) newestDate = d; });
+    const sameDay = rows.filter(r => String(r.date || '').slice(0, 10) === newestDate);
+    const merged = { ...sameDay[sameDay.length - 1] };
+    METRIC_FIELDS.forEach(field => {
+      for (let i = sameDay.length - 1; i >= 0; i--) {
+        const v = sameDay[i][field];
+        if (v !== '' && v !== null && v !== undefined && Number(v) !== 0) { merged[field] = v; break; }
+      }
+    });
+    out.set(key, merged);
+  });
+  return out;
 }
 
 function isSold(item) { return String(item.sourceStatus || '').toLowerCase() === 'sold'; }
