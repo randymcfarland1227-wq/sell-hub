@@ -3101,7 +3101,7 @@ function renderTaskList() {
   container.innerHTML = `<div class="card-grid">${[...byItem.values()].map(({ item, tasks }) => `
     <div class="card stl-card action-row">
       <div class="ar-title-row"><h3>${escapeHtml(itemShortName(item))}</h3><span class="stl-need-count">${tasks.length} task${tasks.length === 1 ? '' : 's'}</span></div>
-      <div class="ar-meta-line">${priceLineHTML(item)} · ${escapeHtml(expectedSaleFor(item).label)} · ${escapeHtml(saleSpeedFor(item).band.label)}</div>
+      <div class="ar-meta-line">${priceLineHTML(item)} ${expectedSaleChipHTML(item)}</div>
       <ul class="task-lines">${tasks.map(t => `
         <li><span>${escapeHtml(t)}</span><button type="button" class="btn small task-done" data-id="${escapeHtml(item.itemId)}" data-task="${escapeHtml(t)}">Done</button></li>`).join('')}</ul>
     </div>`).join('')}</div>`;
@@ -3332,6 +3332,21 @@ function expectedSaleFor(item) {
   if (cat === 'furniture') return pick('tail', 'Local pickup only, so it waits for someone nearby who wants it.');
   if (/\b(dvd|cd|book|vinyl|record)\b/.test(hay)) return pick('tail', 'Media sells eventually; individual discs and books are a waiting game.');
   return pick('steady', 'No strong signal either way from the category.');
+}
+// Shown wherever an item is queued to be listed or sitting as a draft, so the
+// speed you can expect is visible while you decide what to work on next -
+// "Quick mover, about 1-3 weeks" rather than an abstract band name. The colour
+// runs fast-to-slow so a column of these reads at a glance.
+const EXPECT_PLAIN = {
+  quick:  'Quick sale',
+  steady: 'Medium sale',
+  slow:   'Slower sale',
+  tail:   'Long haul',
+};
+function expectedSaleChipHTML(item) {
+  const e = expectedSaleFor(item);
+  const plain = EXPECT_PLAIN[e.id] || e.label;
+  return `<span class="sale-speed sale-${e.id}" title="${escapeHtml(e.label)} \u2014 ${escapeHtml(e.why)}"><b>${escapeHtml(plain)}</b><i>${escapeHtml(e.days)}</i></span>`;
 }
 function expectedChipHTML(item) {
   const e = expectedSaleFor(item);
@@ -3634,6 +3649,7 @@ function renderStillToList() {
         <div class="card stl-card action-row${postingNoteFor(item.itemId) ? ' stl-on-hold' : ''}">
           <div class="ar-title-row">
             <h3>${escapeHtml(itemTitle(item))}</h3>
+            ${expectedSaleChipHTML(item)}
             ${draftBadgeHTML(item.itemId)}
             <span class="stl-need-count">${missing.length} site${missing.length === 1 ? '' : 's'}</span>
           </div>
@@ -3687,6 +3703,7 @@ function renderStillToList() {
           <div class="card stl-card action-row${postingNoteFor(item.itemId) ? ' stl-on-hold' : ''}" style="--cat:${g.meta.color}">
             <div class="ar-title-row">
               <h3>${escapeHtml(itemTitle(item))}</h3>
+              ${expectedSaleChipHTML(item)}
               ${draftBadgeHTML(item.itemId)}
               ${actionStarHTML(postingTaskKey(item.itemId, g.meta.id), `${itemTitle(item)} on ${g.meta.label}`)}
             </div>
