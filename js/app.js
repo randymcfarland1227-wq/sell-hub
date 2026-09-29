@@ -1632,14 +1632,14 @@ function persistPicked() { localSet('sellHub.picked', [...state.picked]); }
 // chose on the item so next week you can see what you already tried.
 // ---------------------------------------------------------------------
 const OPTIMIZE_LEVERS = [
-  { id: 'share', label: 'Share on Poshmark', why: 'Biggest single-day lift you have - sharing put views up 30% in one day.' },
-  { id: 'offer', label: 'Send an offer', why: 'Goes straight to people already watching. Expires in 24-48h, so it needs doing while they are warm.' },
-  { id: 'price', label: 'Drop toward the floor', why: 'Only where clicks are healthy and nobody is buying - that is a price objection.' },
-  { id: 'photos', label: 'Reshoot the photos', why: 'For views with no clicks: the thumbnail is losing them, not the price.' },
-  { id: 'title', label: 'Rewrite the title', why: 'For low impressions: the words buyers search are missing.' },
-  { id: 'crosslist', label: 'Cross-list somewhere new', why: 'A fresh audience beats another price cut on a listing nobody is seeing.' },
-  { id: 'bundle', label: 'Bundle with something', why: 'Turns two dead cheap items into one sale worth shipping.' },
-  { id: 'promote', label: 'Promote it', why: 'General promoted listings only charge an ad fee when it sells.' },
+  { id: 'offer', label: 'Send an offer', why: 'Convert existing interest before changing the public price.' },
+  { id: 'price', label: 'Test a lower price', why: 'Use when traffic is arriving but buyers are not converting.' },
+  { id: 'photos', label: 'Reshoot cover photo', why: 'Use when people see the listing but do not open or watch it.' },
+  { id: 'title', label: 'Rewrite title', why: 'Use when the listing is not being discovered.' },
+  { id: 'share', label: 'Share listing', why: 'Refresh visibility on platforms where sharing moves listings back up.' },
+  { id: 'crosslist', label: 'Cross-list', why: 'Put the item in front of a different buyer pool.' },
+  { id: 'bundle', label: 'Bundle it', why: 'Make lower-priced inventory more worthwhile to buy and ship.' },
+  { id: 'promote', label: 'Promote listing', why: 'Buy reach only when the margin can support it.' },
 ];
 // A lagger is an item you've looked at and decided to leave alone. It stops
 // appearing in Optimize without pretending it's doing fine.
@@ -1674,85 +1674,150 @@ function optimizePlanFor(itemId) {
   const latest = latestActionOfType(itemId, 'Optimize Plan');
   return latest ? String(latest.detail || '') : '';
 }
-function optimizeRowHTML(item, sp) {
+function optimizationFor(item, sp) {
+  const action = pricingActionFor(item);
+  const ask = parseMoney(item.listPrice);
+  const floor = parseMoney(item.floorPrice);
+  const room = Math.max(0, ask - floor);
+  let lever = 'crosslist';
+  let label = 'Reach a fresh buyer pool';
+  let reason = 'The listing is aging without a strong buyer signal. Cross-list it before sacrificing more margin.';
+  let tone = 'reach';
+  let target = '';
+  let confidence = 'Medium confidence';
+
+  if (action && ['handled', 'complete', 'dismissed', 'held'].includes(action.severity)) {
+    lever = 'share'; label = action.label; tone = 'steady'; confidence = 'Recently handled';
+    target = 'No new move yet';
+    reason = action.reason || 'You already acted on this listing. Give that move time to work.';
+  } else if (sp.watchers > 0) {
+    lever = 'offer'; label = 'Send an offer now'; tone = 'hot'; confidence = 'Strong signal';
+    const offer = Math.max(floor || 0, Math.round(ask * .9));
+    target = offer && offer < ask ? `${fmtMoney(offer)} offer target` : 'Use your best profitable offer';
+    reason = `${sp.watchers} watcher${sp.watchers === 1 ? '' : 's'} already raised a hand. Convert that interest before cutting the public price.`;
+  } else if (action && action.label === 'Try a price drop') {
+    lever = 'price'; label = 'Run a price test'; tone = 'price-friction'; confidence = 'Strong signal';
+    const suggested = action.suggestedPrice || suggestedDropPrice(ask, floor);
+    target = suggested ? `Test ${fmtMoney(suggested)} · floor ${fmtMoney(floor)}` : `Protect the ${fmtMoney(floor)} floor`;
+    reason = `${sp.views} views with weak buyer action points to price resistance. You have ${fmtMoney(room)} between ask and floor.`;
+  } else if (action && action.label === 'Refresh listing') {
+    lever = 'photos'; label = 'Refresh the conversion layer'; tone = 'creative';
+    target = 'Keep price unchanged';
+    reason = `${sp.views} views but no watcher signal. Change the cover photo and first 60 title characters before lowering the price.`;
+  } else if (action && action.label === 'Boost visibility') {
+    lever = splitPlatforms(item.platform).some(p => platformMeta(p).id === 'poshmark') ? 'share' : 'title';
+    label = 'Fix discoverability'; tone = 'reach';
+    target = 'Keep price unchanged';
+    reason = 'The listing is not earning views. Improve search terms, share it, or cross-list it before touching the price.';
+  } else if (sp.overdue) {
+    lever = sp.views >= 10 ? 'photos' : 'crosslist';
+    label = sp.views >= 10 ? 'Repackage the listing' : 'Find a new audience';
+    tone = sp.views >= 10 ? 'creative' : 'reach';
+    target = 'Keep price unchanged first';
+    reason = `Day ${sp.daysListed || 0} is beyond the expected ${sp.expected.days}. ${sp.views ? `${sp.views} views have not produced a watcher.` : 'It needs more qualified reach.'}`;
+  } else if (action && action.label === 'On track') {
+    lever = 'share'; label = 'Maintain momentum'; tone = 'steady'; confidence = 'Lower urgency';
+    target = 'No price change';
+    reason = 'Traffic is healthy enough to wait. Refresh visibility and preserve your margin.';
+  }
+
+  const age = sp.daysListed || 0;
+  const score = Math.round(sp.watchers * 80 + sp.clicks * 4 + Math.min(sp.views, 120) * .35 + (sp.overdue ? 45 : 0) + Math.min(age, 90) * .35 + Math.min(ask, 150) * .08);
+  return { action, ask, floor, room, lever, label, reason, tone, target, confidence, score };
+}
+
+function optimizeRowHTML(item, sp, rank) {
   const plan = optimizePlanFor(item.itemId);
   const chosen = new Set(plan.split('|')[0].split(',').map(x => x.trim()).filter(Boolean));
   const notes = plan.includes('|') ? plan.split('|').slice(1).join('|').trim() : '';
+  const rec = optimizationFor(item, sp);
+  if (!chosen.size) chosen.add(rec.lever);
   const posted = postedInfoFor(item.itemId);
   const photo = photoForItem(item.itemId);
   const sites = splitPlatforms(item.platform).map(p => platformMeta(p).label).join(', ') || 'not listed';
+  const ctr = sp.views ? Math.round((sp.clicks / sp.views) * 100) : 0;
   return `
-    <div class="opt-row" data-opt-id="${escapeHtml(item.itemId)}">
+    <article class="opt-row opt-${rec.tone}" data-opt-id="${escapeHtml(item.itemId)}">
       <div class="opt-head">
-        <span class="cp-thumb">${photo ? `<img src="${escapeHtml(photo)}" alt="" loading="lazy" onerror="this.remove()">` : ''}</span>
+        <span class="opt-rank" aria-label="Priority ${rank}">${rank}</span>
+        <span class="opt-thumb">${photo ? `<img src="${escapeHtml(photo)}" alt="" loading="lazy" onerror="this.remove()">` : '<span>Photo</span>'}</span>
         <div class="opt-title">
           <b>${escapeHtml(itemShortName(item))}</b>
-          <small>${escapeHtml(String(item.listPrice ?? '—'))} · floor ${escapeHtml(String(item.floorPrice ?? '—'))} · ${escapeHtml(sites)}</small>
-          <small>${sp.views} views · ${sp.clicks} clicks · ${sp.watchers} watching · ${posted ? 'day ' + posted.days : 'not posted'}${sp.overdue ? ` · <b class="opt-over">past ${escapeHtml(sp.band.days)}</b>` : ''}</small>
-          <small>Expected ${escapeHtml(expectedSaleFor(item).label.toLowerCase())} (${escapeHtml(expectedSaleFor(item).days)}) · performing ${escapeHtml(sp.band.label.toLowerCase())}</small>
+          <small>${escapeHtml(sites)} · ${posted ? `day ${posted.days}` : 'listing date missing'}</small>
         </div>
+        <div class="opt-price"><b>${fmtMoney(rec.ask)}</b><small>${fmtMoney(rec.floor)} floor</small></div>
       </div>
+      <div class="opt-recommendation">
+        <div><span class="opt-signal">${escapeHtml(rec.confidence)}</span><h4>${escapeHtml(rec.label)}</h4><p>${escapeHtml(rec.reason)}</p></div>
+        <strong>${escapeHtml(rec.target)}</strong>
+      </div>
+      <div class="opt-evidence" aria-label="Listing evidence">
+        <span><b>${sp.views}</b> views</span><span><b>${sp.clicks}</b> clicks</span><span><b>${ctr}%</b> click rate</span><span><b>${sp.watchers}</b> watching</span><span><b>${fmtMoney(rec.room)}</b> price room</span>
+      </div>
+      <details class="opt-plan"${plan ? ' open' : ''}>
+        <summary>${plan ? 'Edit saved plan' : 'Adjust the plan'}</summary>
       <div class="opt-levers">
         ${OPTIMIZE_LEVERS.map(l => `<button type="button" class="opt-lever${chosen.has(l.id) ? ' on' : ''}" data-lever="${l.id}" title="${escapeHtml(l.why)}">${escapeHtml(l.label)}</button>`).join('')}
       </div>
-      <textarea class="opt-notes" rows="2" placeholder="What's the plan? e.g. reshoot Saturday, then offer at $45 to the three watchers.">${escapeHtml(notes)}</textarea>
+      <textarea class="opt-notes" rows="2" placeholder="Add a useful detail, deadline, or offer amount…">${escapeHtml(notes)}</textarea>
       <div class="opt-actions">
-        <button type="button" class="btn small opt-tasks">Add to tasks</button>
-        <button type="button" class="btn secondary small opt-save">Save plan only</button>
+        <button type="button" class="btn small opt-tasks">Put plan in Actions</button>
+        <button type="button" class="btn secondary small opt-save">Save plan</button>
         <button type="button" class="icon-btn opt-lagger" title="Not performing, and you don't want to do anything about it">Mark as lagger</button>
         <span class="status-msg opt-status"></span>
       </div>
-    </div>`;
+      </details>
+    </article>`;
 }
 function renderOptimizeView() {
   const container = document.getElementById('optimizeList');
   if (!container) return;
   const latestByPlatform = latestMetricsByItemPlatform();
   const live = state.inventory.filter(it => !isSold(it) && isRealItem(it));
-  const scored = live.map(it => ({ it, sp: saleSpeedFor(it, latestByPlatform) }));
+  const scored = live.map(it => ({ it, sp: saleSpeedFor(it, latestByPlatform) }))
+    .filter(r => postedInfoFor(r.it.itemId) || String(r.it.sourceStatus || '').toLowerCase() === 'listed')
+    .map(r => ({ ...r, rec: optimizationFor(r.it, r.sp) }));
   const laggers = scored.filter(r => laggerFor(r.it.itemId));
   const active = scored.filter(r => !laggerFor(r.it.itemId));
-  const overdue = active.filter(r => r.sp.overdue).sort((a, b) => (b.sp.daysListed || 0) - (a.sp.daysListed || 0));
-  // Behind expectation: still inside its window, but the pace it is actually
-  // running at is slower than the kind of item suggested. This is the early
-  // warning; overdue is the deadline.
-  const behind = active.filter(r => !r.sp.overdue
-    && r.sp.expected && ['fast', 'medium', 'slow'].includes(r.sp.band.id)
-    && r.sp.band.order > r.sp.expected.order)
-    .sort((a, b) => (b.sp.daysListed || 0) - (a.sp.daysListed || 0));
-  const behindIds = new Set(behind.map(r => r.it.itemId));
-  const focused = active.filter(r => focusedFor(r.it.itemId) && !r.sp.overdue && !behindIds.has(r.it.itemId));
+  const ranked = active.slice().sort((a, b) => b.rec.score - a.rec.score);
+  const actionable = ranked.filter(r =>
+    (r.rec.action && ['opportunity', 'urgent', 'attention'].includes(r.rec.action.severity))
+    || r.sp.overdue || focusedFor(r.it.itemId));
+  const queue = (actionable.length ? actionable : ranked).slice(0, 12);
   const withPlan = scored.filter(r => optimizePlanFor(r.it.itemId));
 
   const tiles = document.getElementById('optimizeTiles');
   if (tiles) {
-    const atRisk = overdue.reduce((n, r) => n + parseMoney(r.it.listPrice), 0);
+    const offerRows = ranked.filter(r => r.rec.action && r.rec.action.severity === 'opportunity');
+    const priceRows = ranked.filter(r => r.rec.action && r.rec.action.severity === 'urgent');
+    const visibilityRows = ranked.filter(r => r.rec.action && r.rec.action.severity === 'attention' && ['share', 'title', 'crosslist', 'photos'].includes(r.rec.lever));
+    const queueValue = queue.reduce((n, r) => n + r.rec.ask, 0);
     tiles.innerHTML = `
-      <div class="stat-tile"><div class="num">${overdue.length}</div><div class="lbl">Past their window</div></div>
-      <div class="stat-tile"><div class="num">${behind.length}</div><div class="lbl">Behind expectation</div></div>
-      <div class="stat-tile"><div class="num">${fmtMoney(atRisk + behind.reduce((n, r) => n + parseMoney(r.it.listPrice), 0))}</div><div class="lbl">Asking, stalled</div></div>
-      <div class="stat-tile"><div class="num">${focused.length}</div><div class="lbl">Focused</div></div>
-      <div class="stat-tile"><div class="num">${withPlan.length}</div><div class="lbl">Have a plan</div></div>`;
+      <div class="stat-tile opt-tile-hot"><div class="num">${offerRows.length}</div><div class="lbl">Offers ready</div><small>Existing buyer interest</small></div>
+      <div class="stat-tile"><div class="num">${priceRows.length}</div><div class="lbl">Price tests</div><small>Traffic, weak conversion</small></div>
+      <div class="stat-tile"><div class="num">${visibilityRows.length}</div><div class="lbl">Need reach</div><small>Do not cut price first</small></div>
+      <div class="stat-tile"><div class="num">${fmtMoney(queueValue)}</div><div class="lbl">Top queue value</div><small>${queue.length} priority listings</small></div>`;
   }
 
-  const section = (title, blurb, rows) => rows.length ? `
+  const blockerCounts = queue.reduce((m, r) => { m[r.rec.lever] = (m[r.rec.lever] || 0) + 1; return m; }, {});
+  const blocker = Object.entries(blockerCounts).sort((a, b) => b[1] - a[1])[0];
+  const blockerLabel = blocker ? ({ offer: 'buyer follow-up', price: 'price resistance', photos: 'listing conversion', title: 'discoverability', share: 'visibility', crosslist: 'audience reach' }[blocker[0]] || 'listing reach') : 'none';
+  container.innerHTML = `
+    <section class="opt-brief">
+      <div><span>Inventory readout</span><h3>${scored.length} live listings reviewed</h3><p>The most common blocker in the priority queue is <b>${escapeHtml(blockerLabel)}</b>. Work the first three cards before making broad price cuts.</p></div>
+      <div class="opt-brief-meta"><span>${withPlan.length} saved plan${withPlan.length === 1 ? '' : 's'}</span><span>${laggers.length} intentionally parked</span></div>
+    </section>
     <div class="opt-section">
-      <h3 class="subhead">${escapeHtml(title)} <span class="fi-count">${rows.length}</span></h3>
-      <p class="subhead-note">${escapeHtml(blurb)}</p>
-      ${rows.map(r => optimizeRowHTML(r.it, r.sp)).join('')}
-    </div>` : '';
-
-  container.innerHTML =
-    section('Past their window', 'Listed longer than this kind of item was expected to take. These are going stale.', overdue)
-    + section('Behind expectation', 'Still inside the window, but running slower than this kind of item usually does. Cheapest time to fix it.', behind)
-    + section('Focused', "Your shortlist. Still inside its window, but you wanted these pushed.", focused)
+      <div class="opt-queue-head"><div><p class="opt-kicker">Ranked by close signal</p><h3 class="subhead">Priority queue <span class="fi-count">${queue.length}</span></h3></div><p>Interest first, then conversion problems, then reach.</p></div>
+      ${queue.map((r, i) => optimizeRowHTML(r.it, r.sp, i + 1)).join('')}
+    </div>`
     + (laggers.length ? `
       <details class="opt-laggers">
         <summary>Marked as laggers <span class="fi-count">${laggers.length}</span></summary>
         <p class="subhead-note">Left alone on purpose. They still show in Inventory.</p>
         ${laggers.map(r => `<div class="opt-lagger-row"><b>${escapeHtml(itemShortName(r.it))}</b><small>${escapeHtml(String(r.it.listPrice ?? '—'))} · ${r.sp.views} views · ${r.sp.clicks} clicks</small><button type="button" class="btn secondary small opt-unlagger" data-id="${escapeHtml(r.it.itemId)}">Work on it again</button></div>`).join('')}
       </details>` : '')
-    + (overdue.length || behind.length || focused.length ? '' : '<div class="empty-state">Nothing is overdue and nothing is focused. Tap ◎ on an inventory card to work on something specific.</div>');
+    + (queue.length ? '' : '<div class="empty-state">No live listing needs intervention right now.</div>');
 
   container.querySelectorAll('.opt-unlagger').forEach(btn => btn.addEventListener('click', async () => {
     await recordItemAction(btn.dataset.id, 'Unlagger', 'Back in the optimize list.');
