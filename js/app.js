@@ -576,31 +576,55 @@ function daysSince(dateStr) {
 // new price matches what's on the item right now, show the old price
 // struck through next to the current one instead of just the bare number
 // — makes a deployed price change visible at a glance, not just in the log.
+// Just the price it is now. What it used to be, and every offer sent against
+// it, lives in priceLogHTML below - a card that shouts its own history at you
+// is harder to read than one that answers "what is it today?" in one glance.
 function priceLineHTML(item) {
-  const current = parseMoney(item.listPrice);
-  const drop = latestActionOfType(item.itemId, 'Price Drop');
-  const parsed = drop ? parsePriceDropDetail(drop.detail) : null;
-  if (parsed && parsed.from && current && Math.round(parsed.to) === Math.round(current)) {
-    return `<s class="price-was">${fmtMoney(parsed.from)}</s> ${fmtMoney(current)}`;
-  }
-  return item.listPrice ? escapeHtml(item.listPrice) : '—';
+  return item.listPrice ? escapeHtml(item.listPrice) : '\u2014';
+}
+// The full pricing history for one item, collapsed by default: every price
+// drop and every offer sent, newest first.
+function priceLogHTML(itemId) {
+  // Item Actions is append-only and a retried write can land twice, so the
+  // same event must not show up twice here. Identical date+action+detail is
+  // always a duplicate: two genuine drops on one day differ in their prices.
+  const seen = new Set();
+  const events = state.itemActions
+    .filter(a => String(a.itemId) === String(itemId) && (a.action === 'Offer Sent' || a.action === 'Price Drop'))
+    .filter(a => {
+      const key = `${a.date}|${a.action}|${String(a.detail || '')}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice()
+    .reverse();
+  if (!events.length) return '';
+  const rows = events.map(a => {
+    if (a.action === 'Price Drop') {
+      const parsed = parsePriceDropDetail(a.detail);
+      const val = parsed && parsed.from
+        ? `${fmtMoney(parsed.from)} \u2192 ${fmtMoney(parsed.to)}`
+        : (parsed ? fmtMoney(parsed.to) : escapeHtml(String(a.detail || '')));
+      return `<li class="pl-row pl-drop"><span class="pl-when">${escapeHtml(a.date)}</span><span class="pl-what">Price drop</span><span class="pl-val">${val}</span></li>`;
+    }
+    return `<li class="pl-row pl-offer"><span class="pl-when">${escapeHtml(a.date)}</span><span class="pl-what">Offer sent</span><span class="pl-val">${escapeHtml(String(a.detail || ''))}</span></li>`;
+  }).join('');
+  const drops = events.filter(a => a.action === 'Price Drop').length;
+  const offers = events.length - drops;
+  const label = [
+    drops ? `${drops} price drop${drops === 1 ? '' : 's'}` : '',
+    offers ? `${offers} offer${offers === 1 ? '' : 's'} sent` : '',
+  ].filter(Boolean).join(' \u00b7 ');
+  return `<details class="price-log"><summary><span class="pl-summary">${escapeHtml(label)}</span></summary><ul class="pl-list">${rows}</ul></details>`;
 }
 // Small badges surfacing "something was already done about this" directly
 // on the Inventory cards, not just in the Action tab — a price drop and/or
 // an offer sent, whichever have happened for this item.
 function actionBadgesHTML(itemId) {
-  const badges = [];
-  const offer = latestActionOfType(itemId, 'Offer Sent');
-  if (offer) badges.push(`<span class="action-badge offer">Offer sent ${escapeHtml(offer.date)}</span>`);
-  const drop = latestActionOfType(itemId, 'Price Drop');
-  if (drop) {
-    const parsed = parsePriceDropDetail(drop.detail);
-    const txt = parsed && parsed.from ? `Price dropped ${fmtMoney(parsed.from)}→${fmtMoney(parsed.to)}` : 'Price dropped';
-    badges.push(`<span class="action-badge drop">${txt} ${escapeHtml(drop.date)}</span>`);
-  }
   const note = postingNoteFor(itemId);
-  if (note) badges.push(`<span class="action-badge hold">⏸ ${escapeHtml(note)}</span>`);
-  return badges.length ? `<div class="action-badges">${badges.join('')}</div>` : '';
+  if (!note) return '';
+  return `<div class="action-badges"><span class="action-badge hold">\u23f8 ${escapeHtml(note)}</span></div>`;
 }
 
 function latestActionStateFor(itemId) {
@@ -965,7 +989,7 @@ function itemCardHTML(item, cat) {
         <button type="button" class="focus-btn${focused ? ' on' : ''}" data-focus="${escapeHtml(item.itemId)}" data-on="${focused ? '1' : ''}" title="${focused ? 'In Focused inventory — click to remove' : 'Add to Focused inventory'}" aria-label="${focused ? 'Remove from Focused inventory' : 'Add to Focused inventory'}">${focused ? '◉' : '◎'}</button>
         <span class="status-badge ${statusClass(item.sourceStatus)}">${escapeHtml(item.sourceStatus || '—')}</span>
       </div>
-      ${sold ? '' : `<div class="chip-pair">${expectedChipHTML(item)}${speedChipHTML(item)}</div>`}
+      ${sold ? '' : paceRowHTML(item)}
       ${actionBadgesHTML(item.itemId)}
       ${localDealBadgesHTML(item.itemId)}
       ${siteStatusChipsHTML(item)}
@@ -973,6 +997,7 @@ function itemCardHTML(item, cat) {
         ${item.size ? `<span><b>Size —</b> ${escapeHtml(item.size)}</span>` : ''}
         ${item.condition ? `<span><b>Condition —</b> ${escapeHtml(item.condition)}</span>` : ''}
         <span><b>List price —</b> ${priceLineHTML(item)}${item.floorPrice ? ` (floor ${escapeHtml(item.floorPrice)})` : ''}</span>
+        ${priceLogHTML(item.itemId)}
         ${posted ? `<span><b>Posted —</b> ${escapeHtml(posted)}</span>` : ''}
         ${sold ? `<span><b>Sold —</b> ${escapeHtml(item.soldPrice || '—')}</span>` : ''}
       </div>
@@ -1966,6 +1991,7 @@ function rankedDetailHTML(item) {
         </div>
         <div class="rr-facts">${facts}</div>
         ${actionBadgesHTML(item.itemId)}
+        ${priceLogHTML(item.itemId)}
         ${siteStatusChipsHTML(item)}
         ${platformStatsHTML(item)}
       </div>
@@ -3321,6 +3347,26 @@ function saleSpeedFor(item, latestByPlatform) {
   // well gets flagged simply for being older than two weeks.
   const expected = expectedSaleFor(item);
   return { ...out, band, expected, clicksPerDay, overdue: days > expected.maxDays };
+}
+// One row, one verdict. The old pair of chips made you compare two labels
+// ("Expect: Steady" against "Pace: Medium") to work out whether an item was
+// doing fine - so this states the answer and keeps the evidence in the
+// tooltip: where the listing is today, against how long it was meant to take.
+function paceRowHTML(item, latestByPlatform) {
+  const s = saleSpeedFor(item, latestByPlatform);
+  const e = s.expected || expectedSaleFor(item);
+  const day = s.daysListed;
+  let id, flag, detail;
+  if (day === null) { id = 'none'; flag = 'Not posted'; detail = 'no listing date yet'; }
+  else if (s.band.id === 'nodata') { id = 'none'; flag = 'No stats'; detail = `day ${day} \u00b7 nothing logged yet`; }
+  else if (s.band.id === 'newish') { id = 'new'; flag = 'Too new'; detail = `day ${day} \u00b7 usually ${e.days}`; }
+  else if (s.overdue) { id = 'behind'; flag = 'Behind'; detail = `day ${day} \u00b7 expected ${e.days}`; }
+  else { id = 'onpace'; flag = 'On pace'; detail = `day ${day} of ${e.days}`; }
+  const traffic = (s.band.id === 'nodata' || s.band.id === 'newish' || day === null)
+    ? ''
+    : ` Traffic so far reads ${s.band.label.toLowerCase()}: ${s.clicks} click${s.clicks === 1 ? '' : 's'} in ${day} day${day === 1 ? '' : 's'}.`;
+  const title = `${e.label} \u2014 ${e.why}${traffic}`;
+  return `<div class="pace-row pace-${id}" title="${escapeHtml(title)}"><span class="pace-flag">${escapeHtml(flag)}</span><span class="pace-detail">${escapeHtml(detail)}</span></div>`;
 }
 function speedChipHTML(item, latestByPlatform) {
   const s = saleSpeedFor(item, latestByPlatform);
