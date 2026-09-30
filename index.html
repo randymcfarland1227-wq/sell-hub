@@ -78,17 +78,15 @@
     </div>
 
     <div class="inventory-toolbar">
-      <div class="mode-switch" id="modeSwitch" aria-label="Inventory view">
-        <button data-mode="wheel">Wheel</button>
-        <button data-mode="list" class="active">List</button>
-      </div>
-      <div class="mode-switch" id="groupSwitch" aria-label="Inventory grouping">
-        <button data-group="category" class="active">By category</button>
-        <button data-group="size">By size</button>
-        <button data-group="ranked">By views</button>
-        <button data-group="speed">By sale speed</button>
-        <button data-group="offers">Offers sent</button>
-      </div>
+      <label class="sort-control" id="groupSwitch">Group by
+        <select id="listGroupSelect">
+          <option value="category" selected>Category</option>
+          <option value="size">Size</option>
+          <option value="ranked">Views</option>
+          <option value="speed">Sale speed</option>
+          <option value="offers">Offers sent</option>
+        </select>
+      </label>
       <label class="sort-control">Sort by
         <select id="listSortSelect">
           <option value="views" selected>Most views</option>
@@ -129,41 +127,6 @@
 
     <div id="inventoryBrowse">
     <p class="stl-note">Site tags on each card: filled = live there, dashed = still to post, grey = not posting or ended.</p>
-
-    <!-- ---------- WHEEL MODE ---------- -->
-    <div id="wheelMode">
-      <div id="wheelView">
-        <div class="zoom-row">
-          <span>Zoom</span>
-          <button class="zoom-btn" id="zoomOut" aria-label="Zoom out">&minus;</button>
-          <span class="zoom-pct" id="zoomPct">100%</span>
-          <button class="zoom-btn" id="zoomIn" aria-label="Zoom in">&plus;</button>
-        </div>
-        <div class="wheel-scroll" id="wheelScroll">
-          <div class="wheel-wrap" id="wheelWrap">
-            <svg class="wheel-spokes" id="wheelSpokes" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
-            <div class="wheel-center">
-              <div class="wheel-center-count" id="wheelCount"></div>
-              <div class="wheel-center-label">active listings</div>
-            </div>
-            <div id="wheelNodes"></div>
-          </div>
-        </div>
-      </div>
-
-      <div id="categoryView" style="display:none">
-        <button class="back-link" id="backToWheel">&larr; All categories</button>
-        <div class="cat-detail-head">
-          <span class="icon" id="catIcon"></span>
-          <div>
-            <h2 id="catLabel"></h2>
-            <p class="cat-blurb" id="catBlurb"></p>
-          </div>
-          <label class="chip-toggle" style="margin-left:auto"><input type="checkbox" id="showSoldCategory"> show sold</label>
-        </div>
-        <div class="card-grid" id="categoryCards"></div>
-      </div>
-    </div>
 
     <!-- ---------- LIST MODE ---------- -->
     <section class="pick-panel" id="pickPanel" hidden aria-label="Selected items"></section>
@@ -577,12 +540,12 @@
   <div class="acq-drawer-body" id="acqDrawerBody"></div>
 </aside>
 
-<script src="js/config.js?v=20260929-salespeed"></script>
-<script src="js/data.js?v=20260929-salespeed"></script>
+<script src="js/config.js?v=20260930-listonly"></script>
+<script src="js/data.js?v=20260930-listonly"></script>
 <script src="js/app.js?v=20260929-close"></script>
-<script src="js/acquire-config.js?v=20260929-salespeed"></script>
-<script src="js/acquire-model.js?v=20260929-salespeed"></script>
-<script src="js/acquire.js?v=20260929-salespeed"></script>
-<script src="js/stocking.js?v=20260929-salespeed"></script>
+<script src="js/acquire-config.js?v=20260930-listonly"></script>
+<script src="js/acquire-model.js?v=20260930-listonly"></script>
+<script src="js/acquire.js?v=20260930-listonly"></script>
+<script src="js/stocking.js?v=20260930-listonly"></script>
 </body>
 </html>

@@ -725,18 +725,18 @@ applyTheme(currentTheme());
 // ---------------------------------------------------------------------
 // Inventory — mode switch (wheel vs list)
 // ---------------------------------------------------------------------
-document.querySelectorAll('#modeSwitch button').forEach(btn => {
-  btn.addEventListener('click', () => setMode(btn.dataset.mode, true));
-});
-
-document.querySelectorAll('#groupSwitch button').forEach(btn => {
-  btn.addEventListener('click', () => setListGroup(btn.dataset.group));
-});
+// The wheel view is gone: List is the only inventory view, and the five
+// grouping buttons that sat beside it are now one select, so the toolbar
+// reads as two dropdowns instead of a wall of toggles.
+const listGroupSelect = document.getElementById('listGroupSelect');
+if (listGroupSelect) {
+  listGroupSelect.addEventListener('change', () => setListGroup(listGroupSelect.value));
+}
 
 function setListGroup(group) {
   state.listGroup = group;
   localSet('sellHub.listGroup', group);
-  document.querySelectorAll('#groupSwitch button').forEach(b => b.classList.toggle('active', b.dataset.group === group));
+  if (listGroupSelect && listGroupSelect.value !== group) listGroupSelect.value = group;
   renderList();
 }
 
@@ -747,9 +747,7 @@ function inventoryListModeActive() {
   return !!(el && el.style.display !== 'none');
 }
 function inventoryWheelCategoryActive() {
-  const wheel = document.getElementById('wheelMode');
-  const cat = document.getElementById('categoryView');
-  return !!(wheel && wheel.style.display !== 'none' && cat && cat.style.display !== 'none');
+  return false; // wheel drill-down removed
 }
 function setInventoryExpandedAll(expand) {
   if (inventoryWheelCategoryActive()) {
@@ -794,148 +792,33 @@ state.expandedSpeeds = new Set();
   renderList();
 }
 
-function setMode(mode, resetHash) {
-  document.querySelectorAll('#modeSwitch button').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
-  document.getElementById('wheelMode').style.display = mode === 'wheel' ? '' : 'none';
-  document.getElementById('listMode').style.display = mode === 'list' ? '' : 'none';
-  localSet('sellHub.mode', mode);
-  if (mode === 'wheel' && resetHash) location.hash = '';
+function setMode() {
+  const list = document.getElementById('listMode');
+  if (list) list.style.display = '';
+  localSet('sellHub.mode', 'list');
   syncInventoryToolbar();
-  // Wheel wrap measures 0 while #wheelMode is display:none (default List).
-  // Re-measure after it becomes visible so aspect-ratio height is not stuck at 0.
-  if (mode === 'wheel') {
-    requestAnimationFrame(() => applyZoom());
-  }
 }
 
 function syncInventoryToolbar() {
   const inv = document.getElementById('inventory');
   if (!inv) return;
-  const wheel = document.getElementById('wheelMode');
-  const list = document.getElementById('listMode');
-  const inWheel = !!(wheel && wheel.style.display !== 'none');
-  const inList = !!(list && list.style.display !== 'none');
-  const inWheelCat = inventoryWheelCategoryActive();
-  inv.classList.toggle('mode-wheel', inWheel);
-  inv.classList.toggle('mode-list', inList);
-  inv.classList.toggle('wheel-overview', inWheel && !inWheelCat);
-  inv.classList.toggle('wheel-category', inWheelCat);
+  inv.classList.remove('mode-wheel', 'wheel-overview', 'wheel-category');
+  inv.classList.add('mode-list');
   const group = document.getElementById('groupSwitch');
-  const sort = document.querySelector('#inventory .sort-control');
+  const sort = document.querySelector('#inventory .sort-control:not(#groupSwitch)');
   const expand = document.querySelector('#inventory .inventory-expand');
-  if (group) group.hidden = !inList;
-  if (sort) sort.hidden = !inList;
-  // Expand/Collapse apply to list sections or wheel category drill-down rows.
-  if (expand) expand.hidden = !(inList || inWheelCat);
+  if (group) group.hidden = false;
+  if (sort) sort.hidden = false;
+  if (expand) expand.hidden = false;
 }
 
 // ---------------------------------------------------------------------
 // Inventory — wheel of categories, drilling into one at a time
 // ---------------------------------------------------------------------
-function renderWheel() {
-  const nodesEl = document.getElementById('wheelNodes');
-  const spokesEl = document.getElementById('wheelSpokes');
-  nodesEl.innerHTML = '';
-  spokesEl.innerHTML = '';
-
-  const cats = activeCategories();
-  const n = cats.length;
-  const R = 38;
-  const cx = 50, cy = 50;
-
-  cats.forEach((cat, i) => {
-    const angle = (2 * Math.PI * i) / n - Math.PI / 2;
-    const x = cx + R * Math.cos(angle);
-    const y = cy + R * Math.sin(angle);
-    const count = state.inventory.filter(it => categoryMeta(it.category).id === cat.id && !isSold(it)).length;
-
-    const spoke = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-    spoke.setAttribute('x1', cx); spoke.setAttribute('y1', cy);
-    spoke.setAttribute('x2', x); spoke.setAttribute('y2', y);
-    spoke.setAttribute('class', 'spoke-line');
-    spokesEl.appendChild(spoke);
-
-    const node = document.createElement('button');
-    node.className = 'wheel-node';
-    node.style.left = x + '%';
-    node.style.top = y + '%';
-    node.style.setProperty('--dot', cat.color);
-    node.innerHTML = `
-      <span class="bubble">${cat.icon}</span>
-      <span class="label">${cat.label}</span>
-      <span class="count">${count}</span>
-    `;
-    node.addEventListener('click', () => { location.hash = `#/category/${cat.id}`; });
-    nodesEl.appendChild(node);
-  });
-
-  document.getElementById('wheelCount').textContent = state.inventory.filter(it => !isSold(it)).length;
-}
-
-function applyZoom() {
-  const wrap = document.getElementById('wheelWrap');
-  const scroll = document.getElementById('wheelScroll');
-  if (!wrap || !scroll) return;
-  // Skip while the wheel host is hidden — writing width:0px permanently
-  // collapses aspect-ratio height and .wheel-scroll clips to a thin sliver.
-  const host = document.getElementById('wheelMode');
-  if (host && host.style.display === 'none') return;
-  const inv = document.getElementById('inventory');
-  if (inv && !inv.classList.contains('active')) return;
-  const avail = scroll.clientWidth;
-  if (avail <= 0) return;
-  const base = Math.min(avail, ZOOM_BASE);
-  const px = Math.round(base * state.zoom);
-  wrap.style.width = px + 'px';
-  wrap.style.height = px + 'px'; // explicit height so overflow clip cannot zero the canvas
-  document.getElementById('zoomPct').textContent = Math.round(state.zoom * 100) + '%';
-  document.getElementById('zoomOut').disabled = state.zoom <= ZOOM_MIN;
-  document.getElementById('zoomIn').disabled = state.zoom >= ZOOM_MAX;
-  void wrap.offsetWidth;
-  scroll.scrollLeft = (px - scroll.clientWidth) / 2;
-}
-document.getElementById('zoomIn').addEventListener('click', () => {
-  state.zoom = Math.min(ZOOM_MAX, +(state.zoom + ZOOM_STEP).toFixed(2));
-  applyZoom();
-});
-document.getElementById('zoomOut').addEventListener('click', () => {
-  state.zoom = Math.max(ZOOM_MIN, +(state.zoom - ZOOM_STEP).toFixed(2));
-  applyZoom();
-});
-let resizeTimer;
-window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(applyZoom, 150); });
-
-function showWheel() {
-  document.getElementById('wheelView').style.display = '';
-  document.getElementById('categoryView').style.display = 'none';
-  syncInventoryToolbar();
-  requestAnimationFrame(() => applyZoom());
-}
-
-function showCategory(catId) {
-  const cat = activeCategories().find(c => c.id === catId);
-  if (!cat) { showWheel(); return; }
-
-  document.getElementById('wheelView').style.display = 'none';
-  const view = document.getElementById('categoryView');
-  view.style.display = '';
-  view.style.setProperty('--cat', cat.color);
-  syncInventoryToolbar();
-
-  document.getElementById('catIcon').textContent = cat.icon;
-  document.getElementById('catLabel').textContent = cat.label;
-  const count = state.inventory.filter(it => categoryMeta(it.category).id === catId).length;
-  document.getElementById('catBlurb').textContent = `${count} item${count === 1 ? '' : 's'} in this category`;
-
-  // Fresh entry into a category always starts collapsed; in-session toggles
-  // (show sold, mark sold) keep expand choices via renderCategoryCards alone.
-  state.expandedWheelItems = new Set();
-  renderCategoryCards(cat);
-}
-
-// Item-level list price plus per-platform views/clicks — the numbers a
-// seller actually checks day to day — shown directly on the card instead
-// of behind a click, per platform since views/clicks are platform-specific.
+function renderWheel() { /* wheel view removed */ }
+function applyZoom() { /* wheel view removed */ }
+function showWheel() { /* wheel view removed */ }
+function showCategory() { /* wheel view removed */ }
 function platformStatsHTML(item) {
   const platforms = splitPlatforms(item.platform);
   if (!platforms.length) return '';
@@ -1412,18 +1295,11 @@ function renderCategoryCards(cat) {
   wireItemCards(grid, () => renderCategoryCards(cat));
 }
 
-document.getElementById('backToWheel').addEventListener('click', () => { location.hash = ''; });
 
-document.getElementById('showSoldCategory').addEventListener('change', e => {
-  state.showSold = e.target.checked;
-  const catId = (location.hash.match(/^#\/category\/(.+)$/) || [])[1];
-  const cat = activeCategories().find(c => c.id === catId);
-  if (cat) renderCategoryCards(cat);
-});
 
 function routeOverview() {
   const match = location.hash.match(/^#\/category\/(.+)$/);
-  if (match) showCategory(match[1]); else showWheel();
+  /* wheel view removed - the inventory list is the only view */
 }
 window.addEventListener('hashchange', routeOverview);
 
@@ -1455,7 +1331,7 @@ document.getElementById('showSoldList').addEventListener('change', e => {
 });
 document.getElementById('listSortSelect').addEventListener('change', e => {
   state.listSort = e.target.value;
-  setMode('list', true);
+  setMode();
   renderList();
 });
 
@@ -4684,7 +4560,7 @@ state.expandedCats = new Set();
 state.expandedSizes = new Set();
 state.expandedRanked = new Set();
 state.expandedWheelItems = new Set();
-document.querySelectorAll('#groupSwitch button').forEach(b => b.classList.toggle('active', b.dataset.group === state.listGroup));
+if (listGroupSelect) listGroupSelect.value = state.listGroup;
 document.querySelectorAll('#stlGroupSwitch button').forEach(b => {
   b.classList.toggle('active', b.dataset.stlGroup === state.stlGroup);
   b.addEventListener('click', () => {
@@ -4708,7 +4584,7 @@ renderPickPanel();
 renderFocusView();
 renderOptimizeView();
 setInventoryMode(state.inventoryMode);
-setMode(localGet('sellHub.mode', 'list'));
+setMode();
 renderStats();
 state.featuredActions = new Set(localGet('sellHub.featuredActions', []));
 // Stars set in another tab (or in Life Hub's embedded copy of this site) show up here too,
