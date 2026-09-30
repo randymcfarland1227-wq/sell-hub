@@ -46,6 +46,72 @@ function escapeHtml(s) {
 // Compact inventory label used on collapsed ranked rows (brand + item, no em dash).
 // Brand + item, without saying the brand twice when the item name already
 // starts with it ("Timberland Timberland Ellendale..." reads as a typo).
+// ---------------------------------------------------------------------
+// Visual language: one icon + one colour per kind of number, used on every
+// tile and section heading, so a glance tells you what a box is about
+// before you read it.
+// ---------------------------------------------------------------------
+const ICON_PATHS = {
+  tag: '<path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/>',
+  eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  pointer: '<path d="M4 4l7 17 2.5-7.5L21 11z"/>',
+  heart: '<path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8l1 1.1L12 21l7.8-7.5 1-1.1a5.5 5.5 0 0 0 0-7.8z"/>',
+  check: '<circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/>',
+  wallet: '<path d="M3 7h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/><path d="M3 7l12-4v4"/><circle cx="16.5" cy="13.5" r="1.2"/>',
+  truck: '<path d="M2 6h11v10H2z"/><path d="M13 10h4l3 3v3h-7"/><circle cx="6" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>',
+  tasks: '<path d="M9 6h11M9 12h11M9 18h11"/><path d="M3 6l1.5 1.5L7 5M3 12l1.5 1.5L7 11M3 18l1.5 1.5L7 17"/>',
+  users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6.5 6.5 0 0 1 3.5 6"/>',
+  xcircle: '<circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6"/>',
+  wrench: '<path d="M14.7 6.3a4 4 0 0 0 5 5L21 13l-8 8-3-3 8-8-1.3-1.3a4 4 0 0 0-5-5L14 2z"/><path d="M3 21l6-6"/>',
+  upload: '<path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>',
+  zap: '<path d="M13 2L4 14h7l-1 8 9-12h-7z"/>',
+  send: '<path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/>',
+  down: '<path d="M3 7l6 6 4-4 8 8"/><path d="M15 17h6v-6"/>',
+  megaphone: '<path d="M3 11v2a1 1 0 0 0 1 1h3l6 5V5L7 10H4a1 1 0 0 0-1 1z"/><path d="M17 8a5 5 0 0 1 0 8"/>',
+  alert: '<path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18h.01"/>',
+  gauge: '<path d="M4 18a9 9 0 1 1 16 0"/><path d="M12 14l4-5"/>',
+  activity: '<path d="M3 12h4l3-8 4 16 3-8h4"/>',
+  box: '<path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/>',
+  dollar: '<path d="M12 2v20"/><path d="M17 6H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',
+  layers: '<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>',
+  list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  pin: '<path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/>',
+  note: '<path d="M4 4h16v12l-4 4H4z"/><path d="M16 20v-4h4"/>',
+  target: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/>',
+  chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+};
+function icon(name) {
+  return `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">${ICON_PATHS[name] || ICON_PATHS.target}</svg>`;
+}
+// kind -> icon; the colour for each kind lives in CSS as .kpi-<kind>.
+const KPI_ICONS = {
+  listings: 'tag', views: 'eye', clicks: 'pointer', watchers: 'heart', sold: 'check', cash: 'wallet',
+  ship: 'truck', tasks: 'tasks', local: 'users', end: 'xcircle', prep: 'wrench', list: 'upload', moves: 'zap',
+  offer: 'send', drop: 'down', reach: 'megaphone', out: 'send', behind: 'alert', pace: 'gauge', week: 'activity',
+  items: 'box', value: 'dollar', net: 'dollar', focus: 'target',
+};
+function kpiIcon(kind) { return `<span class="kpi-ico">${icon(KPI_ICONS[kind] || 'target')}</span>`; }
+function kpiClass(kind, num) {
+  const zero = num === 0 || num === '0' || num === '$0' || num === '—';
+  return `kpi kpi-${kind}${zero ? ' is-zero' : ''}`;
+}
+// Section headings get the same treatment: an icon chip in the section's
+// colour, added once at start-up from this map.
+const SECTION_KINDS = {
+  'sec-ship': 'ship', 'sec-tasks': 'tasks', 'sec-local': 'local', 'sec-end': 'end', 'sec-prep': 'prep', 'sec-list': 'list',
+  'sec-pricing': 'moves', 'sec-offers-out': 'out', 'sec-under': 'behind', 'sec-platforms': 'layers', 'sec-listings': 'list',
+  'sec-sales': 'sold', 'sec-cashflow': 'cash',
+};
+function decorateSectionHeadings() {
+  document.querySelectorAll('.subhead[id]').forEach(h => {
+    const kind = SECTION_KINDS[h.id];
+    if (!kind || h.querySelector('.sec-ico')) return;
+    h.classList.add('sec-head', 'kpi-' + kind);
+    h.insertAdjacentHTML('afterbegin', `<span class="sec-ico">${icon(KPI_ICONS[kind] || kind)}</span>`);
+  });
+}
+
 function itemDisplayName(item, sep) {
   const brand = String((item && item.brand) || '').trim();
   const name = String((item && item.item) || '').trim();
@@ -324,7 +390,7 @@ function collectResaleActions() {
       id: key,
       title: itemTitle(item),
       detail: `Post it on ${missing.map(m => m.meta.label).join(', ')}.`,
-      meta: item.listPrice ? `List price ${fmtMoney(parseMoney(item.listPrice))}` : 'No list price yet',
+      meta: askFor(item) ? `List price ${fmtMoney(askFor(item))}` : 'No list price yet',
       kind: 'list',
       tag: `List (${missing.map(m => shortPlatformLabel(m.meta)).join(', ')})`,
       itemId: item.itemId,
@@ -632,7 +698,35 @@ function daysSince(dateStr) {
 // it, lives in priceLogHTML below - a card that shouts its own history at you
 // is harder to read than one that answers "what is it today?" in one glance.
 function priceLineHTML(item) {
-  return item.listPrice ? escapeHtml(item.listPrice) : '\u2014';
+  return priceTextFor(item);
+}
+
+// The price on the live listing is the price - Randy sets it there, and the
+// sheet's List price is only a fallback for items not live anywhere yet.
+// Read per site from the latest stat pull (eBay and Poshmark rows carry it).
+function livePricesFor(item) {
+  if (!item || isSold(item)) return [];
+  const map = latestMetricsByItemPlatform();
+  return platformsStatusFor(item).done
+    .map(d => {
+      const snap = map.get(item.itemId + '|' + d.meta.id);
+      return { meta: d.meta, price: snap ? parseMoney(snap.price) : 0 };
+    })
+    .filter(r => r.price > 0)
+    .sort((a, b) => platformRank(a.meta.id) - platformRank(b.meta.id));
+}
+function askFor(item) {
+  const live = livePricesFor(item);
+  return live.length ? live[0].price : parseMoney(item && item.listPrice);
+}
+const moneyText = n => '$' + (Number.isInteger(n) ? n : n.toFixed(2));
+// "$49.99", or "$49.99 eBay · $60 Posh" when the sites differ.
+function priceTextFor(item) {
+  const live = livePricesFor(item);
+  if (!live.length) return item && item.listPrice ? escapeHtml(moneyText(parseMoney(item.listPrice))) : '\u2014';
+  const distinct = [...new Set(live.map(r => r.price))];
+  if (distinct.length === 1) return escapeHtml(moneyText(distinct[0]));
+  return live.map(r => `${escapeHtml(moneyText(r.price))} <i class="px-site">${escapeHtml(r.meta.short || r.meta.label)}</i>`).join(' · ');
 }
 // The full pricing history for one item, collapsed by default: every price
 // drop and every offer sent, newest first.
@@ -844,10 +938,11 @@ function platformStatsHTML(item) {
   // One line per site — site, price, views, clicks — so a card with three
   // platforms costs three lines rather than six. The "was" price is left to
   // the List price row above; repeating it here is what broke the line.
-  const raw = item.listPrice == null ? '' : String(item.listPrice).trim();
-  const price = !raw ? '—' : (raw.startsWith('$') ? raw : '$' + raw);
+  const livePrices = new Map(livePricesFor(item).map(r => [r.meta.id, r.price]));
+  const fallback = parseMoney(item.listPrice);
   const rows = platforms.map(p => {
     const m = platformMeta(p);
+    const price = livePrices.has(m.id) ? moneyText(livePrices.get(m.id)) : fallback ? moneyText(fallback) : '—';
     const snap = latestByPlatform.get(item.itemId + '|' + m.id);
     const views = Number(snap && (snap.views || snap.impressions)) || 0;
     const clicks = Number(snap && snap.clicks) || 0;
@@ -949,8 +1044,6 @@ function inventoryCardHTML(item) {
   const photo = photoForItem(item.itemId);
   const focused = !!focusedFor(item.itemId);
   const posted = postedInfoFor(item.itemId);
-  const raw = String(item.listPrice ?? '').trim();
-  const price = raw ? (raw.startsWith('$') ? raw : '$' + raw) : '—';
   const facts = [
     item.size ? `Size ${escapeHtml(item.size)}` : '',
     item.condition ? escapeHtml(item.condition) : '',
@@ -966,7 +1059,7 @@ function inventoryCardHTML(item) {
         </div>
         <div class="inv-body">
           <div class="inv-title-row">
-            <h3 title="${escapeHtml(title)}">${escapeHtml(title)}</h3>
+            <h3 title="${escapeHtml(title)}">${itemLink(item, escapeHtml(title))}</h3>
             <div class="inv-tools">
               <label class="pick-box" title="Select this item"><input type="checkbox" data-pick="${escapeHtml(item.itemId)}"${state.picked.has(String(item.itemId)) ? ' checked' : ''}><span></span></label>
               <button type="button" class="focus-btn${focused ? ' on' : ''}" data-focus="${escapeHtml(item.itemId)}" data-on="${focused ? '1' : ''}" title="${focused ? 'In Focused inventory — click to remove' : 'Add to Focused inventory'}">${focused ? '◉' : '◎'}</button>
@@ -975,7 +1068,7 @@ function inventoryCardHTML(item) {
           <div class="inv-status-row">
             <span class="status-badge ${statusClass(item.sourceStatus)}">${escapeHtml(item.sourceStatus || '—')}</span>
             ${alertButtonHTML(item)}
-            <span class="inv-price"><b>${escapeHtml(price)}</b>${item.floorPrice ? `<i>floor ${escapeHtml(String(item.floorPrice))}</i>` : ''}</span>
+            <span class="inv-price"><b>${priceTextFor(item)}</b>${item.floorPrice ? `<i>floor ${escapeHtml(String(item.floorPrice))}</i>` : ''}</span>
           </div>
           ${facts ? `<div class="inv-facts">${facts}</div>` : ''}
           ${siteStatusChipsHTML(item)}
@@ -1468,7 +1561,7 @@ function itemSortStats(item, latestByPlatform) {
     views += snapshotViews(snap, m.id);
     clicks += Number(snap && snap.clicks) || 0;
   });
-  return { views, clicks, ctr: views ? clicks / views : 0, price: parseMoney(item.listPrice) };
+  return { views, clicks, ctr: views ? clicks / views : 0, price: askFor(item) };
 }
 
 // ---------------------------------------------------------------------
@@ -1566,7 +1659,7 @@ function renderPickPanel() {
   if (!items.length) { el.innerHTML = ''; el.hidden = true; return; }
   el.hidden = false;
   const latestByPlatform = latestMetricsByItemPlatform();
-  const total = items.reduce((n, it) => n + parseMoney(it.listPrice), 0);
+  const total = items.reduce((n, it) => n + askFor(it), 0);
   const floor = items.reduce((n, it) => n + parseMoney(it.floorPrice), 0);
   const rows = items.map(it => {
     const b = sizeBucket(it);
@@ -1580,7 +1673,7 @@ function renderPickPanel() {
           <b>${escapeHtml([it.brand, it.item].filter(Boolean).join(' — ') || it.itemId)}</b>
           <small>${escapeHtml(b.label)} · ${escapeHtml(it.condition || '—')} · ${escapeHtml(sites || 'not listed')}</small>
         </span>
-        <span class="pick-stats"><b>${fmtMoney(parseMoney(it.listPrice))}</b><small>${stats.views} views · ${stats.clicks} clicks</small></span>
+        <span class="pick-stats"><b>${fmtMoney(askFor(it))}</b><small>${stats.views} views · ${stats.clicks} clicks</small></span>
         <button type="button" class="icon-btn pick-drop" data-id="${escapeHtml(it.itemId)}" aria-label="Remove from selection">✕</button>
       </li>`;
   }).join('');
@@ -1673,7 +1766,7 @@ function optimizePlanFor(itemId) {
 }
 function optimizationFor(item, sp, gap) {
   const action = pricingActionFor(item);
-  const ask = parseMoney(item.listPrice);
+  const ask = askFor(item);
   const floor = parseMoney(item.floorPrice);
   const room = Math.max(0, ask - floor);
   let lever = 'crosslist';
@@ -1763,7 +1856,7 @@ function optimizeRowHTML(item, sp, rank, gap) {
         <span class="opt-rank">${rank}</span>
         <span class="opt-thumb">${photo ? `<img src="${escapeHtml(photo)}" alt="" loading="lazy" onerror="this.remove()">` : ''}</span>
         <span class="opt-name">
-          <b>${escapeHtml(itemShortName(item))}</b>
+          <b>${itemLink(item, escapeHtml(itemShortName(item)))}</b>
           <small>${gap && gap.why ? escapeHtml(gap.why) : escapeHtml(rec.reason)}</small>
         </span>
         <span class="opt-nums">
@@ -1807,12 +1900,19 @@ const GAP_ZERO_CLICK_DAYS = 10;  // no clicks by now means nobody is choosing it
 // eBay's "views" are visits to the listing page - someone chose to open it -
 // while its click count from the API stays at 0, so opens = clicks plus eBay
 // page visits. Without this an eBay listing with real visitors reads "no clicks".
+// eBay reports the same visits twice - page views from Seller Hub and clicks
+// from the API - so its opens are the larger of the two, never the sum.
+function snapOpens(snap, platformIdValue) {
+  if (!snap) return 0;
+  const clicks = Number(snap.clicks) || 0;
+  return platformIdValue === 'ebay' ? Math.max(clicks, Number(snap.views) || 0) : clicks;
+}
 function listingOpensFor(item, map) {
   let opens = 0;
   splitPlatforms(item.platform).forEach(p => {
     const m = platformMeta(p);
     const snap = map.get(item.itemId + '|' + m.id);
-    opens += (Number(snap && snap.clicks) || 0) + (m.id === 'ebay' ? Number(snap && snap.views) || 0 : 0);
+    opens += snapOpens(snap, m.id);
   });
   return opens;
 }
@@ -1881,12 +1981,12 @@ function renderOptimizeTiles() {
   const out = recentOffers().filter(o => o.days <= 7).length;
   const offerSub = prepared ? `${prepared} ready for your OK` : approved ? `${approved} approved, sending next run` : 'Watchers & likers';
   tiles.innerHTML = [
-    { num: counts['Send an offer'] || 0, lbl: 'Offers to make', sub: offerSub, target: 'sec-pricing', hot: true },
-    { num: counts['Try a price drop'] || 0, lbl: 'Price drops', sub: 'Traffic, weak clicks', target: 'sec-pricing' },
-    { num: (counts['Boost visibility'] || 0) + (counts['Refresh listing'] || 0), lbl: 'Need reach', sub: 'Fix before cutting price', target: 'sec-pricing' },
-    { num: out, lbl: 'Offers out', sub: 'Sent in the last 7 days', target: 'sec-offers-out' },
-    { num: behind, lbl: 'Behind pace', sub: 'Slower than expected', target: 'sec-under' },
-  ].map(t => `<button type="button" class="stat-tile opt-tile${t.hot ? ' opt-tile-hot' : ''}" data-target="${t.target}"><div class="num">${t.num}</div><div class="lbl">${t.lbl}</div><small>${escapeHtml(t.sub)}</small></button>`).join('');
+    { kind: 'offer', num: counts['Send an offer'] || 0, lbl: 'Offers to make', sub: offerSub, target: 'sec-pricing' },
+    { kind: 'drop', num: counts['Try a price drop'] || 0, lbl: 'Price drops', sub: 'Traffic, weak clicks', target: 'sec-pricing' },
+    { kind: 'reach', num: (counts['Boost visibility'] || 0) + (counts['Refresh listing'] || 0), lbl: 'Need reach', sub: 'Fix before cutting price', target: 'sec-pricing' },
+    { kind: 'out', num: out, lbl: 'Offers out', sub: 'Sent in the last 7 days', target: 'sec-offers-out' },
+    { kind: 'behind', num: behind, lbl: 'Behind pace', sub: 'Slower than expected', target: 'sec-under' },
+  ].map(t => `<button type="button" class="stat-tile opt-tile ${kpiClass(t.kind, t.num)}" data-target="${t.target}">${kpiIcon(t.kind)}<div class="num">${t.num}</div><div class="lbl">${t.lbl}</div><small>${escapeHtml(t.sub)}</small></button>`).join('');
   tiles.querySelectorAll('[data-target]').forEach(tile => tile.addEventListener('click', () => scrollToSection(tile.dataset.target)));
 }
 
@@ -1923,23 +2023,23 @@ function renderOptimizeToday() {
   });
   const dropText = a => { const p = parsePriceDropDetail(a.detail); return p && p.from ? `${fmtMoney(p.from)} → ${fmtMoney(p.to)}` : p ? `now ${fmtMoney(p.to)}` : String(a.detail || ''); };
   const offerText = a => { const m = String(a.detail || '').match(/(eBay|Poshmark|Depop|Mercari|Facebook)[^$]*\$[\d.]+(?:\s*to\s*\$[\d.]+)?/i); return m ? m[0].replace(/\s+-\s+/, ' ') : String(a.detail || '').slice(0, 60); };
-  const blip = (cls, name, detail) => `<li class="td-blip ${cls}"><b>${escapeHtml(name)}</b><span>${escapeHtml(detail)}</span></li>`;
-  const col = (title, n, items, empty) => `
+  const blip = (cls, name, detail, id) => `<li class="td-blip ${cls}"${id ? ` data-open-item="${escapeHtml(id)}"` : ''}><b>${escapeHtml(name)}</b><span>${escapeHtml(detail)}</span></li>`;
+  const col = (title, n, items, empty, ico) => `
     <div class="td-col">
-      <div class="td-head"><span>${title}</span><i>${n}</i></div>
+      <div class="td-head">${icon(ico)}<span>${title}</span><i>${n}</i></div>
       ${items.length ? `<ul>${items.join('')}</ul>` : `<p class="td-empty">${empty}</p>`}
     </div>`;
-  const behindItems = behind.slice(0, 4).map(r => blip(newlyBehind.includes(r) ? 'new' : '', itemShortName(r.it), newlyBehind.includes(r) ? 'new today' : r.gap.why.split(/[;.]/)[0]));
+  const behindItems = behind.slice(0, 4).map(r => blip(newlyBehind.includes(r) ? 'new' : '', itemShortName(r.it), newlyBehind.includes(r) ? 'new today' : r.gap.why.split(/[;.]/)[0], r.it.itemId));
   if (behind.length > 4) behindItems.push(`<li class="td-more"><button type="button" class="linkish" data-go="sec-under">+${behind.length - 4} more</button></li>`);
   box.innerHTML = `
     <div class="td-title"><h3>Today</h3><span>${escapeHtml(new Date(today + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }))}</span></div>
     <div class="td-grid">
-      ${col('Offers sent', offers.length, offers.map(a => blip('', nameOf(a.itemId), offerText(a))), 'None sent today')}
-      ${col('Prices changed', drops.length, drops.map(a => blip('', nameOf(a.itemId), dropText(a))), 'No price changes')}
-      ${col('Waiting for your OK', waiting.length, waiting.map(w => blip('ok', itemShortName(w.it), w.p.detail.slice(0, 60))), 'Nothing to approve')}
-      ${col('Behind pace', behind.length, behindItems, 'Nothing behind')}
+      ${col('Offers sent', offers.length, offers.map(a => blip('', nameOf(a.itemId), offerText(a), a.itemId)), 'None sent today', 'send')}
+      ${col('Prices changed', drops.length, drops.map(a => blip('', nameOf(a.itemId), dropText(a), a.itemId)), 'No price changes', 'down')}
+      ${col('Waiting for your OK', waiting.length, waiting.map(w => blip('ok', itemShortName(w.it), w.p.detail.slice(0, 60), w.it.itemId)), 'Nothing to approve', 'note')}
+      ${col('Behind pace', behind.length, behindItems, 'Nothing behind', 'alert')}
     </div>
-    ${cleared.length ? `<p class="td-cleared">Cleared today: ${cleared.map(a => escapeHtml(nameOf(a.itemId))).join(', ')}</p>` : ''}`;
+    ${cleared.length ? `<p class="td-cleared">Cleared today: ${cleared.map(a => `<span class="item-link" data-open-item="${escapeHtml(a.itemId)}">${escapeHtml(nameOf(a.itemId))}</span>`).join(', ')}</p>` : ''}`;
   box.querySelectorAll('[data-go]').forEach(b => b.addEventListener('click', () => scrollToSection(b.dataset.go)));
 }
 
@@ -1977,9 +2077,9 @@ function renderOffersOut() {
         const sp = sold ? null : saleSpeedFor(o.item, map);
         const outcome = sold
           ? `<span class="oo-sold">Sold${o.item.soldPrice ? ' · ' + escapeHtml(String(o.item.soldPrice)) : ''}</span>`
-          : `${sp.watchers} watching now · ${escapeHtml(String(o.item.listPrice ?? '—'))} ask${o.days >= 2 ? ' · <span class="oo-stale">offer has lapsed</span>' : ''}`;
+          : `${sp.watchers} watching now · ${priceTextFor(o.item)} ask${o.days >= 2 ? ' · <span class="oo-stale">offer has lapsed</span>' : ''}`;
         return `<tr class="${sold ? 'oo-row-sold' : ''}">
-          <td class="ot-name"><b>${escapeHtml(itemShortName(o.item))}</b><small>${o.count > 1 ? `${o.count} offers this month` : ''}</small></td>
+          <td class="ot-name"><b>${itemLink(o.item, escapeHtml(itemShortName(o.item)))}</b><small>${o.count > 1 ? `${o.count} offers this month` : ''}</small></td>
           <td>${o.days === 0 ? 'today' : o.days === 1 ? 'yesterday' : o.days + 'd ago'}</td>
           <td>${escapeHtml(o.detail.slice(0, 110))}</td>
           <td>${outcome}</td>
@@ -2133,16 +2233,15 @@ function perfRowHTML(r, rank) {
   const id = String(r.it.itemId);
   const open = state.expandedPerf.has(id) ? ' open' : '';
   const ctr = r.stats.views ? Math.round((r.opens / r.stats.views) * 100) : 0;
-  const price = String(r.it.listPrice ?? '').trim();
   const v = paceVerdict(r);
   const action = pricingActionFor(r.it);
   return `
     <details class="ranked-row perf-row" data-perf-id="${escapeHtml(id)}"${open}>
       <summary class="ranked-row-head">
         <span class="rr-rank">${rank}</span>
-        <span class="ranked-row-title">${escapeHtml(itemShortName(r.it))}<small class="perf-sub"><span class="perf-verdict perf-${v.id}">${escapeHtml(v.label)}</span>${r.sp.daysListed !== null ? ` · day ${r.sp.daysListed}` : ''} · ${escapeHtml(EXPECT_PLAIN[r.sp.expected.id] || r.sp.expected.label)} ${escapeHtml(r.sp.expected.days)}${action && !action.hidden ? ` · ${escapeHtml(action.label)}` : ''}</small></span>
+        <span class="ranked-row-title">${itemLink(r.it, escapeHtml(itemShortName(r.it)))}<small class="perf-sub"><span class="perf-verdict perf-${v.id}">${escapeHtml(v.label)}</span>${r.sp.daysListed !== null ? ` · day ${r.sp.daysListed}` : ''} · ${escapeHtml(EXPECT_PLAIN[r.sp.expected.id] || r.sp.expected.label)} ${escapeHtml(r.sp.expected.days)}${action && !action.hidden ? ` · ${escapeHtml(action.label)}` : ''}</small></span>
         <span class="rr-quick perf-quick">
-          <b>${price ? (price.startsWith('$') ? escapeHtml(price) : '$' + escapeHtml(price)) : '—'}</b>
+          <b>${priceTextFor(r.it)}</b>
           <i>${r.stats.views} views</i>
           <i>${r.opens} open${r.opens === 1 ? '' : 's'} · ${ctr}%</i>
           <i>${r.now.watchers} watching</i>
@@ -2182,10 +2281,10 @@ function renderPerformanceTiles(rows) {
   const opensWas = sum(r => listingOpensFor(r.it, past));
   const movers = rows.filter(r => r.trend.views || r.trend.clicks).length;
   tiles.innerHTML = `
-    <div class="stat-tile"><div class="num">${onPace}<small class="of"> / ${rows.length}</small></div><div class="lbl">On pace or better</div><small>${behind} behind · ${rows.length - onPace - behind} too new or no stats</small></div>
-    <div class="stat-tile"><div class="num">${signed(sum(r => r.trend.views))}</div><div class="lbl">Views this week</div><small>${movers} listings gained traffic</small></div>
-    <div class="stat-tile"><div class="num">${signed(Math.max(0, opensNow - opensWas))}</div><div class="lbl">Opens this week</div><small>${opensNow.toLocaleString()} opens in total</small></div>
-    <div class="stat-tile"><div class="num">${signed(sum(r => r.trend.watchers))}</div><div class="lbl">Watchers this week</div><small>${sum(r => r.now.watchers)} watching now</small></div>`;
+    <div class="stat-tile kpi kpi-pace">${kpiIcon('pace')}<div class="num">${onPace}<small class="of"> / ${rows.length}</small></div><div class="lbl">On pace or better</div><small>${behind} behind · ${rows.length - onPace - behind} too new or no stats</small></div>
+    <div class="stat-tile kpi kpi-views">${kpiIcon('views')}<div class="num">${signed(sum(r => r.trend.views))}</div><div class="lbl">Views this week</div><small>${movers} listings gained traffic</small></div>
+    <div class="stat-tile kpi kpi-clicks">${kpiIcon('clicks')}<div class="num">${signed(Math.max(0, opensNow - opensWas))}</div><div class="lbl">Opens this week</div><small>${opensNow.toLocaleString()} opens in total</small></div>
+    <div class="stat-tile kpi kpi-watchers">${kpiIcon('watchers')}<div class="num">${signed(sum(r => r.trend.watchers))}</div><div class="lbl">Watchers this week</div><small>${sum(r => r.now.watchers)} watching now</small></div>`;
 }
 function renderPerformanceView() {
   const container = document.getElementById('performanceList');
@@ -2285,6 +2384,182 @@ document.getElementById('perfSortSelect')?.addEventListener('change', e => {
   renderPerformanceView();
 });
 
+// ---------------------------------------------------------------------
+// Item panel - everything known about one item, keyed by its item id and
+// built from what is already logged: live prices and stats per site from
+// Metrics, and every offer, price change, note and decision from Item
+// Actions. Anything with data-open-item="<id>" opens it, so the Today
+// digest, Optimize, Performance and Inventory all link to the same record
+// instead of restating it.
+// ---------------------------------------------------------------------
+const ACTIVITY_META = {
+  'Offer Sent': { icon: 'send', kind: 'offer', label: 'Offer sent' },
+  'Offer Prepared': { icon: 'note', kind: 'prep', label: 'Offer prepared' },
+  'Offer Approved': { icon: 'check', kind: 'pace', label: 'Offer approved' },
+  'Price Drop': { icon: 'down', kind: 'drop', label: 'Price drop' },
+  'Price Edit': { icon: 'dollar', kind: 'value', label: 'Price change' },
+  'Completed': { icon: 'check', kind: 'pace', label: 'Cleared' },
+  'Reopened': { icon: 'activity', kind: 'week', label: 'Reopened' },
+  'Posting Note': { icon: 'note', kind: 'prep', label: 'Note' },
+  'Listing Posted': { icon: 'upload', kind: 'list', label: 'Listed' },
+  'Draft Created': { icon: 'upload', kind: 'tasks', label: 'Draft made' },
+  'Not Posting': { icon: 'xcircle', kind: 'tasks', label: 'Not posting' },
+  'Listing Ended': { icon: 'xcircle', kind: 'end', label: 'Listing ended' },
+  'Price Hold': { icon: 'clock', kind: 'tasks', label: 'Price held' },
+  'Price Released': { icon: 'clock', kind: 'tasks', label: 'Hold released' },
+  'Ignored': { icon: 'xcircle', kind: 'tasks', label: 'Dismissed' },
+  'Task': { icon: 'tasks', kind: 'tasks', label: 'Task' },
+  'Task Done': { icon: 'check', kind: 'tasks', label: 'Task done' },
+  'Focus': { icon: 'target', kind: 'focus', label: 'Focused' },
+  'Lagger': { icon: 'alert', kind: 'behind', label: 'Marked lagger' },
+};
+function itemHistorySeries(item) {
+  // One cumulative views/opens point per day, carrying each site's last
+  // known numbers forward so a site skipped one day doesn't dip the line.
+  const byPlat = new Map();
+  state.metrics.forEach(m => {
+    if (String(m.itemId) !== String(item.itemId)) return;
+    const d = String(m.date || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return;
+    const pid = platformMeta(m.platform).id;
+    if (!byPlat.has(pid)) byPlat.set(pid, new Map());
+    const day = byPlat.get(pid).get(d) || {};
+    METRIC_FIELDS.forEach(f => { const v = Number(m[f]) || 0; if (v) day[f] = v; });
+    byPlat.get(pid).set(d, day);
+  });
+  const dates = [...new Set([...byPlat.values()].flatMap(mp => [...mp.keys()]))].sort().slice(-14);
+  const last = new Map();
+  return dates.map(d => {
+    let views = 0, opens = 0, watchers = 0;
+    byPlat.forEach((mp, pid) => {
+      if (mp.has(d)) last.set(pid, mp.get(d));
+      const snap = last.get(pid);
+      if (!snap) return;
+      views += snapshotViews(snap, pid);
+      opens += snapOpens(snap, pid);
+      watchers += snap.watchers || 0;
+    });
+    return { d, views, opens, watchers };
+  });
+}
+function sparkHTML(series, key, label) {
+  if (series.length < 2) return '';
+  const w = 220, h = 44, vals = series.map(p => p[key]);
+  const max = Math.max(1, ...vals), min = Math.min(...vals);
+  const x = i => (i / (series.length - 1)) * (w - 8) + 4;
+  const y = v => h - 6 - ((v - min) / Math.max(1, max - min)) * (h - 14);
+  const pts = vals.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+  const change = vals[vals.length - 1] - vals[0];
+  return `<div class="dr-spark kpi-${key === 'views' ? 'views' : key === 'opens' ? 'clicks' : 'watchers'}">
+    <div class="dr-spark-head"><span>${label}</span><b>${vals[vals.length - 1].toLocaleString()}</b><i>${change >= 0 ? '+' : ''}${change.toLocaleString()} since ${escapeHtml(prettyDay(series[0].d))}</i></div>
+    <svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true"><polyline points="${pts}" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="${x(vals.length - 1).toFixed(1)}" cy="${y(vals[vals.length - 1]).toFixed(1)}" r="3" fill="currentColor"/></svg>
+  </div>`;
+}
+function itemDrawerHTML(item) {
+  const photo = photoForItem(item.itemId);
+  const map = latestMetricsByItemPlatform();
+  const sold = isSold(item);
+  const sp = sold ? null : saleSpeedFor(item, map);
+  const gap = sp ? performanceGapFor(item, sp, map) : null;
+  const action = sold ? null : pricingActionFor(item);
+  const live = livePricesFor(item);
+  const status = platformsStatusFor(item);
+  const facts = [categoryMeta(item.category).label, item.size ? 'Size ' + item.size : '', item.condition, item.itemId].filter(Boolean).map(escapeHtml).join(' · ');
+  const siteRows = status.done.concat(status.ended).map(d => {
+    const snap = map.get(item.itemId + '|' + d.meta.id);
+    const price = live.find(r => r.meta.id === d.meta.id);
+    const opens = snapOpens(snap, d.meta.id);
+    return `<tr style="--plat:${d.meta.color}">
+      <td><span class="pt-site"><i></i>${escapeHtml(d.meta.label)}</span>${status.ended.includes(d) ? ' <small>ended</small>' : ''}</td>
+      <td>${price ? moneyText(price.price) : '—'}</td>
+      <td>${snap ? (Number(snap.impressions) || 0).toLocaleString() : '—'}</td>
+      <td>${snap ? snapshotViews(snap, d.meta.id).toLocaleString() : '—'}</td>
+      <td>${snap ? opens : '—'}</td>
+      <td>${snap ? Number(snap.watchers) || 0 : '—'}</td>
+      <td class="dr-asof">${snap ? escapeHtml(prettyDay(String(snap.date).slice(0, 10))) : ''}</td>
+    </tr>`;
+  }).join('');
+  const seen = new Set();
+  const activity = state.itemActions
+    .filter(a => String(a.itemId) === String(item.itemId))
+    .filter(a => { const k = `${a.date}|${a.action}|${a.detail}`; if (seen.has(k)) return false; seen.add(k); return true; })
+    .reverse();
+  const series = itemHistorySeries(item);
+  const floor = parseMoney(item.floorPrice);
+  const sale = expectedSaleFor(item);
+  return `
+    <header class="dr-head">
+      <div class="dr-thumb">${photo ? `<img src="${escapeHtml(photo)}" alt="" onerror="this.remove()">` : ''}</div>
+      <div class="dr-title">
+        <h2>${escapeHtml(itemDisplayName(item, ' — '))}</h2>
+        <p>${facts}</p>
+        <div class="dr-badges"><span class="status-badge ${statusClass(item.sourceStatus)}">${escapeHtml(item.sourceStatus || '—')}</span>${action && !action.hidden ? `<span class="dr-pill">${escapeHtml(action.label)}</span>` : ''}${gap && gap.behind ? '<span class="dr-pill bad">Behind pace</span>' : ''}</div>
+      </div>
+      <button type="button" class="dr-close" aria-label="Close">×</button>
+    </header>
+    <section class="dr-prices">
+      <div class="dr-price-main"><span>Price</span><b>${sold ? escapeHtml(String(item.soldPrice || '—')) : priceTextFor(item)}</b>${sold ? '<i>sold</i>' : ''}</div>
+      <div><span>Floor</span><b>${floor ? moneyText(floor) : '—'}</b></div>
+      ${sold ? '' : `<div><span>Room</span><b>${floor && askFor(item) ? moneyText(Math.max(0, askFor(item) - floor)) : '—'}</b></div>
+      <div><span>Expected</span><b>${escapeHtml(EXPECT_PLAIN[sale.id] || sale.label)}</b><i>${escapeHtml(sale.days)}</i></div>
+      <div><span>Listed</span><b>${sp && sp.daysListed !== null ? 'day ' + sp.daysListed : '—'}</b></div>`}
+    </section>
+    ${gap && gap.why ? `<div class="opt-gap dr-gap">${escapeHtml(gap.why)}</div>` : ''}
+    ${siteRows ? `<section class="dr-sec"><h3>${icon('layers')} By site</h3><table class="plat-table dr-table"><thead><tr><th>Site</th><th>Price</th><th>Impr.</th><th>Views</th><th>Opens</th><th>Watch</th><th>As of</th></tr></thead><tbody>${siteRows}</tbody></table></section>` : ''}
+    ${series.length > 1 ? `<section class="dr-sec"><h3>${icon('activity')} Last ${series.length} pulls</h3><div class="dr-sparks">${sparkHTML(series, 'views', 'Views')}${sparkHTML(series, 'opens', 'Opens')}${sparkHTML(series, 'watchers', 'Watching')}</div></section>` : ''}
+    <section class="dr-sec"><h3>${icon('clock')} Activity</h3>
+      ${activity.length ? `<ol class="dr-timeline">${activity.map(a => {
+        const m = ACTIVITY_META[a.action] || { icon: 'note', kind: 'tasks', label: a.action };
+        return `<li class="kpi-${m.kind}"><span class="dr-dot">${icon(m.icon)}</span><div><div class="dr-ev"><b>${escapeHtml(m.label)}</b><time>${escapeHtml(prettyDay(String(a.date).slice(0, 10)))}</time></div>${a.detail ? `<p>${escapeHtml(String(a.detail))}</p>` : ''}</div></li>`;
+      }).join('')}</ol>` : '<p class="td-empty">Nothing logged for this item yet.</p>'}
+    </section>`;
+}
+function openItemDrawer(itemId) {
+  const item = state.inventory.find(it => String(it.itemId) === String(itemId));
+  if (!item) return;
+  let back = document.getElementById('itemDrawerBack');
+  if (!back) {
+    back = document.createElement('div');
+    back.id = 'itemDrawerBack';
+    back.className = 'drawer-back';
+    back.innerHTML = '<aside class="drawer" role="dialog" aria-modal="true" aria-label="Item details"></aside>';
+    document.body.appendChild(back);
+    back.addEventListener('click', ev => { if (ev.target === back || ev.target.closest('.dr-close')) closeItemDrawer(); });
+    document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && !back.hidden) closeItemDrawer(); });
+  }
+  const panel = back.querySelector('.drawer');
+  panel.innerHTML = itemDrawerHTML(item);
+  panel.scrollTop = 0;
+  back.hidden = false;
+  document.body.classList.add('drawer-open');
+  setTimeout(() => back.classList.add('in'), 10);
+  panel.querySelector('.dr-close')?.focus();
+}
+function closeItemDrawer() {
+  const back = document.getElementById('itemDrawerBack');
+  if (!back) return;
+  back.classList.remove('in');
+  document.body.classList.remove('drawer-open');
+  setTimeout(() => { back.hidden = true; }, 180);
+}
+// Delegated, so any link rendered anywhere later works without wiring. It
+// also stops a name inside a <summary> from toggling the row open.
+document.addEventListener('click', ev => {
+  const link = ev.target.closest('[data-open-item]');
+  if (!link) return;
+  ev.preventDefault();
+  ev.stopPropagation();
+  openItemDrawer(link.dataset.openItem);
+}, true);
+document.addEventListener('keydown', ev => {
+  if (ev.key !== 'Enter') return;
+  const link = ev.target.closest && ev.target.closest('[data-open-item]');
+  if (link) { ev.preventDefault(); openItemDrawer(link.dataset.openItem); }
+});
+function itemLink(item, text) {
+  return `<span class="item-link" data-open-item="${escapeHtml(item.itemId)}" role="link" tabindex="0">${text}</span>`;
+}
+
 // Scrolls to a heading anywhere in the page, opening every collapsed section
 // around it first - a heading inside a closed <details> has no position.
 function scrollToSection(id) {
@@ -2310,14 +2585,14 @@ function renderFocusView() {
     const stats = items.map(it => itemSortStats(it, latestByPlatform));
     const views = stats.reduce((n, x) => n + x.views, 0);
     const clicks = stats.reduce((n, x) => n + x.clicks, 0);
-    const value = items.reduce((n, it) => n + parseMoney(it.listPrice), 0);
+    const value = items.reduce((n, it) => n + askFor(it), 0);
     const tasks = items.reduce((n, it) => n + itemTasks(it).total, 0);
     tiles.innerHTML = items.length ? `
-      <div class="stat-tile"><div class="num">${items.length}</div><div class="lbl">Focused</div></div>
-      <div class="stat-tile"><div class="num">${fmtMoney(value)}</div><div class="lbl">Asking</div></div>
-      <div class="stat-tile"><div class="num">${views.toLocaleString()}</div><div class="lbl">Views</div></div>
-      <div class="stat-tile"><div class="num">${clicks.toLocaleString()}</div><div class="lbl">Clicks</div></div>
-      <div class="stat-tile"><div class="num">${tasks}</div><div class="lbl">Open tasks</div></div>` : '';
+      <div class="stat-tile kpi kpi-focus">${kpiIcon('focus')}<div class="num">${items.length}</div><div class="lbl">Focused</div></div>
+      <div class="stat-tile kpi kpi-value">${kpiIcon('value')}<div class="num">${fmtMoney(value)}</div><div class="lbl">Asking</div></div>
+      <div class="stat-tile kpi kpi-views">${kpiIcon('views')}<div class="num">${views.toLocaleString()}</div><div class="lbl">Views</div></div>
+      <div class="stat-tile kpi kpi-clicks">${kpiIcon('clicks')}<div class="num">${clicks.toLocaleString()}</div><div class="lbl">Clicks</div></div>
+      <div class="stat-tile kpi kpi-tasks">${kpiIcon('tasks')}<div class="num">${tasks}</div><div class="lbl">Open tasks</div></div>` : '';
   }
 
   // Worth a look: getting clicked but not focused yet.
@@ -2420,7 +2695,7 @@ function renderCompilation() {
     const stats = itemSortStats(it, latestByPlatform);
     const tasks = itemTasks(it);
     const status = platformsStatusFor(it);
-    sumPrice += parseMoney(it.listPrice);
+    sumPrice += askFor(it);
     sumViews += stats.views;
     sumClicks += stats.clicks;
     sumPosts += tasks.posts;
@@ -2670,15 +2945,15 @@ function renderSalesBySite() {
   const orderTotal = saleAmount + shipping;
 
   const tiles = [
-    { num: state.sales.length, lbl: 'Sales recorded', sub: unrecorded.length ? `${unrecorded.length} sold item${unrecorded.length === 1 ? '' : 's'} not recorded` : '' },
-    { num: money2(saleAmount), lbl: 'Sale amount', sub: shipping ? `+ ${money2(shipping)} shipping charged` : '' },
-    { num: minusMoney(costs), lbl: 'Fees & labels' },
-    { num: money2(net), lbl: 'Net cash kept', sub: orderTotal ? `${Math.round((net / orderTotal) * 100)}% of what buyers paid` : '' },
-    { num: withBalance.length ? money2(available) : '—', lbl: 'Available on sites', sub: inPerson ? `+ ${money2(inPerson)} paid in person` : '', negative: available < 0 },
-    { num: withBalance.length ? money2(pending) : '—', lbl: 'Pending / on hold' },
+    { kind: 'sold', num: state.sales.length, lbl: 'Sales recorded', sub: unrecorded.length ? `${unrecorded.length} sold item${unrecorded.length === 1 ? '' : 's'} not recorded` : '' },
+    { kind: 'value', num: money2(saleAmount), lbl: 'Sale amount', sub: shipping ? `+ ${money2(shipping)} shipping charged` : '' },
+    { kind: 'drop', num: minusMoney(costs), lbl: 'Fees & labels' },
+    { kind: 'net', num: money2(net), lbl: 'Net cash kept', sub: orderTotal ? `${Math.round((net / orderTotal) * 100)}% of what buyers paid` : '' },
+    { kind: 'cash', num: withBalance.length ? money2(available) : '—', lbl: 'Available on sites', sub: inPerson ? `+ ${money2(inPerson)} paid in person` : '', negative: available < 0 },
+    { kind: 'prep', num: withBalance.length ? money2(pending) : '—', lbl: 'Pending / on hold' },
   ];
   totalsEl.innerHTML = tiles.map(t => `
-    <div class="stat-tile${t.negative ? ' negative' : ''}"><div class="num">${t.num}</div><div class="lbl">${t.lbl}</div>${t.sub ? `<div class="sub">${escapeHtml(t.sub)}</div>` : ''}</div>
+    <div class="stat-tile ${kpiClass(t.kind || 'items', t.num)}${t.negative ? ' negative' : ''}">${kpiIcon(t.kind || 'items')}<div class="num">${t.num}</div><div class="lbl">${t.lbl}</div>${t.sub ? `<div class="sub">${escapeHtml(t.sub)}</div>` : ''}</div>
   `).join('');
 
   if (!sites.length && !unrecorded.length) {
@@ -3009,15 +3284,16 @@ function renderPulseBar() {
   balances.forEach(b => { available += saleNumber(b.available) || 0; pending += saleNumber(b.pending) || 0; });
   const when = latestDate ? new Date(latestDate + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '';
   const tiles = [
-    { num: live.toLocaleString(), lbl: 'Live listings', sub: `${itemsLive} items`, view: 'inventory' },
-    { num: hasStats ? latest.views.toLocaleString() : '—', lbl: 'Views', sub: delta ? pulseDelta(delta.views) : '', view: 'performance', target: 'sec-platforms' },
-    { num: hasStats ? latest.clicks.toLocaleString() : '—', lbl: 'Clicks', sub: delta ? pulseDelta(delta.clicks) : '', view: 'performance', target: 'sec-platforms' },
-    { num: hasStats ? latest.watchers.toLocaleString() : '—', lbl: 'Watchers & likes', sub: delta ? pulseDelta(delta.watchers) : '', view: 'optimize', target: 'sec-pricing' },
-    { num: soldCount, lbl: 'Sold', sub: `${money2(kept)} kept`, view: 'stats', target: 'sec-sales' },
-    { num: money2(available), lbl: 'Cash on sites', sub: pending ? `+ ${money2(pending)} pending` : 'nothing pending', view: 'stats', target: 'sec-cashflow', negative: available < 0 },
+    { kind: 'listings', num: live.toLocaleString(), lbl: 'Live listings', sub: `${itemsLive} items`, view: 'inventory' },
+    { kind: 'views', num: hasStats ? latest.views.toLocaleString() : '—', lbl: 'Views', sub: delta ? pulseDelta(delta.views) : '', view: 'performance', target: 'sec-platforms' },
+    { kind: 'clicks', num: hasStats ? latest.clicks.toLocaleString() : '—', lbl: 'Clicks', sub: delta ? pulseDelta(delta.clicks) : '', view: 'performance', target: 'sec-platforms' },
+    { kind: 'watchers', num: hasStats ? latest.watchers.toLocaleString() : '—', lbl: 'Watchers & likes', sub: delta ? pulseDelta(delta.watchers) : '', view: 'optimize', target: 'sec-pricing' },
+    { kind: 'sold', num: soldCount, lbl: 'Sold', sub: `${money2(kept)} kept`, view: 'stats', target: 'sec-sales' },
+    { kind: 'cash', num: money2(available), lbl: 'Cash on sites', sub: pending ? `+ ${money2(pending)} pending` : 'nothing pending', view: 'stats', target: 'sec-cashflow', negative: available < 0 },
   ];
   el.innerHTML = tiles.map(t => `
-    <button type="button" class="pb-tile${t.negative ? ' negative' : ''}" data-view-go="${t.view}"${t.target ? ` data-target="${t.target}"` : ''}>
+    <button type="button" class="pb-tile kpi kpi-${t.kind}${t.negative ? ' negative' : ''}" data-view-go="${t.view}"${t.target ? ` data-target="${t.target}"` : ''}>
+      ${kpiIcon(t.kind)}
       <span class="pb-num">${t.num}</span>
       <span class="pb-lbl">${t.lbl}</span>
       ${t.sub ? `<span class="pb-sub">${t.sub}</span>` : ''}
@@ -3045,14 +3321,14 @@ function renderOverallTiles() {
   const netBySale = new Map(state.sales.filter(sl => saleNumber(sl.netCash) !== null).map(sl => [String(sl.itemId), saleNumber(sl.netCash)]));
   const netCash = items.filter(isSold).reduce((s, it) => s + (netBySale.has(String(it.itemId)) ? netBySale.get(String(it.itemId)) : parseMoney(it.netCash || it.soldPrice)), 0);
   const tiles = [
-    { num: items.length, lbl: 'Total items' },
-    { num: listed, lbl: 'Listed' },
-    { num: sold, lbl: 'Sold' },
-    { num: fmtMoney(estValue), lbl: 'Est. value (active)' },
-    { num: fmtMoney(netCash), lbl: 'Net cash (sold)' },
+    { kind: 'items', num: items.length, lbl: 'Total items' },
+    { kind: 'listings', num: listed, lbl: 'Listed' },
+    { kind: 'sold', num: sold, lbl: 'Sold' },
+    { kind: 'value', num: fmtMoney(estValue), lbl: 'Est. value (active)' },
+    { kind: 'net', num: fmtMoney(netCash), lbl: 'Net cash (sold)' },
   ];
   document.getElementById('overallTiles').innerHTML = tiles.map(t => `
-    <div class="stat-tile"><div class="num">${t.num}</div><div class="lbl">${t.lbl}</div></div>
+    <div class="stat-tile ${kpiClass(t.kind, t.num)}">${kpiIcon(t.kind)}<div class="num">${t.num}</div><div class="lbl">${t.lbl}</div></div>
   `).join('');
 }
 
@@ -3074,7 +3350,7 @@ function renderPlatformCards() {
       const read = (map) => {
         const snap = map.get(it.itemId + '|' + id);
         if (!snap) return { reach: 0, opens: 0, watchers: 0 };
-        const opens = (Number(snap.clicks) || 0) + (id === 'ebay' ? Number(snap.views) || 0 : 0);
+        const opens = snapOpens(snap, id);
         return { reach: Number(snap.impressions) || Number(snap.views) || 0, opens, watchers: Number(snap.watchers) || 0 };
       };
       const n = read(now), w = read(past);
@@ -3516,15 +3792,15 @@ function renderActionSummary() {
   const moves = state.inventory.filter(it => !isSold(it)).map(pricingActionFor)
     .filter(a => !a.hidden && MOVE_GROUP_KEYS.includes(pricingGroupKeyFor(a))).length;
   const tiles = [
-    { num: toShip, lbl: 'To ship', target: 'sec-ship' },
-    { num: allOpenTasks().length, lbl: 'Planned tasks', target: 'sec-tasks' },
-    { num: openLocalDeals().length, lbl: 'Local deals', target: 'sec-local', sub: localDealsDueLabel() },
-    { num: soldElsewhereTasks().length, lbl: 'Listings to end', target: 'sec-end' },
-    { num: prepCount, lbl: 'Item prep', target: 'sec-prep' },
-    { num: toList, lbl: 'Posts to make', target: 'sec-list' },
-    { num: moves, lbl: 'Optimize moves', target: 'sec-pricing', sub: 'on Optimize' },
+    { kind: 'ship', num: toShip, lbl: 'To ship', target: 'sec-ship' },
+    { kind: 'tasks', num: allOpenTasks().length, lbl: 'Planned tasks', target: 'sec-tasks' },
+    { kind: 'local', num: openLocalDeals().length, lbl: 'Local deals', target: 'sec-local', sub: localDealsDueLabel() },
+    { kind: 'end', num: soldElsewhereTasks().length, lbl: 'Listings to end', target: 'sec-end' },
+    { kind: 'prep', num: prepCount, lbl: 'Item prep', target: 'sec-prep' },
+    { kind: 'list', num: toList, lbl: 'Posts to make', target: 'sec-list' },
+    { kind: 'moves', num: moves, lbl: 'Optimize moves', target: 'sec-pricing', sub: 'on Optimize' },
   ];
-  container.innerHTML = tiles.map(t => `<button class="as-tile${t.num ? '' : ' as-zero'}" data-target="${t.target}"><span class="num">${t.num}</span><span class="lbl">${t.lbl}</span>${t.sub ? `<span class="sub">${t.sub}</span>` : ''}</button>`).join('');
+  container.innerHTML = tiles.map(t => `<button class="as-tile ${kpiClass(t.kind, t.num)}${t.num ? '' : ' as-zero'}" data-target="${t.target}">${kpiIcon(t.kind)}<span class="num">${t.num}</span><span class="lbl">${t.lbl}</span>${t.sub ? `<span class="sub">${t.sub}</span>` : ''}</button>`).join('');
   container.querySelectorAll('.as-tile').forEach(tile => tile.addEventListener('click', () => scrollToSection(tile.dataset.target)));
 }
 
@@ -3622,13 +3898,9 @@ function draftToggleHTML(itemId, meta) {
 function postingNoteFor(itemId) {
   const latest = latestActionOfType(itemId, 'Posting Note');
   const note = latest ? String(latest.detail || '').trim() : '';
-  // A note about a price mismatch ("Poshmark still $70, the drop only hit
-  // eBay") resolves itself: once the live prices agree it stops showing, so
-  // nobody has to remember whether it was dealt with.
-  if (note && isPriceNote(note)) {
-    const item = state.inventory.find(it => String(it.itemId) === String(itemId));
-    if (!item || !priceDriftFor(item).length) return '';
-  }
+  // Notes about the sheet and a listing disagreeing on price are retired:
+  // the live listing price is the price, so there is nothing to reconcile.
+  if (note && isPriceNote(note)) return '';
   return note;
 }
 function isPriceNote(note) {
@@ -3641,40 +3913,10 @@ function prepNoteFor(itemId) {
   return note && !isPriceNote(note) ? note : '';
 }
 
-// Live price on each site against the sheet's list price, read from the
-// latest stat pull (both eBay and Poshmark rows carry the listing price).
-// Computed, not logged, so it disappears the day the prices line up.
-const DRIFT_FRESH_DAYS = 2;
-function priceDriftFor(item) {
-  const sheet = parseMoney(item.listPrice);
-  if (!sheet || isSold(item)) return [];
-  const map = latestMetricsByItemPlatform();
-  let newest = latestMetricsCache.newest;
-  if (!newest || latestMetricsCache.newestFor !== map) {
-    newest = '';
-    state.metrics.forEach(m => { const d = String(m.date || '').slice(0, 10); if (d > newest) newest = d; });
-    latestMetricsCache.newest = newest;
-    latestMetricsCache.newestFor = map;
-  }
-  const out = [];
-  platformsStatusFor(item).done.forEach(row => {
-    const snap = map.get(item.itemId + '|' + row.meta.id);
-    const live = snap ? parseMoney(snap.price) : 0;
-    if (!live) return;
-    const age = newest ? Math.round((new Date(newest + 'T12:00:00') - new Date(String(snap.date).slice(0, 10) + 'T12:00:00')) / 86400000) : 0;
-    if (age > DRIFT_FRESH_DAYS) return;
-    if (Math.abs(live - sheet) >= 1) out.push({ meta: row.meta, live, sheet });
-  });
-  return out;
-}
-const money2dp = n => '$' + (Math.round(n * 100) / 100).toFixed(Number.isInteger(n) ? 0 : 2);
 // Everything worth a second look on one item, kept behind a small "!" rather
 // than printed across the card.
 function itemAlerts(item) {
-  const alerts = priceDriftFor(item).map(d => ({
-    kind: 'drift',
-    text: `${d.meta.label} is listed at ${money2dp(d.live)} but the sheet says ${money2dp(d.sheet)}.`,
-  }));
+  const alerts = [];
   const note = postingNoteFor(item.itemId);
   if (note) alerts.push({ kind: 'note', text: note, clearable: true });
   if (isSold(item)) {
@@ -4067,7 +4309,7 @@ function renderItemPrep() {
     return `
       <div class="card stl-card action-row prep-card">
         <div class="ar-title-row">
-          <h3>${escapeHtml(itemDisplayName(item, ' — ') || item.itemId)}</h3>
+          <h3>${itemLink(item, escapeHtml(itemDisplayName(item, ' — ') || item.itemId))}</h3>
           ${expectedSaleChipHTML(item)}
           ${draftBadgeHTML(item.itemId)}
         </div>
@@ -4135,7 +4377,7 @@ function renderReadyToList() {
       return `
         <div class="card stl-card action-row${postingNoteFor(item.itemId) ? ' stl-on-hold' : ''}">
           <div class="ar-title-row">
-            <h3>${escapeHtml(itemTitle(item))}</h3>
+            <h3>${itemLink(item, escapeHtml(itemTitle(item)))}</h3>
             ${expectedSaleChipHTML(item)}
             ${draftBadgeHTML(item.itemId)}
             <span class="stl-need-count">${missing.length} site${missing.length === 1 ? '' : 's'}</span>
@@ -4189,7 +4431,7 @@ function renderReadyToList() {
         return `
           <div class="card stl-card action-row${postingNoteFor(item.itemId) ? ' stl-on-hold' : ''}" style="--cat:${g.meta.color}">
             <div class="ar-title-row">
-              <h3>${escapeHtml(itemTitle(item))}</h3>
+              <h3>${itemLink(item, escapeHtml(itemTitle(item)))}</h3>
               ${expectedSaleChipHTML(item)}
               ${draftBadgeHTML(item.itemId)}
               ${actionStarHTML(postingTaskKey(item.itemId, g.meta.id), `${itemTitle(item)} on ${g.meta.label}`)}
@@ -4223,7 +4465,7 @@ function renderReadyToList() {
         const skipped = status.skipped.filter(function (s) { return !siteFilter || s.meta.id === siteFilter; });
         return `
           <div class="card stl-card action-row">
-            <div class="ar-title-row"><h3>${escapeHtml(itemTitle(item))}</h3></div>
+            <div class="ar-title-row"><h3>${itemLink(item, escapeHtml(itemTitle(item)))}</h3></div>
             <div class="stl-chips">${skipped.map(function (s) {
               return `<div class="ar-actions"><span class="stl-chip stl-skipped" style="--plat:${s.meta.color}">${escapeHtml(s.meta.label)}</span><button class="btn ar-primary stl-reopen-btn" data-id="${escapeHtml(item.itemId)}" data-platform="${escapeHtml(s.meta.label)}">Post after all</button></div>`;
             }).join('')}</div>
@@ -4384,7 +4626,7 @@ function naturalPricingAction(item) {
   const ctr = clicks / views;
   const weakInterest = views >= PRICING_MIN_VIEWS_TO_JUDGE && ctr < PRICING_LOW_CTR;
   if (weakInterest) {
-    const listPrice = parseMoney(item.listPrice);
+    const listPrice = askFor(item);
     const floorPrice = parseMoney(item.floorPrice);
     const nearFloor = floorPrice > 0 && listPrice > 0 && (listPrice - floorPrice) <= floorPrice * PRICING_NEAR_FLOOR_MARGIN;
     if (nearFloor) {
@@ -4436,7 +4678,7 @@ function applyActionOverride(item, natural, override) {
     delete out.offerPlatformLabel;
   }
   if (override.label === 'Try a price drop') {
-    if (!out.suggestedPrice) out.suggestedPrice = suggestedDropPrice(parseMoney(item.listPrice), parseMoney(item.floorPrice));
+    if (!out.suggestedPrice) out.suggestedPrice = suggestedDropPrice(askFor(item), parseMoney(item.floorPrice));
   } else {
     delete out.suggestedPrice;
   }
@@ -4983,7 +5225,7 @@ function renderPricingInto(container, groupKeys, emptyHTML) {
     return `
     <div class="card pricing-card action-row pa-${action.severity}" data-item-id="${escapeHtml(item.itemId)}">
       <div class="ar-title-row">
-        <h3>${escapeHtml(title)}</h3>
+        <h3>${itemLink(item, escapeHtml(title))}</h3>
         <div class="card-top-actions">${actionStarHTML(item.itemId, [item.brand, item.item].filter(Boolean).join(' ') || item.itemId)}<span class="pa-badge pa-${action.severity}">${escapeHtml(action.label)}${action.manual ? ' · you' : ''}</span>${held ? '<span class="pa-badge pa-price-held" title="Price drops stay off this one until you release it">🔒</span>' : ''}${suggestionAddedChipHTML(item, action)}</div>
       </div>
       <div class="ar-meta-line">${metaBits.join(' · ')}</div>
@@ -5181,6 +5423,7 @@ document.querySelectorAll('#stlGroupSwitch button').forEach(b => {
   });
 });
 // Actions and Optimize sections fold shut and stay that way across visits.
+decorateSectionHeadings();
 (function rememberSectionFolds() {
   const closed = new Set(localGet('sellHub.closedSections', []));
   document.querySelectorAll('details.action-section, details.opt-block').forEach(d => {
