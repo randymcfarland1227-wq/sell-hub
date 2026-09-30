@@ -2827,3 +2827,71 @@ details.stocking-intake[open] > summary::before { content: '- '; }
 :root[data-theme="dark"] .sale-steady { --ss-fg: #8fc2ee; --ss-bg: rgba(43,108,176,.22); --ss-line: #33587d; }
 :root[data-theme="dark"] .sale-slow   { --ss-fg: #e8c27a; --ss-bg: rgba(161,117,46,.22); --ss-line: #7a6132; }
 :root[data-theme="dark"] .sale-tail   { --ss-fg: #eaa3b2; --ss-bg: rgba(122,50,66,.24); --ss-line: #7d3b4a; }
+
+/* ---------- Collapsible Actions / Optimize sections ---------- */
+details.action-section > summary,
+details.opt-block > summary { list-style: none; cursor: pointer; position: relative; padding-right: 26px; }
+details.action-section > summary::-webkit-details-marker,
+details.opt-block > summary::-webkit-details-marker { display: none; }
+details.action-section > summary::after,
+details.opt-block > summary::after {
+  content: '▾'; position: absolute; right: 2px; top: 50%; transform: translateY(-50%);
+  color: var(--text-muted); font-size: 1.1rem; line-height: 1; transition: transform .15s;
+}
+details.action-section:not([open]) > summary::after,
+details.opt-block:not([open]) > summary::after { transform: translateY(-50%) rotate(-90deg); }
+details.action-section:not([open]) > summary .subhead,
+details.opt-block:not([open]) > summary .subhead { color: var(--text-muted); }
+details.opt-block { margin-bottom: 8px; }
+details.opt-block > summary .subhead { margin: 18px 0 10px; }
+
+/* ---------- Item prep ---------- */
+.prep-card { border-left: 3px solid var(--warn); }
+.prep-sites { align-items: center; }
+.prep-sites-lbl { font-size: .7rem; color: var(--text-faint); margin-right: 2px; }
+
+/* ---------- Optimize ---------- */
+button.stat-tile.opt-tile { font: inherit; text-align: left; cursor: pointer; color: inherit; }
+button.stat-tile.opt-tile:hover { border-color: var(--primary); }
+.opt-gap {
+  font-size: .8rem; line-height: 1.4; color: var(--bad); background: var(--bad-bg);
+  border-radius: 10px; padding: 7px 11px;
+}
+.opt-gap span { display: block; font-size: .64rem; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; color: var(--text-faint); margin-bottom: 2px; }
+.pa-prepared { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; background: var(--warn-bg); }
+.pa-prepared.approved { background: var(--good-bg); }
+.oo-sold { color: var(--good); font-weight: 700; }
+.oo-stale { color: var(--warn); }
+.oo-row-sold td { background: var(--good-bg); }
+.ot-age { display: block; color: var(--text-faint); font-size: .7rem; }
+
+/* ---------- Performance ---------- */
+.perf-toolbar { margin: 14px 0 12px; }
+.perf-toolbar [hidden] { display: none !important; }
+.perf-group { margin-bottom: 10px; }
+.perf-group > summary { list-style: none; cursor: pointer; }
+.perf-group > summary::-webkit-details-marker { display: none; }
+.perf-row .ranked-row-title { display: flex; flex-direction: column; gap: 2px; white-space: normal; }
+.perf-sub { font-family: inherit; font-weight: 400; font-size: .72rem; color: var(--text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.perf-verdict { font-weight: 700; }
+.perf-verdict.perf-behind { color: var(--bad); }
+.perf-verdict.perf-onpace { color: var(--good); }
+.perf-verdict.perf-new { color: var(--primary); }
+.perf-trend.up { color: var(--good); }
+.perf-row .ranked-detail > .opt-gap { margin: 0 14px 8px; }
+.perf-row .ranked-detail > .pace-row { margin: 0 14px 8px; }
+.perf-moves-link {
+  display: block; width: 100%; text-align: left; font: inherit; font-size: .84rem; font-weight: 700; cursor: pointer;
+  margin-bottom: 12px; padding: 10px 14px; border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--primary) 40%, var(--border)); background: color-mix(in srgb, var(--primary) 9%, var(--bg-card)); color: var(--primary);
+}
+@media (max-width: 700px) {
+  .perf-row > .ranked-row-head { flex-wrap: wrap; align-items: flex-start; row-gap: 4px; }
+  .perf-row .ranked-row-title { flex: 1 1 calc(100% - 60px); }
+  .perf-row .perf-sub { white-space: normal; }
+  .perf-row .perf-quick { order: 3; flex: 1 1 100%; flex-wrap: wrap; row-gap: 2px; column-gap: 10px; white-space: normal; padding-left: 34px; }
+}
+/* The ranked list hides its last stat on phones to save room; Performance
+   rows wrap instead, so keep the weekly trend visible. */
+@media (max-width: 560px) { .perf-row .perf-quick i:last-child { display: inline; } }
+.prep-sites .stl-chip { color: var(--text); border-color: color-mix(in srgb, var(--plat) 55%, var(--text-faint)); }

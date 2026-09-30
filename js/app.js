@@ -3,7 +3,7 @@ const state = {
   listShowSold: false,    // list mode
   listActiveCats: new Set(),
   zoom: 1,
-  listSort: 'views',
+  listSort: 'name',
   listGroup: 'category',  // 'category' = collapsible sections, 'ranked' = one sorted list
   expandedCats: new Set(),   // category sections open in list view (default: none)
   expandedSizes: new Set(),  // size-band rows open in By size view (default: none)
@@ -27,6 +27,10 @@ const state = {
   loadedAt: '',
   expandedItems: new Set(),
   picked: new Set(),      // items ticked for the Selected items panel / bundling
+  perfView: 'status',     // Performance tab grouping
+  perfSort: 'views',
+  expandedPerf: new Set(),        // Performance rows opened this session
+  collapsedPerfGroups: new Set(), // Performance groups closed this session
 };
 
 const ZOOM_MIN = 0.7, ZOOM_MAX = 1.6, ZOOM_STEP = 0.1, ZOOM_BASE = 380;
@@ -127,10 +131,13 @@ function platformOptionsHTML(selected) {
 // falls back to 0 when every source that day reported 0. Older dates are never
 // mixed in - a zero yesterday and a zero today are different facts.
 const METRIC_FIELDS = ['impressions', 'views', 'watchers', 'clicks', 'price'];
-function latestMetricsByItemPlatform() {
+// asOf (yyyy-mm-dd, optional) reads the numbers as they stood on that day,
+// which is how Performance works out a week's trend.
+function latestMetricsByItemPlatform(asOf) {
   const byKey = new Map();
   state.metrics.forEach(m => {
     if (!m.itemId) return;
+    if (asOf && String(m.date || '').slice(0, 10) > asOf) return;
     const key = m.itemId + '|' + platformMeta(m.platform).id;
     if (!byKey.has(key)) byKey.set(key, []);
     byKey.get(key).push(m);
@@ -680,7 +687,8 @@ function showView(view) {
     requestAnimationFrame(() => applyZoom());
   }
   if (view === 'focus') renderFocusView();
-  if (view === 'optimize') renderOptimizeView();
+  if (view === 'optimize') { renderOptimizeView(); renderPricingActions(); }
+  if (view === 'performance') renderPerformanceView();
   if (view === 'stocking' && typeof refreshStocking === 'function') {
     refreshStocking();
   }
@@ -772,15 +780,6 @@ function setInventoryExpandedAll(expand) {
       state.expandedSizes = new Set(keys);
     } else {
       state.expandedSizes = new Set();
-    }
-  } else if (state.listGroup === 'ranked') {
-    if (expand) {
-      const ids = [...document.querySelectorAll('#catSections details.ranked-row[data-rank-id]')]
-        .map(el => el.dataset.rankId).filter(Boolean);
-      state.expandedRanked = new Set(ids);
-    } else {
-      state.expandedRanked = new Set();
-state.expandedSpeeds = new Set();
     }
   } else if (expand) {
     state.expandedCats = new Set(
@@ -879,7 +878,10 @@ function localDealBadgesHTML(itemId) {
   }).join('')}</div>`;
 }
 
-function itemCardHTML(item, cat) {
+// opts.perf=false leaves off the traffic lines (pace verdict, per-site views
+// and clicks) - Inventory shows the stock, Performance shows how it's doing.
+function itemCardHTML(item, cat, opts) {
+  const perf = !opts || opts.perf !== false;
   const sold = isSold(item);
   const expanded = state.expandedItems.has(item.itemId);
   const titleParts = [item.brand, item.item].filter(Boolean);
@@ -899,7 +901,7 @@ function itemCardHTML(item, cat) {
         <button type="button" class="focus-btn${focused ? ' on' : ''}" data-focus="${escapeHtml(item.itemId)}" data-on="${focused ? '1' : ''}" title="${focused ? 'In Focused inventory — click to remove' : 'Add to Focused inventory'}" aria-label="${focused ? 'Remove from Focused inventory' : 'Add to Focused inventory'}">${focused ? '◉' : '◎'}</button>
         <span class="status-badge ${statusClass(item.sourceStatus)}">${escapeHtml(item.sourceStatus || '—')}</span>
       </div>
-      ${sold ? '' : paceRowHTML(item)}
+      ${sold || !perf ? '' : paceRowHTML(item)}
       ${actionBadgesHTML(item.itemId)}
       ${localDealBadgesHTML(item.itemId)}
       ${siteStatusChipsHTML(item)}
@@ -911,7 +913,7 @@ function itemCardHTML(item, cat) {
         ${posted ? `<span><b>Posted —</b> ${escapeHtml(posted)}</span>` : ''}
         ${sold ? `<span><b>Sold —</b> ${escapeHtml(item.soldPrice || '—')}</span>` : ''}
       </div>
-      ${platformStatsHTML(item)}
+      ${perf ? platformStatsHTML(item) : ''}
       <button class="card-expand-toggle" data-id="${item.itemId}">${expanded ? '− Hide' : '+ Description & mark sold'}</button>
       ${expanded ? itemDetailHTML(item) : ''}
     </div>
@@ -1413,7 +1415,7 @@ function renderSizeView(container, latestByPlatform, compareItems) {
             <span class="size-names">${escapeHtml(sorted.map(it => itemShortName(it)).join(' · ').slice(0, 90))}</span>
             <button type="button" class="btn secondary size-pick-all" data-ids="${escapeHtml(sorted.map(it => it.itemId).join(','))}">Select these ${sorted.length}</button>
           </summary>
-          <div class="card-grid">${sorted.map(it => itemCardHTML(it, categoryMeta(it.category))).join('')}</div>
+          <div class="card-grid">${sorted.map(it => itemCardHTML(it, categoryMeta(it.category), { perf: false })).join('')}</div>
         </details>`;
       }).join('')}
     </section>`).join('');
@@ -1550,7 +1552,7 @@ function optimizePlanFor(itemId) {
   const latest = latestActionOfType(itemId, 'Optimize Plan');
   return latest ? String(latest.detail || '') : '';
 }
-function optimizationFor(item, sp) {
+function optimizationFor(item, sp, gap) {
   const action = pricingActionFor(item);
   const ask = parseMoney(item.listPrice);
   const floor = parseMoney(item.floorPrice);
@@ -1591,22 +1593,44 @@ function optimizationFor(item, sp) {
     tone = sp.views >= 10 ? 'creative' : 'reach';
     target = 'Keep price unchanged first';
     reason = `Day ${sp.daysListed || 0} is beyond the expected ${sp.expected.days}. ${sp.views ? `${sp.views} views have not produced a watcher.` : 'It needs more qualified reach.'}`;
+  } else if (gap && gap.behind) {
+    // Behind its expected pace without tripping a pricing rule - read which
+    // part of the funnel is failing: nobody sees it, people see it but don't
+    // open it, or they open it and still don't buy.
+    const opens = listingOpensFor(item, latestMetricsByItemPlatform());
+    confidence = 'Behind pace';
+    if (sp.views < 10) {
+      lever = 'title'; label = 'Get it seen'; tone = 'reach';
+      target = 'Keep price unchanged';
+      reason = `Only ${sp.views} view${sp.views === 1 ? '' : 's'} in ${sp.daysListed} days - buyers aren't finding it. Put the words people search (brand, model, size) at the front of the title, then cross-list it.`;
+    } else if (opens === 0) {
+      lever = 'photos'; label = 'Fix the first impression'; tone = 'creative';
+      target = 'Keep price unchanged';
+      reason = `${sp.views} people saw it in search and none opened it. The cover photo, title and price shown in results are all they judge - reshoot the lead photo and tighten the title before cutting price.`;
+    } else if (room > 0) {
+      lever = 'price'; label = 'Test a lower price'; tone = 'price-friction';
+      const suggested = suggestedDropPrice(ask, floor);
+      target = suggested ? `Test ${fmtMoney(suggested)} · floor ${fmtMoney(floor)}` : `Protect the ${fmtMoney(floor)} floor`;
+      reason = `People open it but it isn't moving at the pace this kind of item should. You have ${fmtMoney(room)} of room above your floor.`;
+    } else {
+      lever = 'crosslist'; label = 'Find a new audience'; tone = 'reach';
+      target = 'Already at the floor';
+      reason = 'Opened but not selling, and already at its floor - put it in front of a different buyer pool or bundle it.';
+    }
   } else if (action && action.label === 'On track') {
     lever = 'share'; label = 'Maintain momentum'; tone = 'steady'; confidence = 'Lower urgency';
     target = 'No price change';
     reason = 'Traffic is healthy enough to wait. Refresh visibility and preserve your margin.';
   }
 
-  const age = sp.daysListed || 0;
-  const score = Math.round(sp.watchers * 80 + sp.clicks * 4 + Math.min(sp.views, 120) * .35 + (sp.overdue ? 45 : 0) + Math.min(age, 90) * .35 + Math.min(ask, 150) * .08);
-  return { action, ask, floor, room, lever, label, reason, tone, target, confidence, score };
+  return { action, ask, floor, room, lever, label, reason, tone, target, confidence };
 }
 
-function optimizeRowHTML(item, sp, rank) {
+function optimizeRowHTML(item, sp, rank, gap) {
   const plan = optimizePlanFor(item.itemId);
   const chosen = new Set(plan.split('|')[0].split(',').map(x => x.trim()).filter(Boolean));
   const notes = plan.includes('|') ? plan.split('|').slice(1).join('|').trim() : '';
-  const rec = optimizationFor(item, sp);
+  const rec = optimizationFor(item, sp, gap);
   if (!chosen.size) chosen.add(rec.lever);
   const posted = postedInfoFor(item.itemId);
   const photo = photoForItem(item.itemId);
@@ -1623,6 +1647,7 @@ function optimizeRowHTML(item, sp, rank) {
         </div>
         <div class="opt-price"><b>${fmtMoney(rec.ask)}</b><small>${fmtMoney(rec.floor)} floor</small></div>
       </div>
+      ${gap && gap.why ? `<div class="opt-gap"><span>${escapeHtml(expectedSaleFor(item).label)} · usually ${escapeHtml(expectedSaleFor(item).days)}</span>${escapeHtml(gap.why)}</div>` : ''}
       <div class="opt-recommendation">
         <div><span class="opt-signal">${escapeHtml(rec.confidence)}</span><h4>${escapeHtml(rec.label)}</h4><p>${escapeHtml(rec.reason)}</p></div>
         <strong>${escapeHtml(rec.target)}</strong>
@@ -1645,55 +1670,156 @@ function optimizeRowHTML(item, sp, rank) {
       </details>
     </article>`;
 }
+// How far a listing is running behind what its kind of item should do.
+// Optimize is for the ones falling short - a listing already pulling
+// clicks and watchers faster than expected has nothing to fix, however much
+// traffic it gets. Measured three ways: past the expected window, a slower
+// traffic band than the item type usually earns, or no clicks at all after
+// long enough to have had some.
+const PACE_BAND_FOR_EXPECTED = { quick: 'fast', steady: 'medium', slow: 'slow', tail: 'slow' };
+const GAP_MIN_DAYS = 7;          // younger than this, pace is still noise
+const GAP_ZERO_CLICK_DAYS = 10;  // no clicks by now means nobody is choosing it
+// eBay's "views" are visits to the listing page - someone chose to open it -
+// while its click count from the API stays at 0, so opens = clicks plus eBay
+// page visits. Without this an eBay listing with real visitors reads "no clicks".
+function listingOpensFor(item, map) {
+  let opens = 0;
+  splitPlatforms(item.platform).forEach(p => {
+    const m = platformMeta(p);
+    const snap = map.get(item.itemId + '|' + m.id);
+    opens += (Number(snap && snap.clicks) || 0) + (m.id === 'ebay' ? Number(snap && snap.views) || 0 : 0);
+  });
+  return opens;
+}
+function performanceGapFor(item, sp, latestByPlatform) {
+  const day = sp.daysListed;
+  const e = sp.expected || expectedSaleFor(item);
+  const out = { behind: false, score: 0, why: '' };
+  if (day === null || sp.band.id === 'newish') return out;
+  const reasons = [];
+  let score = 0;
+  if (sp.band.id === 'nodata') {
+    if (day < GAP_MIN_DAYS) return out;
+    reasons.push(`no traffic logged after ${day} days`);
+    score += 2;
+  } else {
+    const expectedBand = SPEED_BANDS[PACE_BAND_FOR_EXPECTED[e.id] || 'medium'];
+    const paceGap = sp.band.order - expectedBand.order;
+    if (paceGap > 0 && day >= GAP_MIN_DAYS) {
+      reasons.push(`traffic reads ${sp.band.label.toLowerCase()} where a ${e.label.toLowerCase()} usually reads ${expectedBand.label.toLowerCase()}`);
+      score += paceGap;
+    }
+    if (day >= GAP_ZERO_CLICK_DAYS && listingOpensFor(item, latestByPlatform || latestMetricsByItemPlatform()) === 0) {
+      reasons.push(`${sp.views} view${sp.views === 1 ? '' : 's'} and nobody has opened it`);
+      score += 1;
+    }
+  }
+  if (day > e.maxDays) {
+    reasons.unshift(`day ${day}, past the ${e.days} it should take`);
+    score += 2 + (day - e.maxDays) / e.maxDays;
+  }
+  if (!reasons.length) return out;
+  score += (day / e.maxDays) * 0.5 - Math.min(sp.watchers, 3) * 0.3;
+  const why = reasons.join('; ');
+  return { behind: true, score, why: why.charAt(0).toUpperCase() + why.slice(1) + '.' };
+}
+function underperformers(latestByPlatform) {
+  const map = latestByPlatform || latestMetricsByItemPlatform();
+  return state.inventory
+    .filter(it => !isSold(it) && isRealItem(it) && postedInfoFor(it.itemId))
+    .map(it => { const sp = saleSpeedFor(it, map); return { it, sp, gap: performanceGapFor(it, sp, map) }; })
+    .filter(r => r.gap.behind);
+}
+
+function renderOptimizeTiles() {
+  const tiles = document.getElementById('optimizeTiles');
+  if (!tiles) return;
+  const counts = {};
+  let prepared = 0, approved = 0;
+  state.inventory.filter(it => !isSold(it)).forEach(it => {
+    const a = pricingActionFor(it);
+    if (a.hidden) return;
+    counts[a.label] = (counts[a.label] || 0) + 1;
+    if (a.prepared) { if (a.prepared.approved) approved++; else prepared++; }
+  });
+  const behind = underperformers().filter(r => !laggerFor(r.it.itemId)).length;
+  const out = recentOffers().filter(o => o.days <= 7).length;
+  const offerSub = prepared ? `${prepared} ready for your OK` : approved ? `${approved} approved, sending next run` : 'Watchers & likers';
+  tiles.innerHTML = [
+    { num: counts['Send an offer'] || 0, lbl: 'Offers to make', sub: offerSub, target: 'sec-pricing', hot: true },
+    { num: counts['Try a price drop'] || 0, lbl: 'Price drops', sub: 'Traffic, weak clicks', target: 'sec-pricing' },
+    { num: (counts['Boost visibility'] || 0) + (counts['Refresh listing'] || 0), lbl: 'Need reach', sub: 'Fix before cutting price', target: 'sec-pricing' },
+    { num: out, lbl: 'Offers out', sub: 'Sent in the last 7 days', target: 'sec-offers-out' },
+    { num: behind, lbl: 'Behind pace', sub: 'Slower than expected', target: 'sec-under' },
+  ].map(t => `<button type="button" class="stat-tile opt-tile${t.hot ? ' opt-tile-hot' : ''}" data-target="${t.target}"><div class="num">${t.num}</div><div class="lbl">${t.lbl}</div><small>${escapeHtml(t.sub)}</small></button>`).join('');
+  tiles.querySelectorAll('[data-target]').forEach(tile => tile.addEventListener('click', () => scrollToSection(tile.dataset.target)));
+}
+
+// Every offer sent in the last 30 days, newest first, one row per item, with
+// what happened since - so you can see whether offers are closing sales.
+function recentOffers() {
+  const byItem = new Map();
+  state.itemActions.forEach(a => {
+    if (a.action !== 'Offer Sent') return;
+    const date = String(a.date || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+    const days = daysSince(date);
+    if (days > 30) return;
+    const key = String(a.itemId);
+    const prev = byItem.get(key);
+    byItem.set(key, { itemId: key, date, days, detail: String(a.detail || ''), count: (prev ? prev.count : 0) + 1 });
+  });
+  return [...byItem.values()]
+    .map(o => ({ ...o, item: state.inventory.find(it => String(it.itemId) === o.itemId) }))
+    .filter(o => o.item)
+    .sort((a, b) => b.date.localeCompare(a.date));
+}
+function renderOffersOut() {
+  const container = document.getElementById('optimizeOffers');
+  if (!container) return;
+  const rows = recentOffers();
+  if (!rows.length) { container.innerHTML = '<div class="empty-state">No offers sent in the last 30 days.</div>'; return; }
+  const map = latestMetricsByItemPlatform();
+  container.innerHTML = `
+    <table class="offers-table">
+      <thead><tr><th>Item</th><th>Sent</th><th>Offer</th><th>Since then</th></tr></thead>
+      <tbody>${rows.map(o => {
+        const sold = isSold(o.item);
+        const sp = sold ? null : saleSpeedFor(o.item, map);
+        const outcome = sold
+          ? `<span class="oo-sold">Sold${o.item.soldPrice ? ' · ' + escapeHtml(String(o.item.soldPrice)) : ''}</span>`
+          : `${sp.watchers} watching now · ${escapeHtml(String(o.item.listPrice ?? '—'))} ask${o.days >= 2 ? ' · <span class="oo-stale">offer has lapsed</span>' : ''}`;
+        return `<tr class="${sold ? 'oo-row-sold' : ''}">
+          <td class="ot-name"><b>${escapeHtml(itemShortName(o.item))}</b><small>${o.count > 1 ? `${o.count} offers this month` : ''}</small></td>
+          <td>${o.days === 0 ? 'today' : o.days === 1 ? 'yesterday' : o.days + 'd ago'}</td>
+          <td>${escapeHtml(o.detail.slice(0, 110))}</td>
+          <td>${outcome}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>
+    <p class="subhead-note">eBay and Poshmark offers expire after 24-48 hours, so an unsold item past two days can take a fresh, lower offer.</p>`;
+}
+
 function renderOptimizeView() {
   const container = document.getElementById('optimizeList');
   if (!container) return;
+  renderOptimizeTiles();
+  renderOffersOut();
   const latestByPlatform = latestMetricsByItemPlatform();
-  const live = state.inventory.filter(it => !isSold(it) && isRealItem(it));
-  const scored = live.map(it => ({ it, sp: saleSpeedFor(it, latestByPlatform) }))
-    .filter(r => postedInfoFor(r.it.itemId) || String(r.it.sourceStatus || '').toLowerCase() === 'listed')
-    .map(r => ({ ...r, rec: optimizationFor(r.it, r.sp) }));
-  const laggers = scored.filter(r => laggerFor(r.it.itemId));
-  const active = scored.filter(r => !laggerFor(r.it.itemId));
-  const ranked = active.slice().sort((a, b) => b.rec.score - a.rec.score);
-  const actionable = ranked.filter(r =>
-    (r.rec.action && ['opportunity', 'urgent', 'attention'].includes(r.rec.action.severity))
-    || r.sp.overdue || focusedFor(r.it.itemId));
-  const queue = (actionable.length ? actionable : ranked).slice(0, 12);
-  const withPlan = scored.filter(r => optimizePlanFor(r.it.itemId));
+  const behind = underperformers(latestByPlatform);
+  const laggers = behind.filter(r => laggerFor(r.it.itemId));
+  const queue = behind.filter(r => !laggerFor(r.it.itemId)).sort((a, b) => b.gap.score - a.gap.score);
 
-  const tiles = document.getElementById('optimizeTiles');
-  if (tiles) {
-    const offerRows = ranked.filter(r => r.rec.action && r.rec.action.severity === 'opportunity');
-    const priceRows = ranked.filter(r => r.rec.action && r.rec.action.severity === 'urgent');
-    const visibilityRows = ranked.filter(r => r.rec.action && r.rec.action.severity === 'attention' && ['share', 'title', 'crosslist', 'photos'].includes(r.rec.lever));
-    const queueValue = queue.reduce((n, r) => n + r.rec.ask, 0);
-    tiles.innerHTML = `
-      <div class="stat-tile opt-tile-hot"><div class="num">${offerRows.length}</div><div class="lbl">Offers ready</div><small>Existing buyer interest</small></div>
-      <div class="stat-tile"><div class="num">${priceRows.length}</div><div class="lbl">Price tests</div><small>Traffic, weak conversion</small></div>
-      <div class="stat-tile"><div class="num">${visibilityRows.length}</div><div class="lbl">Need reach</div><small>Do not cut price first</small></div>
-      <div class="stat-tile"><div class="num">${fmtMoney(queueValue)}</div><div class="lbl">Top queue value</div><small>${queue.length} priority listings</small></div>`;
-  }
-
-  const blockerCounts = queue.reduce((m, r) => { m[r.rec.lever] = (m[r.rec.lever] || 0) + 1; return m; }, {});
-  const blocker = Object.entries(blockerCounts).sort((a, b) => b[1] - a[1])[0];
-  const blockerLabel = blocker ? ({ offer: 'buyer follow-up', price: 'price resistance', photos: 'listing conversion', title: 'discoverability', share: 'visibility', crosslist: 'audience reach' }[blocker[0]] || 'listing reach') : 'none';
-  container.innerHTML = `
-    <section class="opt-brief">
-      <div><span>Inventory readout</span><h3>${scored.length} live listings reviewed</h3><p>The most common blocker in the priority queue is <b>${escapeHtml(blockerLabel)}</b>. Work the first three cards before making broad price cuts.</p></div>
-      <div class="opt-brief-meta"><span>${withPlan.length} saved plan${withPlan.length === 1 ? '' : 's'}</span><span>${laggers.length} intentionally parked</span></div>
-    </section>
-    <div class="opt-section">
-      <div class="opt-queue-head"><div><p class="opt-kicker">Ranked by close signal</p><h3 class="subhead">Priority queue <span class="fi-count">${queue.length}</span></h3></div><p>Interest first, then conversion problems, then reach.</p></div>
-      ${queue.map((r, i) => optimizeRowHTML(r.it, r.sp, i + 1)).join('')}
-    </div>`
+  container.innerHTML = (queue.length ? `
+    <p class="subhead-note">Worst first: listings running furthest behind what their kind of item usually does. Anything selling on pace or better stays off this list.</p>
+    ${queue.map((r, i) => optimizeRowHTML(r.it, r.sp, i + 1, r.gap)).join('')}` :
+      '<div class="empty-state">Nothing is running behind its expected pace right now.</div>')
     + (laggers.length ? `
       <details class="opt-laggers">
         <summary>Marked as laggers <span class="fi-count">${laggers.length}</span></summary>
-        <p class="subhead-note">Left alone on purpose. They still show in Inventory.</p>
+        <p class="subhead-note">Left alone on purpose. They still show in Inventory and Performance.</p>
         ${laggers.map(r => `<div class="opt-lagger-row"><b>${escapeHtml(itemShortName(r.it))}</b><small>${escapeHtml(String(r.it.listPrice ?? '—'))} · ${r.sp.views} views · ${r.sp.clicks} clicks</small><button type="button" class="btn secondary small opt-unlagger" data-id="${escapeHtml(r.it.itemId)}">Work on it again</button></div>`).join('')}
-      </details>` : '')
-    + (queue.length ? '' : '<div class="empty-state">No live listing needs intervention right now.</div>');
+      </details>` : '');
 
   container.querySelectorAll('.opt-unlagger').forEach(btn => btn.addEventListener('click', async () => {
     await recordItemAction(btn.dataset.id, 'Unlagger', 'Back in the optimize list.');
@@ -1750,6 +1876,215 @@ function renderOptimizeView() {
       status.classList.add('error');
     }
   }));
+}
+
+// ---------------------------------------------------------------------
+// Performance - every live listing's numbers in one place: traffic, its
+// trend over the last week, pace against what that kind of item usually
+// takes, and the status of whatever has been done about it. Inventory is
+// just the stock; this is how the stock is doing.
+// ---------------------------------------------------------------------
+const PERF_TREND_DAYS = 7;
+function perfPastDate() {
+  const d = new Date(todayStr() + 'T12:00:00');
+  d.setDate(d.getDate() - PERF_TREND_DAYS);
+  return d.toISOString().slice(0, 10);
+}
+function itemTrafficFrom(item, map) {
+  let views = 0, clicks = 0, watchers = 0;
+  splitPlatforms(item.platform).forEach(p => {
+    const m = platformMeta(p);
+    const snap = map.get(item.itemId + '|' + m.id);
+    views += snapshotViews(snap, m.id);
+    clicks += Number(snap && snap.clicks) || 0;
+    watchers += Number(snap && snap.watchers) || 0;
+  });
+  return { views, clicks, watchers };
+}
+function perfRows() {
+  const now = latestMetricsByItemPlatform();
+  const past = latestMetricsByItemPlatform(perfPastDate());
+  return state.inventory
+    .filter(it => !isSold(it) && isRealItem(it) && (postedInfoFor(it.itemId) || String(it.sourceStatus || '').toLowerCase() === 'listed'))
+    .map(it => {
+      const cur = itemTrafficFrom(it, now);
+      const was = itemTrafficFrom(it, past);
+      const sp = saleSpeedFor(it, now);
+      const stats = itemSortStats(it, now);
+      return {
+        it, sp, stats, gap: performanceGapFor(it, sp, now),
+        trend: { views: Math.max(0, cur.views - was.views), clicks: Math.max(0, cur.clicks - was.clicks), watchers: cur.watchers - was.watchers },
+        now: cur, was,
+      };
+    });
+}
+function paceVerdict(r) {
+  if (r.sp.daysListed === null) return { id: 'none', label: 'Not posted', order: 5 };
+  if (r.sp.band.id === 'newish') return { id: 'new', label: 'Too new to tell', order: 3 };
+  if (r.gap.behind) return { id: 'behind', label: 'Behind pace', order: 1 };
+  if (r.sp.band.id === 'nodata') return { id: 'none', label: 'No stats yet', order: 4 };
+  return { id: 'onpace', label: 'On pace or better', order: 2 };
+}
+function perfCompare(a, b) {
+  const k = state.perfSort;
+  if (k === 'clicks') return b.stats.clicks - a.stats.clicks;
+  if (k === 'ctr') return b.stats.ctr - a.stats.ctr;
+  if (k === 'trend') return b.trend.views - a.trend.views || b.trend.clicks - a.trend.clicks;
+  if (k === 'price') return b.stats.price - a.stats.price;
+  return b.stats.views - a.stats.views;
+}
+function signed(n) { return (n > 0 ? '+' : '') + n; }
+function perfRowHTML(r, rank) {
+  const id = String(r.it.itemId);
+  const open = state.expandedPerf.has(id) ? ' open' : '';
+  const ctr = r.stats.views ? Math.round((r.stats.clicks / r.stats.views) * 100) : 0;
+  const price = String(r.it.listPrice ?? '').trim();
+  const v = paceVerdict(r);
+  const action = pricingActionFor(r.it);
+  return `
+    <details class="ranked-row perf-row" data-perf-id="${escapeHtml(id)}"${open}>
+      <summary class="ranked-row-head">
+        <span class="rr-rank">${rank}</span>
+        <span class="ranked-row-title">${escapeHtml(itemShortName(r.it))}<small class="perf-sub"><span class="perf-verdict perf-${v.id}">${escapeHtml(v.label)}</span>${r.sp.daysListed !== null ? ` · day ${r.sp.daysListed}` : ''} · ${escapeHtml(EXPECT_PLAIN[r.sp.expected.id] || r.sp.expected.label)} ${escapeHtml(r.sp.expected.days)}${action && !action.hidden ? ` · ${escapeHtml(action.label)}` : ''}</small></span>
+        <span class="rr-quick perf-quick">
+          <b>${price ? (price.startsWith('$') ? escapeHtml(price) : '$' + escapeHtml(price)) : '—'}</b>
+          <i>${r.stats.views} views</i>
+          <i>${r.stats.clicks} click${r.stats.clicks === 1 ? '' : 's'} · ${ctr}%</i>
+          <i>${r.now.watchers} watching</i>
+          <i class="perf-trend${r.trend.views || r.trend.clicks ? ' up' : ''}" title="Change over the last ${PERF_TREND_DAYS} days">${signed(r.trend.views)} views · ${signed(r.trend.clicks)} clicks /wk</i>
+        </span>
+      </summary>
+      <div class="ranked-detail">
+        ${r.gap.why ? `<div class="opt-gap">${escapeHtml(r.gap.why)}</div>` : ''}
+        ${paceRowHTML(r.it)}
+        ${rankedDetailHTML(r.it)}
+      </div>
+    </details>`;
+}
+function perfGroupHTML(title, rows, extra, cls) {
+  const sorted = rows.slice().sort(perfCompare);
+  const key = 'perfgrp:' + title;
+  const open = state.collapsedPerfGroups.has(key) ? '' : ' open';
+  return `
+    <details class="cat-section perf-group ${cls || ''}" data-perf-group="${escapeHtml(key)}"${open}>
+      <summary class="cat-heading"><h2>${escapeHtml(title)}</h2><span class="count">${rows.length}</span>${extra || ''}</summary>
+      <div class="ranked-list">${sorted.map((r, i) => perfRowHTML(r, i + 1)).join('') || '<div class="empty-state">Nothing here.</div>'}</div>
+    </details>`;
+}
+function renderPerformanceTiles(rows) {
+  const tiles = document.getElementById('performanceTiles');
+  if (!tiles) return;
+  const sum = (f) => rows.reduce((n, r) => n + f(r), 0);
+  const behind = rows.filter(r => r.gap.behind).length;
+  const onPace = rows.filter(r => paceVerdict(r).id === 'onpace').length;
+  tiles.innerHTML = `
+    <div class="stat-tile"><div class="num">${rows.length}</div><div class="lbl">Live listings</div><small>${onPace} on pace · ${behind} behind</small></div>
+    <div class="stat-tile"><div class="num">${sum(r => r.stats.views).toLocaleString()}</div><div class="lbl">Views</div><small>${signed(sum(r => r.trend.views))} this week</small></div>
+    <div class="stat-tile"><div class="num">${sum(r => r.stats.clicks).toLocaleString()}</div><div class="lbl">Clicks</div><small>${signed(sum(r => r.trend.clicks))} this week</small></div>
+    <div class="stat-tile"><div class="num">${sum(r => r.now.watchers)}</div><div class="lbl">Watchers & likes</div><small>${signed(sum(r => r.trend.watchers))} this week</small></div>`;
+}
+function renderPerformanceView() {
+  const container = document.getElementById('performanceList');
+  if (!container) return;
+  const view = state.perfView;
+  const viewSelect = document.getElementById('perfViewSelect');
+  if (viewSelect && viewSelect.value !== view) viewSelect.value = view;
+  const completedWrap = document.getElementById('perfCompletedWrap');
+  if (completedWrap) completedWrap.hidden = view !== 'status';
+  const sortWrap = document.getElementById('perfSortWrap');
+  if (sortWrap) sortWrap.hidden = view === 'status' || view === 'offers';
+  const rows = perfRows();
+  renderPerformanceTiles(rows);
+
+  if (view === 'status') {
+    const moves = state.inventory.filter(it => !isSold(it)).map(pricingActionFor)
+      .filter(a => !a.hidden && MOVE_GROUP_KEYS.includes(pricingGroupKeyFor(a))).length;
+    container.innerHTML = `
+      ${moves ? `<button type="button" class="perf-moves-link" data-go="optimize">${moves} listing${moves === 1 ? ' needs' : 's need'} a move — open Optimize →</button>` : ''}
+      <div id="performanceStatus"></div>`;
+    container.querySelector('.perf-moves-link')?.addEventListener('click', () => showView('optimize'));
+    renderPricingInto(container.querySelector('#performanceStatus'), STATUS_GROUP_KEYS,
+      '<div class="empty-state">No status to show yet.</div>');
+    return;
+  }
+
+  if (view === 'offers') {
+    const offerRows = state.inventory
+      .filter(it => !isSold(it))
+      .map(it => ({ it, offer: latestActionOfType(it.itemId, 'Offer Sent'), stats: itemSortStats(it, latestMetricsByItemPlatform()) }))
+      .filter(r => r.offer)
+      .sort((a, b) => String(b.offer.date).localeCompare(String(a.offer.date)));
+    container.innerHTML = offerRows.length ? `
+      <table class="offers-table">
+        <thead><tr><th>Item</th><th>Last offer</th><th>Where</th><th>Traffic now</th></tr></thead>
+        <tbody>${offerRows.map(({ it, offer, stats }) => {
+          const days = daysSince(String(offer.date).slice(0, 10));
+          return `<tr>
+            <td class="ot-name"><b>${escapeHtml(itemShortName(it))}</b><small>${escapeHtml(String(it.listPrice ?? '—'))}</small></td>
+            <td>${escapeHtml(String(offer.date))}<small class="ot-age">${days === 0 ? 'today' : days + 'd ago'}</small></td>
+            <td>${escapeHtml(String(offer.detail || '—').slice(0, 90))}</td>
+            <td>${stats.views} views · ${stats.clicks} clicks</td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table>` : '<div class="empty-state">No offers sent yet.</div>';
+    return;
+  }
+
+  if (view === 'ranked') {
+    const labels = { views: 'Most views', clicks: 'Most clicks', ctr: 'Highest click rate', trend: 'Most views this week', price: 'Highest price' };
+    container.innerHTML = perfGroupHTML(labels[state.perfSort] || 'Ranking', rows);
+  } else if (view === 'speed') {
+    const groups = new Map();
+    rows.forEach(r => {
+      if (!groups.has(r.sp.band.id)) groups.set(r.sp.band.id, { band: r.sp.band, rows: [] });
+      groups.get(r.sp.band.id).rows.push(r);
+    });
+    container.innerHTML = [...groups.values()].sort((a, b) => a.band.order - b.band.order).map(g => {
+      const over = g.rows.filter(r => r.sp.overdue).length;
+      return perfGroupHTML(g.band.label, g.rows,
+        `<span class="speed-range">pace suggests ${escapeHtml(g.band.days)}</span>${over ? `<span class="speed-over-count">${over} past expected</span>` : ''}`,
+        'speed-' + g.band.id);
+    }).join('') || '<div class="empty-state">No live listings yet.</div>';
+  } else {
+    const groups = new Map();
+    rows.forEach(r => {
+      const v = paceVerdict(r);
+      if (!groups.has(v.id)) groups.set(v.id, { v, rows: [] });
+      groups.get(v.id).rows.push(r);
+    });
+    container.innerHTML = [...groups.values()].sort((a, b) => a.v.order - b.v.order)
+      .map(g => perfGroupHTML(g.v.label, g.rows, '', 'pace-' + g.v.id)).join('') || '<div class="empty-state">No live listings yet.</div>';
+  }
+  container.querySelectorAll('details.perf-row').forEach(row => row.addEventListener('toggle', () => {
+    const id = row.dataset.perfId;
+    if (row.open) state.expandedPerf.add(id); else state.expandedPerf.delete(id);
+  }));
+  container.querySelectorAll('details.perf-group').forEach(g => g.addEventListener('toggle', () => {
+    if (g.open) state.collapsedPerfGroups.delete(g.dataset.perfGroup); else state.collapsedPerfGroups.add(g.dataset.perfGroup);
+  }));
+  wireItemCards(container, renderPerformanceView);
+}
+document.getElementById('perfViewSelect')?.addEventListener('change', e => {
+  state.perfView = e.target.value;
+  localSet('sellHub.perfView', state.perfView);
+  renderPerformanceView();
+});
+document.getElementById('perfSortSelect')?.addEventListener('change', e => {
+  state.perfSort = e.target.value;
+  localSet('sellHub.perfSort', state.perfSort);
+  renderPerformanceView();
+});
+
+// Scrolls to a heading anywhere in the page, opening every collapsed section
+// around it first - a heading inside a closed <details> has no position.
+function scrollToSection(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const view = el.closest('.view');
+  if (view && !view.classList.contains('active')) showView(view.id);
+  let d = el.tagName === 'DETAILS' ? el : el.closest('details');
+  while (d) { d.open = true; d = d.parentElement && d.parentElement.closest('details'); }
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function renderFocusView() {
@@ -1971,125 +2306,16 @@ function renderList() {
   container.innerHTML = '';
   const latestByPlatform = latestMetricsByItemPlatform();
 
+  // Inventory sorts by the stock itself; traffic rankings live on Performance.
+  const postedDate = it => (postedInfoFor(it.itemId) || {}).date || '';
   const compareItems = (a, b) => {
-    if (state.listSort === 'views') return b.stats.views - a.stats.views;
-    if (state.listSort === 'clicks') return b.stats.clicks - a.stats.clicks;
-    if (state.listSort === 'ctr') return b.stats.ctr - a.stats.ctr;
     if (state.listSort === 'price') return b.stats.price - a.stats.price;
+    if (state.listSort === 'newest') return postedDate(b.it).localeCompare(postedDate(a.it));
     return (a.it.item || a.it.brand || '').localeCompare(b.it.item || b.it.brand || '');
   };
 
   if (state.listGroup === 'size') {
     renderSizeView(container, latestByPlatform, compareItems);
-    wireItemCards(container, renderList);
-    return;
-  }
-
-  if (state.listGroup === 'speed') {
-    if (!state.expandedSpeeds) state.expandedSpeeds = new Set();
-    let items = state.inventory.filter(it => state.listActiveCats.has(categoryMeta(it.category).id));
-    if (!state.listShowSold) items = items.filter(it => !isSold(it));
-    const groups = new Map();
-    items.forEach(it => {
-      const sp = saleSpeedFor(it, latestByPlatform);
-      const key = sp.band.id;
-      if (!groups.has(key)) groups.set(key, { band: sp.band, rows: [] });
-      groups.get(key).rows.push({ it, stats: itemSortStats(it, latestByPlatform), sp });
-    });
-    const ordered = [...groups.values()].sort((a, b) => a.band.order - b.band.order);
-    container.innerHTML = ordered.length ? ordered.map(g => {
-      const over = g.rows.filter(r => r.sp.overdue).length;
-      // Anything past its window floats to the top of its band.
-      g.rows.sort((a, b) => (b.sp.overdue ? 1 : 0) - (a.sp.overdue ? 1 : 0) || b.stats.clicks - a.stats.clicks);
-      const open = state.expandedSpeeds.has(g.band.id) ? ' open' : '';
-      return `<details class="cat-section speed-section" data-speed-id="${escapeHtml(g.band.id)}"${open}>
-        <summary class="cat-heading">
-          <span class="icon speed-dot speed-${escapeHtml(g.band.id)}"></span>
-          <h2>${escapeHtml(g.band.label)}</h2>
-          <span class="speed-range">pace suggests ${escapeHtml(g.band.days)}</span>
-          <span class="count">${g.rows.length}</span>
-          ${over ? `<span class="speed-over-count">${over} past expected</span>` : ''}
-        </summary>
-        <div class="card-grid">${g.rows.map(r => itemCardHTML(r.it, categoryMeta(r.it.category))).join('')}</div>
-      </details>`;
-    }).join('') : '<div class="empty-state">No inventory matches these filters.</div>';
-    container.querySelectorAll('details.speed-section').forEach(d => d.addEventListener('toggle', () => {
-      const id = d.dataset.speedId;
-      if (d.open) state.expandedSpeeds.add(id); else state.expandedSpeeds.delete(id);
-    }));
-    wireItemCards(container, renderList);
-    return;
-  }
-
-  if (state.listGroup === 'offers') {
-    const rows = state.inventory
-      .filter(it => !isSold(it))
-      .map(it => ({ it, offer: latestActionOfType(it.itemId, 'Offer Sent'), stats: itemSortStats(it, latestByPlatform) }))
-      .filter(r => r.offer)
-      .sort((a, b) => String(b.offer.date).localeCompare(String(a.offer.date)));
-    if (!rows.length) {
-      container.innerHTML = '<div class="empty-state">No offers sent yet. They show up here once you mark one sent on the Actions page.</div>';
-      return;
-    }
-    const today = todayStr();
-    container.innerHTML = `
-      <div class="cat-section">
-        <div class="cat-heading"><span class="icon">✉️</span><h2>Offers sent</h2><span class="count">${rows.length}</span></div>
-        <table class="offers-table">
-          <thead><tr><th>Item</th><th>Sent</th><th>Where</th><th>Since</th><th>Traffic since</th></tr></thead>
-          <tbody>${rows.map(({ it, offer, stats }) => {
-            const days = Math.max(0, Math.round((new Date(today + 'T12:00:00') - new Date(String(offer.date).slice(0, 10) + 'T12:00:00')) / 86400000));
-            return `<tr>
-              <td class="ot-name"><b>${escapeHtml(itemShortName(it))}</b><small>${escapeHtml(String(it.listPrice ?? '—'))}</small></td>
-              <td>${escapeHtml(String(offer.date))}</td>
-              <td>${escapeHtml(String(offer.detail || '—')).slice(0, 60)}</td>
-              <td>${days === 0 ? 'today' : days + 'd ago'}</td>
-              <td>${stats.views} views · ${stats.clicks} clicks</td>
-            </tr>`;
-          }).join('')}</tbody>
-        </table>
-        <p class="cp-task-breakdown">An eBay offer expires after 24-48 hours; Poshmark's lasts 24. Anything older than a couple of days is a candidate to send again, lower.</p>
-      </div>`;
-    return;
-  }
-
-  if (state.listGroup === 'ranked') {
-    let items = state.inventory.filter(it => state.listActiveCats.has(categoryMeta(it.category).id));
-    if (!state.listShowSold) items = items.filter(it => !isSold(it));
-    const ranked = items.map(it => ({ it, stats: itemSortStats(it, latestByPlatform) })).sort(compareItems);
-    const labels = { views: 'Most views', clicks: 'Most clicks', ctr: 'Highest click rate', price: 'Highest price', name: 'By name' };
-    container.innerHTML = ranked.length ? `
-      <div class="cat-section ranked-section">
-        <div class="cat-heading"><span class="rank-mark">#</span><h2>${labels[state.listSort]}</h2><span class="count">${ranked.length} items</span></div>
-        <div class="ranked-list">
-          ${ranked.map(({ it, stats }, i) => {
-            const rank = i + 1;
-            const id = String(it.itemId);
-            const open = state.expandedRanked.has(id) ? ' open' : '';
-            return `
-            <details class="ranked-row" data-rank-id="${escapeHtml(id)}"${open}>
-              <summary class="ranked-row-head">
-                <span class="rr-rank">${rank}</span>
-                <span class="ranked-row-title">${escapeHtml(itemShortName(it))}</span>
-                <span class="rr-quick">
-                  <b>${escapeHtml(it.listPrice == null || it.listPrice === '' ? '—' : (String(it.listPrice).trim().startsWith('$') ? String(it.listPrice).trim() : '$' + String(it.listPrice).trim()))}</b>
-                  <i>${stats.views} views</i>
-                  <i>${stats.clicks} clicks</i>
-                </span>
-              </summary>
-              <div class="ranked-detail">${rankedDetailHTML(it)}</div>
-            </details>`;
-          }).join('')}
-        </div>
-      </div>
-    ` : '<div class="empty-state">No inventory matches these filters.</div>';
-    container.querySelectorAll('details.ranked-row').forEach(row => {
-      row.addEventListener('toggle', () => {
-        const id = row.dataset.rankId;
-        if (!id) return;
-        if (row.open) state.expandedRanked.add(id); else state.expandedRanked.delete(id);
-      });
-    });
     wireItemCards(container, renderList);
     return;
   }
@@ -2112,7 +2338,7 @@ function renderList() {
         <h2>${cat.label}</h2>
         <span class="count">${items.length}</span>
       </summary>
-      ${items.length ? `<div class="card-grid">${items.map(it => itemCardHTML(it, cat)).join('')}</div>` : '<div class="empty-state">Nothing here yet.</div>'}
+      ${items.length ? `<div class="card-grid">${items.map(it => itemCardHTML(it, cat, { perf: false })).join('')}</div>` : '<div class="empty-state">Nothing here yet.</div>'}
     `;
     section.addEventListener('toggle', () => {
       if (section.open) state.expandedCats.add(cat.id); else state.expandedCats.delete(cat.id);
@@ -3066,30 +3292,22 @@ function renderActionSummary() {
   }
   const toShip = state.inventory.filter(it => isSold(it) && !hasShipped(it.itemId) && !soldInPerson(it)).length;
   const listRows = stillToListRows();
-  const toList = listRows.reduce((n, r) => n + r.status.missing.length, 0);
-  const toListHeld = listRows.filter(r => postingNoteFor(r.item.itemId)).reduce((n, r) => n + r.status.missing.length, 0);
-  const counts = {};
-  state.inventory.filter(it => !isSold(it)).forEach(it => {
-    const a = pricingActionFor(it);
-    if (!a.hidden) counts[a.label] = (counts[a.label] || 0) + 1;
-  });
-  const visibility = (counts['Boost visibility'] || 0) + (counts['Refresh listing'] || 0);
+  const readyRows = listRows.filter(r => !postingNoteFor(r.item.itemId));
+  const toList = readyRows.reduce((n, r) => n + r.status.missing.length, 0);
+  const prepCount = listRows.filter(r => r.status.missing.length && postingNoteFor(r.item.itemId)).length;
+  const moves = state.inventory.filter(it => !isSold(it)).map(pricingActionFor)
+    .filter(a => !a.hidden && MOVE_GROUP_KEYS.includes(pricingGroupKeyFor(a))).length;
   const tiles = [
     { num: toShip, lbl: 'To ship', target: 'sec-ship' },
+    { num: allOpenTasks().length, lbl: 'Planned tasks', target: 'sec-tasks' },
     { num: openLocalDeals().length, lbl: 'Local deals', target: 'sec-local', sub: localDealsDueLabel() },
     { num: soldElsewhereTasks().length, lbl: 'Listings to end', target: 'sec-end' },
-    { num: toList, lbl: 'Posts to make', target: 'sec-list', sub: toListHeld ? `${toListHeld} on hold` : '' },
-    { num: counts['Send an offer'] || 0, lbl: 'Offers to send', target: pricingGroupId('Send an offer') },
-    { num: counts['Try a price drop'] || 0, lbl: 'Price drops', target: pricingGroupId('Try a price drop') },
-    { num: visibility, lbl: 'Need visibility', target: pricingGroupId(counts['Boost visibility'] ? 'Boost visibility' : 'Refresh listing') },
+    { num: prepCount, lbl: 'Item prep', target: 'sec-prep' },
+    { num: toList, lbl: 'Posts to make', target: 'sec-list' },
+    { num: moves, lbl: 'Optimize moves', target: 'sec-pricing', sub: 'on Optimize' },
   ];
   container.innerHTML = tiles.map(t => `<button class="as-tile${t.num ? '' : ' as-zero'}" data-target="${t.target}"><span class="num">${t.num}</span><span class="lbl">${t.lbl}</span>${t.sub ? `<span class="sub">${t.sub}</span>` : ''}</button>`).join('');
-  container.querySelectorAll('.as-tile').forEach(tile => tile.addEventListener('click', () => {
-    const el = document.getElementById(tile.dataset.target);
-    if (!el) return;
-    if (el.tagName === 'DETAILS') el.open = true;
-    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }));
+  container.querySelectorAll('.as-tile').forEach(tile => tile.addEventListener('click', () => scrollToSection(tile.dataset.target)));
 }
 
 // ---------------------------------------------------------------------
@@ -3320,7 +3538,8 @@ function saleSpeedFor(item, latestByPlatform) {
   if (days === null) return { ...out, band: SPEED_BANDS.nodata, expected: expectedSaleFor(item), overdue: false };
   if (days < 4 && stats.clicks === 0) return { ...out, band: SPEED_BANDS.newish, expected: expectedSaleFor(item), overdue: false };
   if (!stats.views && !stats.clicks) return { ...out, band: SPEED_BANDS.nodata, expected: expectedSaleFor(item), overdue: days > expectedSaleFor(item).maxDays };
-  const clicksPerDay = stats.clicks / days;
+  // eBay page visits count as clicks here (see listingOpensFor).
+  const clicksPerDay = Math.max(stats.clicks, listingOpensFor(item, map)) / days;
   const viewsPerDay = stats.views / days;
   let band = SPEED_BANDS.slow;
   if (clicksPerDay >= 0.7 || watchers >= 3) band = SPEED_BANDS.fast;
@@ -3533,10 +3752,48 @@ function stlListingDetailsHTML(item, meta) {
     </details>`;
 }
 
+// Everything with a posting note ("waiting on the charger", "taking photos")
+// is item prep, not listing work - it sits in its own Actions section until
+// the note is cleared, so Still to list only holds things ready to post.
 function renderStillToList() {
+  renderReadyToList();
+  renderItemPrep();
+}
+function renderItemPrep() {
+  const container = document.getElementById('itemPrepList');
+  if (!container) return;
+  const rows = stillToListRows().filter(r => r.status.missing.length && postingNoteFor(r.item.itemId));
+  setActionSectionVisible('section-prep', rows.length > 0);
+  if (!rows.length) { container.innerHTML = ''; return; }
+  rows.sort((a, b) => (a.item.item || a.item.brand || '').localeCompare(b.item.item || b.item.brand || ''));
+  container.innerHTML = `<div class="card-grid">${rows.map(({ item, status }) => {
+    const sites = status.missing.map(m => `<span class="stl-chip stl-missing" style="--plat:${m.meta.color}">${escapeHtml(m.meta.short)}</span>`).join('');
+    const live = status.done.map(d => d.meta.label);
+    const metaBits = [
+      priceLineHTML(item),
+      item.floorPrice ? `floor ${escapeHtml(item.floorPrice)}` : '',
+      live.length ? `Live: ${escapeHtml(live.join(', '))}` : 'Not live anywhere yet',
+    ].filter(Boolean);
+    return `
+      <div class="card stl-card action-row prep-card">
+        <div class="ar-title-row">
+          <h3>${escapeHtml([item.brand, item.item].filter(Boolean).join(' — ') || item.itemId)}</h3>
+          ${expectedSaleChipHTML(item)}
+          ${draftBadgeHTML(item.itemId)}
+        </div>
+        ${postingNoteHTML(item, 'prep')}
+        <div class="ar-meta-line">${metaBits.join(' · ')}</div>
+        <div class="site-chips prep-sites"><span class="prep-sites-lbl">Then post to</span>${sites}</div>
+        <div class="ar-actions"><div class="ar-secondary">${editToggleHTML(item).replace('btn secondary ie-toggle', 'icon-btn ie-toggle')}</div></div>
+        ${itemEditPanelHTML(item)}
+      </div>`;
+  }).join('')}</div>`;
+  wireStillToListCards(container);
+}
+function renderReadyToList() {
   const container = document.getElementById('stillToListList');
   if (!container) return;
-  const rows = stillToListRows();
+  const rows = stillToListRows().filter(r => !postingNoteFor(r.item.itemId));
   populateStillToListSiteOptions(rows);
 
   const siteFilter = document.getElementById('stillToListSite').value;
@@ -3949,6 +4206,38 @@ function offerWindowFor(itemId, platformId, platformLabel) {
   };
 }
 
+// Offers the daily update has lined up but not sent. It logs "Offer Prepared"
+// with the amount; nothing goes to a buyer until you approve it here (logged
+// as "Offer Approved"), and the next daily run sends whatever is approved.
+// A prepared offer goes stale after a few days, since the listing price or
+// the watchers may have moved on.
+const PREPARED_OFFER_DAYS = 3;
+function preparedOfferFor(itemId) {
+  const prep = latestActionOfType(itemId, 'Offer Prepared');
+  if (!prep || daysSince(prep.date) > PREPARED_OFFER_DAYS) return null;
+  const after = a => a && state.itemActions.indexOf(a) > state.itemActions.indexOf(prep);
+  if (after(latestActionOfType(itemId, 'Offer Sent'))) return null;
+  if (after(latestActionOfType(itemId, 'Ignored'))) return null;
+  const approved = latestActionOfType(itemId, 'Offer Approved');
+  return { date: prep.date, detail: String(prep.detail || ''), approved: after(approved) ? approved : null };
+}
+function preparedOfferHTML(item, action) {
+  const p = action && action.prepared;
+  if (!p) return '';
+  if (p.approved) {
+    return `<div class="pa-callout pa-prepared approved">✅ <b>Approved ${escapeHtml(prettyDay(p.approved.date))}</b> — ${escapeHtml(p.detail)}. Claude sends it on the next daily run.</div>`;
+  }
+  return `<div class="pa-callout pa-prepared">
+    <span>📝 <b>Offer ready</b> — ${escapeHtml(p.detail)}</span>
+    <button type="button" class="btn small pa-approve-btn" data-id="${escapeHtml(item.itemId)}" data-detail="${escapeHtml(p.detail)}">Approve</button>
+  </div>`;
+}
+async function approvePreparedOffer(itemId, detail, btn) {
+  if (btn) btn.disabled = true;
+  await recordItemAction(itemId, 'Offer Approved', detail);
+  renderPricingActions();
+}
+
 function pricingActionFor(item) {
   let natural = naturalPricingAction(item);
   const override = actionOverrideFor(item.itemId);
@@ -3981,6 +4270,8 @@ function pricingActionFor(item) {
       const when = offer.date === today ? 'today' : `on ${offer.date}`;
       return { ...natural, severity: 'handled', label: 'Offer sent', reason: `Offer sent ${when} via ${escapeHtml(offer.detail)}. Waiting to hear back.` };
     }
+    const prepared = preparedOfferFor(item.itemId);
+    if (prepared) natural = { ...natural, prepared };
   }
   if (natural.severity === 'urgent' || (natural.severity === 'attention' && natural.label === 'Refresh listing')) {
     const drop = latestActionOfType(item.itemId, 'Price Drop');
@@ -4323,7 +4614,7 @@ function renderPricingStatsNote() {
     note = document.createElement('p');
     note.id = 'pricingStatsNote';
     note.className = 'subhead-note';
-    head.insertAdjacentElement('afterend', note);
+    (head.closest('summary') || head).insertAdjacentElement('afterend', note);
   }
   let latest = '';
   (state.metrics || []).forEach(m => {
@@ -4338,19 +4629,38 @@ function renderPricingStatsNote() {
     : 'The date on a card is when that suggestion first appeared.';
 }
 
+// The four labels that ask for a move live on Optimize; everything else a
+// listing can be (offer out, dropped, held, on track...) is a status, and
+// statuses live on Performance.
+const MOVE_GROUP_KEYS = ['Send an offer', 'Try a price drop', 'Boost visibility', 'Refresh listing'];
+const STATUS_GROUP_KEYS = PRICING_GROUPS.map(g => g.key).filter(k => !MOVE_GROUP_KEYS.includes(k));
+function pricingGroupKeyFor(action) {
+  return PRICING_GROUPS.some(g => g.key === action.label) ? action.label : 'On track';
+}
+
+// Re-renders every place a pricing card can appear. Kept under the old name
+// because every button handler already calls it.
 function renderPricingActions() {
-  const container = document.getElementById('pricingActions');
+  renderPricingStatsNote();
+  renderPricingInto(document.getElementById('pricingActions'), MOVE_GROUP_KEYS,
+    '<div class="empty-state">No moves suggested right now — every live listing is on track or already handled.</div>');
+  renderOptimizeTiles();
+  renderOffersOut();
+  renderPerformanceView();
+  renderActionSummary();
+}
+
+function renderPricingInto(container, groupKeys, emptyHTML) {
   if (!container) return;
   const items = state.inventory.filter(it => !isSold(it));
-  setActionSectionVisible('section-pricing', true);
-  renderPricingStatsNote();
   if (!items.length) { container.innerHTML = '<div class="empty-state">No active listings yet.</div>'; return; }
 
   const rows = items.map(it => ({ item: it, action: pricingActionFor(it) }))
-    .filter(row => !row.action.hidden && (state.showCompletedActions || row.action.severity !== 'complete'));
+    .filter(row => !row.action.hidden && groupKeys.includes(pricingGroupKeyFor(row.action)))
+    .filter(row => state.showCompletedActions || row.action.severity !== 'complete');
 
   if (!rows.length) {
-    container.innerHTML = '<div class="empty-state">No open pricing actions. Turn on “Show completed pricing” to review finished items.</div>';
+    container.innerHTML = emptyHTML || '<div class="empty-state">Nothing here.</div>';
     return;
   }
 
@@ -4387,7 +4697,8 @@ function renderPricingActions() {
       <div class="ar-meta-line">${metaBits.join(' · ')}</div>
       ${action.suggestedPrice ? `<div class="pa-callout"><b>Suggest ${fmtMoney(action.suggestedPrice)}</b></div>` : ''}
       ${offerDeadlineHTML(action)}
-      ${action.offerWhere ? `<div class="pa-callout"><b>${escapeHtml(action.offerWhere)}</b></div>` : ''}
+      ${action.offerWhere && !action.prepared ? `<div class="pa-callout"><b>${escapeHtml(action.offerWhere)}</b></div>` : ''}
+      ${preparedOfferHTML(item, action)}
       ${pricingReasonHTML(action.reason)}
       <div class="ar-actions pa-actions">
           ${primary}
@@ -4413,11 +4724,11 @@ function renderPricingActions() {
 
   const byGroup = new Map();
   rows.forEach(row => {
-    const key = PRICING_GROUPS.some(g => g.key === row.action.label) ? row.action.label : 'On track';
+    const key = pricingGroupKeyFor(row.action);
     if (!byGroup.has(key)) byGroup.set(key, []);
     byGroup.get(key).push(row);
   });
-  container.innerHTML = PRICING_GROUPS.filter(g => byGroup.has(g.key)).map(g => {
+  container.innerHTML = PRICING_GROUPS.filter(g => groupKeys.includes(g.key) && byGroup.has(g.key)).map(g => {
     const groupRows = byGroup.get(g.key).sort((a, b) => (b.action.watchers - a.action.watchers) || (b.action.views - a.action.views));
     return `
       <details class="action-group pa-group" id="${pricingGroupId(g.key)}" style="--plat:${g.color}"${g.collapsed ? '' : ' open'}>
@@ -4439,6 +4750,9 @@ function renderPricingActions() {
       full.hidden = !expanding;
       btn.textContent = expanding ? 'less' : 'more';
     });
+  });
+  container.querySelectorAll('.pa-approve-btn').forEach(btn => {
+    btn.addEventListener('click', () => approvePreparedOffer(btn.dataset.id, btn.dataset.detail, btn));
   });
   container.querySelectorAll('.pa-offer-btn').forEach(btn => {
     btn.addEventListener('click', () => sendOfferForAction(btn.dataset.id, btn.dataset.plat));
@@ -4555,6 +4869,10 @@ state.picked = new Set(localGet('sellHub.picked', []));
 state.inventoryMode = localGet('sellHub.inventoryMode', 'browse');
 state.stlGroup = localGet('sellHub.stlGroup', 'site');
 state.listGroup = localGet('sellHub.listGroup', 'category');
+// Views / Sale speed / Offers sent moved to the Performance tab.
+if (!['category', 'size'].includes(state.listGroup)) state.listGroup = 'category';
+state.perfView = localGet('sellHub.perfView', 'status');
+state.perfSort = localGet('sellHub.perfSort', 'views');
 // Inventory sections always start collapsed; expand choices live only in-session.
 state.expandedCats = new Set();
 state.expandedSizes = new Set();
@@ -4570,6 +4888,17 @@ document.querySelectorAll('#stlGroupSwitch button').forEach(b => {
     renderStillToList();
   });
 });
+// Actions and Optimize sections fold shut and stay that way across visits.
+(function rememberSectionFolds() {
+  const closed = new Set(localGet('sellHub.closedSections', []));
+  document.querySelectorAll('details.action-section, details.opt-block').forEach(d => {
+    if (closed.has(d.id)) d.open = false;
+    d.addEventListener('toggle', () => {
+      if (d.open) closed.delete(d.id); else closed.add(d.id);
+      localSet('sellHub.closedSections', [...closed]);
+    });
+  });
+})();
 document.getElementById('compileOpenBtn')?.addEventListener('click', () => {
   setInventoryMode(state.inventoryMode === 'compile' ? 'browse' : 'compile');
 });
