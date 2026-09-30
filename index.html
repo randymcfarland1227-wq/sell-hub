@@ -68,6 +68,7 @@
         <p class="section-intro">Only the listings that need a move: suggested offers, price drops and visibility fixes, the offers already out, and anything selling slower than its kind of item should. Listings doing well stay on Performance.</p>
       </div>
     </div>
+    <section class="opt-today" id="optimizeToday" aria-label="Today"></section>
     <div class="stat-tiles" id="optimizeTiles"></div>
     <details class="opt-block" id="opt-block-suggest" open>
       <summary><h3 class="subhead" id="sec-pricing">Suggested moves</h3></summary>
@@ -92,6 +93,11 @@
       </div>
     </div>
     <div class="stat-tiles" id="performanceTiles"></div>
+    <details class="opt-block" id="perf-block-platforms" open>
+      <summary><h3 class="subhead" id="sec-platforms">By platform</h3></summary>
+      <div id="perfPlatforms"></div>
+    </details>
+    <h3 class="subhead" id="sec-listings">Listings</h3>
     <div class="inventory-toolbar perf-toolbar">
       <label class="sort-control">View
         <select id="perfViewSelect">
@@ -105,8 +111,8 @@
       <label class="sort-control" id="perfSortWrap">Sort by
         <select id="perfSortSelect">
           <option value="views" selected>Most views</option>
-          <option value="clicks">Most clicks</option>
-          <option value="ctr">Highest click rate</option>
+          <option value="clicks">Most opens</option>
+          <option value="ctr">Highest open rate</option>
           <option value="trend">Most views this week</option>
           <option value="price">Highest price</option>
         </select>
@@ -129,6 +135,10 @@
           <option value="size">Size</option>
         </select>
       </label>
+      <div class="cat-picker">
+        <button type="button" class="cat-picker-btn" id="catPickerBtn" aria-haspopup="true" aria-expanded="false">Categories</button>
+        <div class="cat-picker-menu" id="catPickerMenu" hidden></div>
+      </div>
       <label class="sort-control">Sort by
         <select id="listSortSelect">
           <option value="name" selected>Name</option>
@@ -166,15 +176,11 @@
     </div>
 
     <div id="inventoryBrowse">
-    <p class="stl-note">Site tags on each card: filled = live there, dashed = still to post, grey = not posting or ended.</p>
 
     <!-- ---------- LIST MODE ---------- -->
     <section class="pick-panel" id="pickPanel" hidden aria-label="Selected items"></section>
 
     <div id="listMode" style="display:none">
-      <div class="chip-row" id="chipRow">
-        <label class="chip-toggle"><input type="checkbox" id="showSoldList"> show sold</label>
-      </div>
       <div id="catSections"></div>
     </div>
 
@@ -246,8 +252,6 @@
     <div class="stat-tiles cash-tiles" id="cashFlowTiles"></div>
     <div id="cashFlowList"></div>
 
-    <h3 class="subhead" id="sec-platforms">By platform</h3>
-    <div class="platform-cards" id="platformCards"></div>
 
     <button class="btn add-toggle-btn" id="metricAddToggle">+ Log a stat update</button>
 

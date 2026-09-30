@@ -27,10 +27,12 @@ const state = {
   loadedAt: '',
   expandedItems: new Set(),
   picked: new Set(),      // items ticked for the Selected items panel / bundling
+  openAlerts: new Set(),  // item ids whose "!" alert list is open
+  openOptRows: new Set(), // Underperforming rows opened this session
   perfView: 'status',     // Performance tab grouping
   perfSort: 'views',
   expandedPerf: new Set(),        // Performance rows opened this session
-  collapsedPerfGroups: new Set(), // Performance groups closed this session
+  perfGroupOpen: {},              // Performance group open/closed choices this session
 };
 
 const ZOOM_MIN = 0.7, ZOOM_MAX = 1.6, ZOOM_STEP = 0.1, ZOOM_BASE = 380;
@@ -42,8 +44,16 @@ function escapeHtml(s) {
 }
 
 // Compact inventory label used on collapsed ranked rows (brand + item, no em dash).
+// Brand + item, without saying the brand twice when the item name already
+// starts with it ("Timberland Timberland Ellendale..." reads as a typo).
+function itemDisplayName(item, sep) {
+  const brand = String((item && item.brand) || '').trim();
+  const name = String((item && item.item) || '').trim();
+  if (brand && name.toLowerCase().startsWith(brand.toLowerCase())) return name;
+  return [brand, name].filter(Boolean).join(sep || ' ') || String((item && item.itemId) || 'Item');
+}
 function itemShortName(item) {
-  return [item && item.brand, item && item.item].filter(Boolean).join(' ') || String((item && item.itemId) || 'Item');
+  return itemDisplayName(item, ' ');
 }
 
 // ---------------------------------------------------------------------
@@ -133,7 +143,15 @@ function platformOptionsHTML(selected) {
 const METRIC_FIELDS = ['impressions', 'views', 'watchers', 'clicks', 'price'];
 // asOf (yyyy-mm-dd, optional) reads the numbers as they stood on that day,
 // which is how Performance works out a week's trend.
+const latestMetricsCache = { src: null, len: -1, map: null };
 function latestMetricsByItemPlatform(asOf) {
+  // Every card and row asks for this; rebuild only when the metrics change.
+  if (!asOf && latestMetricsCache.src === state.metrics && latestMetricsCache.len === state.metrics.length) return latestMetricsCache.map;
+  const out = buildLatestMetrics(asOf);
+  if (!asOf) Object.assign(latestMetricsCache, { src: state.metrics, len: state.metrics.length, map: out });
+  return out;
+}
+function buildLatestMetrics(asOf) {
   const byKey = new Map();
   state.metrics.forEach(m => {
     if (!m.itemId) return;
@@ -265,7 +283,7 @@ function wireActionStars(root) {
   }));
 }
 function itemTitle(item) {
-  return [item.brand, item.item].filter(Boolean).join(' — ') || String(item.itemId);
+  return itemDisplayName(item, ' — ') || String(item.itemId);
 }
 const LIFE_HUB_TASK_SEVERITIES = new Set(['opportunity', 'urgent', 'attention']);
 /** All open Resale actions for Life Hub tasks[] (+ starred featured strip). */
@@ -656,9 +674,10 @@ function priceLogHTML(itemId) {
 // on the Inventory cards, not just in the Action tab — a price drop and/or
 // an offer sent, whichever have happened for this item.
 function actionBadgesHTML(itemId) {
-  const note = postingNoteFor(itemId);
-  if (!note) return '';
-  return `<div class="action-badges"><span class="action-badge hold">\u23f8 ${escapeHtml(note)}</span></div>`;
+  const item = state.inventory.find(it => String(it.itemId) === String(itemId));
+  const alerts = item ? itemAlerts(item) : [];
+  if (!alerts.length) return '';
+  return `<ul class="alert-list">${alerts.map(a => `<li class="alert-${a.kind}"><span>${escapeHtml(a.text)}</span></li>`).join('')}</ul>`;
 }
 
 function latestActionStateFor(itemId) {
@@ -808,7 +827,7 @@ function syncInventoryToolbar() {
   const expand = document.querySelector('#inventory .inventory-expand');
   if (group) group.hidden = false;
   if (sort) sort.hidden = false;
-  if (expand) expand.hidden = false;
+  if (expand) expand.hidden = state.listGroup !== 'size';
 }
 
 // ---------------------------------------------------------------------
@@ -920,6 +939,58 @@ function itemCardHTML(item, cat, opts) {
   `;
 }
 
+// Inventory's card: a row, not a poster. Thumbnail on the left, everything
+// that describes the item on the right, alerts folded behind "!".
+function inventoryCardHTML(item) {
+  const sold = isSold(item);
+  const cat = categoryMeta(item.category);
+  const expanded = state.expandedItems.has(item.itemId);
+  const title = itemDisplayName(item, ' — ') || item.itemId;
+  const photo = photoForItem(item.itemId);
+  const focused = !!focusedFor(item.itemId);
+  const posted = postedInfoFor(item.itemId);
+  const raw = String(item.listPrice ?? '').trim();
+  const price = raw ? (raw.startsWith('$') ? raw : '$' + raw) : '—';
+  const facts = [
+    item.size ? `Size ${escapeHtml(item.size)}` : '',
+    item.condition ? escapeHtml(item.condition) : '',
+    posted ? `Posted ${escapeHtml(prettyDay(posted.date))} · ${posted.days}d` : '',
+    sold ? `Sold ${escapeHtml(String(item.soldPrice || '—'))}` : '',
+  ].filter(Boolean).join(' · ');
+  return `
+    <div class="card inv-card${sold ? ' sold' : ''}" style="--cat:${cat.color}">
+      <div class="inv-main">
+        <div class="inv-thumb${photo ? '' : ' photo-pending'}">
+          ${photo ? `<img src="${escapeHtml(photo)}" alt="" loading="lazy" onerror="this.parentElement.classList.add('photo-pending');this.remove()">` : ''}
+          <span>${escapeHtml(photoPendingLabel(item))}</span>
+        </div>
+        <div class="inv-body">
+          <div class="inv-title-row">
+            <h3 title="${escapeHtml(title)}">${escapeHtml(title)}</h3>
+            <div class="inv-tools">
+              <label class="pick-box" title="Select this item"><input type="checkbox" data-pick="${escapeHtml(item.itemId)}"${state.picked.has(String(item.itemId)) ? ' checked' : ''}><span></span></label>
+              <button type="button" class="focus-btn${focused ? ' on' : ''}" data-focus="${escapeHtml(item.itemId)}" data-on="${focused ? '1' : ''}" title="${focused ? 'In Focused inventory — click to remove' : 'Add to Focused inventory'}">${focused ? '◉' : '◎'}</button>
+            </div>
+          </div>
+          <div class="inv-status-row">
+            <span class="status-badge ${statusClass(item.sourceStatus)}">${escapeHtml(item.sourceStatus || '—')}</span>
+            ${alertButtonHTML(item)}
+            <span class="inv-price"><b>${escapeHtml(price)}</b>${item.floorPrice ? `<i>floor ${escapeHtml(String(item.floorPrice))}</i>` : ''}</span>
+          </div>
+          ${facts ? `<div class="inv-facts">${facts}</div>` : ''}
+          ${siteStatusChipsHTML(item)}
+        </div>
+      </div>
+      ${alertPanelHTML(item)}
+      ${localDealBadgesHTML(item.itemId)}
+      <div class="inv-foot">
+        ${priceLogHTML(item.itemId)}
+        <button class="card-expand-toggle" data-id="${escapeHtml(item.itemId)}">${expanded ? 'Hide details' : 'Details & mark sold'}</button>
+      </div>
+      ${expanded ? itemDetailHTML(item) : ''}
+    </div>`;
+}
+
 function itemDetailHTML(item) {
   const descs = state.descriptions.filter(d => d.itemId === item.itemId);
   const platforms = splitPlatforms(item.platform);
@@ -986,6 +1057,21 @@ function wireItemCards(container, onChange) {
   container.querySelectorAll('.ms-submit').forEach(btn => {
     btn.addEventListener('click', () => markSold(btn, onChange));
   });
+  container.querySelectorAll('.alert-btn').forEach(btn => btn.addEventListener('click', ev => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const id = String(btn.dataset.alert);
+    if (state.openAlerts.has(id)) state.openAlerts.delete(id); else state.openAlerts.add(id);
+    onChange();
+  }));
+  container.querySelectorAll('.alert-clear').forEach(btn => btn.addEventListener('click', async ev => {
+    ev.preventDefault();
+    btn.disabled = true;
+    await recordItemAction(btn.dataset.id, 'Posting Note', '');
+    onChange();
+    renderStillToList();
+    renderActionSummary();
+  }));
   container.querySelectorAll('.remove-item-btn').forEach(btn => {
     btn.addEventListener('click', () => openRemoveDialog(btn.dataset.id, btn));
   });
@@ -1126,7 +1212,7 @@ function openRemoveDialog(itemId, opener) {
   const dialog = document.getElementById('removeItemDialog');
   const item = state.inventory.find(i => i.itemId === itemId);
   if (!dialog || !item) return;
-  const title = [item.brand, item.item].filter(Boolean).join(' — ') || item.itemId;
+  const title = itemDisplayName(item, ' — ') || item.itemId;
   const live = platformsStatusFor(item).done.map(d => d.meta.label);
   const sold = isSold(item);
   dialog.dataset.itemId = itemId;
@@ -1308,29 +1394,62 @@ window.addEventListener('hashchange', routeOverview);
 // ---------------------------------------------------------------------
 // Inventory — List mode (every category, stacked, filterable)
 // ---------------------------------------------------------------------
+// Category filter - one dropdown with a checkbox per category instead of a
+// wall of chips. "All" is remembered as all, so a new category shows up
+// without having to tick it.
+function catSelectionAll() {
+  const cats = activeCategories();
+  return cats.length > 0 && cats.every(c => state.listActiveCats.has(c.id));
+}
+function persistCatSelection() {
+  localSet('sellHub.cats', catSelectionAll() ? 'all' : [...state.listActiveCats]);
+}
 function renderListChips() {
-  const row = document.getElementById('chipRow');
-  const toggle = row.querySelector('.chip-toggle');
-  row.querySelectorAll('.chip').forEach(c => c.remove());
-
-  activeCategories().forEach(cat => {
-    if (!state.listActiveCats.has(cat.id)) state.listActiveCats.add(cat.id);
-    const chip = document.createElement('div');
-    chip.className = 'chip active';
-    chip.style.setProperty('--dot', cat.color);
-    chip.innerHTML = `<span class="dot"></span>${cat.icon} ${cat.label}`;
-    chip.addEventListener('click', () => {
-      if (state.listActiveCats.has(cat.id)) { state.listActiveCats.delete(cat.id); chip.classList.remove('active'); }
-      else { state.listActiveCats.add(cat.id); chip.classList.add('active'); }
-      renderList();
-    });
-    row.insertBefore(chip, toggle);
+  const btn = document.getElementById('catPickerBtn');
+  const menu = document.getElementById('catPickerMenu');
+  if (!btn || !menu) return;
+  const cats = activeCategories();
+  const saved = localGet('sellHub.cats', 'all');
+  if (!state.catSelectionLoaded && cats.length) {
+    state.listActiveCats = new Set(saved === 'all' || !Array.isArray(saved) ? cats.map(c => c.id) : saved.filter(id => cats.some(c => c.id === id)));
+    if (!state.listActiveCats.size) cats.forEach(c => state.listActiveCats.add(c.id));
+    state.catSelectionLoaded = true;
+  } else if (saved === 'all') {
+    cats.forEach(c => state.listActiveCats.add(c.id));
+  }
+  const picked = cats.filter(c => state.listActiveCats.has(c.id));
+  btn.innerHTML = `<span class="cp-lbl">Categories</span><b>${catSelectionAll() ? 'All' : picked.length === 1 ? escapeHtml(picked[0].label) : picked.length + ' selected'}</b><span class="cp-caret">▾</span>`;
+  const counts = {};
+  state.inventory.forEach(it => { if (state.listShowSold || !isSold(it)) { const id = categoryMeta(it.category).id; counts[id] = (counts[id] || 0) + 1; } });
+  menu.innerHTML = `
+    <label class="cp-opt cp-all"><input type="checkbox" data-cat="__all"${catSelectionAll() ? ' checked' : ''}><span>All categories</span></label>
+    ${cats.map(c => `<label class="cp-opt" style="--dot:${c.color}"><input type="checkbox" data-cat="${escapeHtml(c.id)}"${state.listActiveCats.has(c.id) ? ' checked' : ''}><span class="dot"></span><span>${c.icon} ${escapeHtml(c.label)}</span><i>${counts[c.id] || 0}</i></label>`).join('')}
+    <label class="cp-opt cp-sold"><input type="checkbox" id="showSoldList"${state.listShowSold ? ' checked' : ''}><span>Include sold</span></label>`;
+  menu.querySelectorAll('input[data-cat]').forEach(box => box.addEventListener('change', () => {
+    const id = box.dataset.cat;
+    if (id === '__all') {
+      state.listActiveCats = new Set(box.checked || !catSelectionAll() ? cats.map(c => c.id) : []);
+      if (!box.checked) state.listActiveCats = new Set();
+    } else if (box.checked) state.listActiveCats.add(id);
+    else state.listActiveCats.delete(id);
+    persistCatSelection();
+    renderListChips();
+    renderList();
+  }));
+  menu.querySelector('#showSoldList').addEventListener('change', e => {
+    state.listShowSold = e.target.checked;
+    renderListChips();
+    renderList();
   });
 }
-document.getElementById('showSoldList').addEventListener('change', e => {
-  state.listShowSold = e.target.checked;
-  renderList();
-});
+(function wireCatPicker() {
+  const btn = document.getElementById('catPickerBtn');
+  const menu = document.getElementById('catPickerMenu');
+  if (!btn || !menu) return;
+  btn.addEventListener('click', ev => { ev.stopPropagation(); menu.hidden = !menu.hidden; btn.setAttribute('aria-expanded', String(!menu.hidden)); });
+  menu.addEventListener('click', ev => ev.stopPropagation());
+  document.addEventListener('click', () => { if (!menu.hidden) { menu.hidden = true; btn.setAttribute('aria-expanded', 'false'); } });
+})();
 document.getElementById('listSortSelect').addEventListener('change', e => {
   state.listSort = e.target.value;
   setMode();
@@ -1415,7 +1534,7 @@ function renderSizeView(container, latestByPlatform, compareItems) {
             <span class="size-names">${escapeHtml(sorted.map(it => itemShortName(it)).join(' · ').slice(0, 90))}</span>
             <button type="button" class="btn secondary size-pick-all" data-ids="${escapeHtml(sorted.map(it => it.itemId).join(','))}">Select these ${sorted.length}</button>
           </summary>
-          <div class="card-grid">${sorted.map(it => itemCardHTML(it, categoryMeta(it.category), { perf: false })).join('')}</div>
+          <div class="inv-grid">${sorted.map(it => inventoryCardHTML(it)).join('')}</div>
         </details>`;
       }).join('')}
     </section>`).join('');
@@ -1626,49 +1745,55 @@ function optimizationFor(item, sp, gap) {
   return { action, ask, floor, room, lever, label, reason, tone, target, confidence };
 }
 
+// One line per listing: what's wrong and the suggested move, readable at a
+// glance. The plan (levers, notes, buttons) opens underneath on tap.
 function optimizeRowHTML(item, sp, rank, gap) {
   const plan = optimizePlanFor(item.itemId);
   const chosen = new Set(plan.split('|')[0].split(',').map(x => x.trim()).filter(Boolean));
   const notes = plan.includes('|') ? plan.split('|').slice(1).join('|').trim() : '';
   const rec = optimizationFor(item, sp, gap);
   if (!chosen.size) chosen.add(rec.lever);
-  const posted = postedInfoFor(item.itemId);
   const photo = photoForItem(item.itemId);
-  const sites = splitPlatforms(item.platform).map(p => platformMeta(p).label).join(', ') || 'not listed';
-  const ctr = sp.views ? Math.round((sp.clicks / sp.views) * 100) : 0;
+  const sites = splitPlatforms(item.platform).map(p => platformMeta(p).short || platformMeta(p).label).join(', ') || 'not listed';
+  const opens = listingOpensFor(item, latestMetricsByItemPlatform());
+  const open = state.openOptRows.has(String(item.itemId)) ? ' open' : '';
   return `
-    <article class="opt-row opt-${rec.tone}" data-opt-id="${escapeHtml(item.itemId)}">
-      <div class="opt-head">
-        <span class="opt-rank" aria-label="Priority ${rank}">${rank}</span>
-        <span class="opt-thumb">${photo ? `<img src="${escapeHtml(photo)}" alt="" loading="lazy" onerror="this.remove()">` : '<span>Photo</span>'}</span>
-        <div class="opt-title">
+    <details class="opt-row opt-${rec.tone}" data-opt-id="${escapeHtml(item.itemId)}"${open}>
+      <summary class="opt-line">
+        <span class="opt-rank">${rank}</span>
+        <span class="opt-thumb">${photo ? `<img src="${escapeHtml(photo)}" alt="" loading="lazy" onerror="this.remove()">` : ''}</span>
+        <span class="opt-name">
           <b>${escapeHtml(itemShortName(item))}</b>
-          <small>${escapeHtml(sites)} · ${posted ? `day ${posted.days}` : 'listing date missing'}</small>
+          <small>${gap && gap.why ? escapeHtml(gap.why) : escapeHtml(rec.reason)}</small>
+        </span>
+        <span class="opt-nums">
+          <span><b>${sp.views}</b> views</span>
+          <span><b>${opens}</b> opens</span>
+          <span><b>${sp.watchers}</b> watch</span>
+          <span><b>${sp.daysListed ?? '—'}</b> days</span>
+        </span>
+        <span class="opt-ask"><b>${fmtMoney(rec.ask)}</b><small>floor ${fmtMoney(rec.floor)}</small></span>
+        <span class="opt-move">${escapeHtml(rec.label)}</span>
+      </summary>
+      <div class="opt-body">
+        <div class="opt-rec-line">
+          <span class="opt-signal">${escapeHtml(rec.confidence)}</span>
+          <p>${escapeHtml(rec.reason)}</p>
+          ${rec.target ? `<strong>${escapeHtml(rec.target)}</strong>` : ''}
         </div>
-        <div class="opt-price"><b>${fmtMoney(rec.ask)}</b><small>${fmtMoney(rec.floor)} floor</small></div>
+        <div class="opt-meta">${escapeHtml(sites)} · expected ${escapeHtml(expectedSaleFor(item).label.toLowerCase())}, ${escapeHtml(expectedSaleFor(item).days)} · ${sp.clicks} clicks · ${fmtMoney(rec.room)} above floor</div>
+        <div class="opt-levers">
+          ${OPTIMIZE_LEVERS.map(l => `<button type="button" class="opt-lever${chosen.has(l.id) ? ' on' : ''}" data-lever="${l.id}" title="${escapeHtml(l.why)}">${escapeHtml(l.label)}</button>`).join('')}
+        </div>
+        <textarea class="opt-notes" rows="1" placeholder="Detail, deadline or offer amount…">${escapeHtml(notes)}</textarea>
+        <div class="opt-actions">
+          <button type="button" class="btn small opt-tasks">Put plan in Actions</button>
+          <button type="button" class="btn secondary small opt-save">Save plan</button>
+          <button type="button" class="icon-btn opt-lagger" title="Not performing, and you don't want to do anything about it">Mark as lagger</button>
+          <span class="status-msg opt-status"></span>
+        </div>
       </div>
-      ${gap && gap.why ? `<div class="opt-gap"><span>${escapeHtml(expectedSaleFor(item).label)} · usually ${escapeHtml(expectedSaleFor(item).days)}</span>${escapeHtml(gap.why)}</div>` : ''}
-      <div class="opt-recommendation">
-        <div><span class="opt-signal">${escapeHtml(rec.confidence)}</span><h4>${escapeHtml(rec.label)}</h4><p>${escapeHtml(rec.reason)}</p></div>
-        <strong>${escapeHtml(rec.target)}</strong>
-      </div>
-      <div class="opt-evidence" aria-label="Listing evidence">
-        <span><b>${sp.views}</b> views</span><span><b>${sp.clicks}</b> clicks</span><span><b>${ctr}%</b> click rate</span><span><b>${sp.watchers}</b> watching</span><span><b>${fmtMoney(rec.room)}</b> price room</span>
-      </div>
-      <details class="opt-plan"${plan ? ' open' : ''}>
-        <summary>${plan ? 'Edit saved plan' : 'Adjust the plan'}</summary>
-      <div class="opt-levers">
-        ${OPTIMIZE_LEVERS.map(l => `<button type="button" class="opt-lever${chosen.has(l.id) ? ' on' : ''}" data-lever="${l.id}" title="${escapeHtml(l.why)}">${escapeHtml(l.label)}</button>`).join('')}
-      </div>
-      <textarea class="opt-notes" rows="2" placeholder="Add a useful detail, deadline, or offer amount…">${escapeHtml(notes)}</textarea>
-      <div class="opt-actions">
-        <button type="button" class="btn small opt-tasks">Put plan in Actions</button>
-        <button type="button" class="btn secondary small opt-save">Save plan</button>
-        <button type="button" class="icon-btn opt-lagger" title="Not performing, and you don't want to do anything about it">Mark as lagger</button>
-        <span class="status-msg opt-status"></span>
-      </div>
-      </details>
-    </article>`;
+    </details>`;
 }
 // How far a listing is running behind what its kind of item should do.
 // Optimize is for the ones falling short - a listing already pulling
@@ -1731,6 +1856,16 @@ function underperformers(latestByPlatform) {
     .filter(r => r.gap.behind);
 }
 
+// A live count beside a section heading ("Underperforming 19").
+function setSectionCount(headingId, n) {
+  const head = document.getElementById(headingId);
+  if (!head) return;
+  let badge = head.querySelector('.sec-count');
+  if (!badge) { badge = document.createElement('span'); badge.className = 'sec-count'; head.appendChild(badge); }
+  badge.textContent = n;
+  badge.classList.toggle('zero', !n);
+}
+
 function renderOptimizeTiles() {
   const tiles = document.getElementById('optimizeTiles');
   if (!tiles) return;
@@ -1753,6 +1888,59 @@ function renderOptimizeTiles() {
     { num: behind, lbl: 'Behind pace', sub: 'Slower than expected', target: 'sec-under' },
   ].map(t => `<button type="button" class="stat-tile opt-tile${t.hot ? ' opt-tile-hot' : ''}" data-target="${t.target}"><div class="num">${t.num}</div><div class="lbl">${t.lbl}</div><small>${escapeHtml(t.sub)}</small></button>`).join('');
   tiles.querySelectorAll('[data-target]').forEach(tile => tile.addEventListener('click', () => scrollToSection(tile.dataset.target)));
+}
+
+// Today at a glance: what was done (offers, price changes, cleared
+// suggestions) and where things stand (offers waiting for an OK, listings
+// behind pace, and which of those only fell behind today).
+function renderOptimizeToday() {
+  const box = document.getElementById('optimizeToday');
+  if (!box) return;
+  const today = todayStr();
+  const nameOf = id => { const it = state.inventory.find(x => String(x.itemId) === String(id)); return it ? itemShortName(it) : id; };
+  const seen = new Set();
+  const todays = state.itemActions.filter(a => String(a.date).slice(0, 10) === today).filter(a => {
+    const key = `${a.itemId}|${a.action}|${a.detail}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const offers = todays.filter(a => a.action === 'Offer Sent');
+  const drops = todays.filter(a => a.action === 'Price Drop');
+  const cleared = todays.filter(a => a.action === 'Completed');
+  const waiting = [];
+  state.inventory.filter(it => !isSold(it)).forEach(it => {
+    const a = pricingActionFor(it);
+    if (a.prepared && !a.prepared.approved) waiting.push({ it, p: a.prepared });
+  });
+  const map = latestMetricsByItemPlatform();
+  const behind = underperformers(map).filter(r => !laggerFor(r.it.itemId)).sort((a, b) => b.gap.score - a.gap.score);
+  const yMap = latestMetricsByItemPlatform(addDays(today, -1));
+  const newlyBehind = behind.filter(r => {
+    const spY = saleSpeedFor(r.it, yMap);
+    if (spY.daysListed !== null) spY.daysListed = Math.max(0, spY.daysListed - 1);
+    return !performanceGapFor(r.it, spY, yMap).behind;
+  });
+  const dropText = a => { const p = parsePriceDropDetail(a.detail); return p && p.from ? `${fmtMoney(p.from)} → ${fmtMoney(p.to)}` : p ? `now ${fmtMoney(p.to)}` : String(a.detail || ''); };
+  const offerText = a => { const m = String(a.detail || '').match(/(eBay|Poshmark|Depop|Mercari|Facebook)[^$]*\$[\d.]+(?:\s*to\s*\$[\d.]+)?/i); return m ? m[0].replace(/\s+-\s+/, ' ') : String(a.detail || '').slice(0, 60); };
+  const blip = (cls, name, detail) => `<li class="td-blip ${cls}"><b>${escapeHtml(name)}</b><span>${escapeHtml(detail)}</span></li>`;
+  const col = (title, n, items, empty) => `
+    <div class="td-col">
+      <div class="td-head"><span>${title}</span><i>${n}</i></div>
+      ${items.length ? `<ul>${items.join('')}</ul>` : `<p class="td-empty">${empty}</p>`}
+    </div>`;
+  const behindItems = behind.slice(0, 4).map(r => blip(newlyBehind.includes(r) ? 'new' : '', itemShortName(r.it), newlyBehind.includes(r) ? 'new today' : r.gap.why.split(/[;.]/)[0]));
+  if (behind.length > 4) behindItems.push(`<li class="td-more"><button type="button" class="linkish" data-go="sec-under">+${behind.length - 4} more</button></li>`);
+  box.innerHTML = `
+    <div class="td-title"><h3>Today</h3><span>${escapeHtml(new Date(today + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }))}</span></div>
+    <div class="td-grid">
+      ${col('Offers sent', offers.length, offers.map(a => blip('', nameOf(a.itemId), offerText(a))), 'None sent today')}
+      ${col('Prices changed', drops.length, drops.map(a => blip('', nameOf(a.itemId), dropText(a))), 'No price changes')}
+      ${col('Waiting for your OK', waiting.length, waiting.map(w => blip('ok', itemShortName(w.it), w.p.detail.slice(0, 60))), 'Nothing to approve')}
+      ${col('Behind pace', behind.length, behindItems, 'Nothing behind')}
+    </div>
+    ${cleared.length ? `<p class="td-cleared">Cleared today: ${cleared.map(a => escapeHtml(nameOf(a.itemId))).join(', ')}</p>` : ''}`;
+  box.querySelectorAll('[data-go]').forEach(b => b.addEventListener('click', () => scrollToSection(b.dataset.go)));
 }
 
 // Every offer sent in the last 30 days, newest first, one row per item, with
@@ -1778,6 +1966,7 @@ function renderOffersOut() {
   const container = document.getElementById('optimizeOffers');
   if (!container) return;
   const rows = recentOffers();
+  setSectionCount('sec-offers-out', rows.length);
   if (!rows.length) { container.innerHTML = '<div class="empty-state">No offers sent in the last 30 days.</div>'; return; }
   const map = latestMetricsByItemPlatform();
   container.innerHTML = `
@@ -1805,14 +1994,16 @@ function renderOptimizeView() {
   if (!container) return;
   renderOptimizeTiles();
   renderOffersOut();
+  renderOptimizeToday();
   const latestByPlatform = latestMetricsByItemPlatform();
   const behind = underperformers(latestByPlatform);
   const laggers = behind.filter(r => laggerFor(r.it.itemId));
   const queue = behind.filter(r => !laggerFor(r.it.itemId)).sort((a, b) => b.gap.score - a.gap.score);
 
+  setSectionCount('sec-under', queue.length);
   container.innerHTML = (queue.length ? `
-    <p class="subhead-note">Worst first: listings running furthest behind what their kind of item usually does. Anything selling on pace or better stays off this list.</p>
-    ${queue.map((r, i) => optimizeRowHTML(r.it, r.sp, i + 1, r.gap)).join('')}` :
+    <p class="subhead-note">Worst first: listings running furthest behind what their kind of item usually does. Anything selling on pace or better stays off this list. Tap a row for the plan.</p>
+    <div class="opt-list">${queue.map((r, i) => optimizeRowHTML(r.it, r.sp, i + 1, r.gap)).join('')}</div>` :
       '<div class="empty-state">Nothing is running behind its expected pace right now.</div>')
     + (laggers.length ? `
       <details class="opt-laggers">
@@ -1821,6 +2012,10 @@ function renderOptimizeView() {
         ${laggers.map(r => `<div class="opt-lagger-row"><b>${escapeHtml(itemShortName(r.it))}</b><small>${escapeHtml(String(r.it.listPrice ?? '—'))} · ${r.sp.views} views · ${r.sp.clicks} clicks</small><button type="button" class="btn secondary small opt-unlagger" data-id="${escapeHtml(r.it.itemId)}">Work on it again</button></div>`).join('')}
       </details>` : '');
 
+  container.querySelectorAll('details.opt-row').forEach(row => row.addEventListener('toggle', () => {
+    const id = String(row.dataset.optId);
+    if (row.open) state.openOptRows.add(id); else state.openOptRows.delete(id);
+  }));
   container.querySelectorAll('.opt-unlagger').forEach(btn => btn.addEventListener('click', async () => {
     await recordItemAction(btn.dataset.id, 'Unlagger', 'Back in the optimize list.');
     renderOptimizeView();
@@ -1912,7 +2107,7 @@ function perfRows() {
       const sp = saleSpeedFor(it, now);
       const stats = itemSortStats(it, now);
       return {
-        it, sp, stats, gap: performanceGapFor(it, sp, now),
+        it, sp, stats, gap: performanceGapFor(it, sp, now), opens: listingOpensFor(it, now),
         trend: { views: Math.max(0, cur.views - was.views), clicks: Math.max(0, cur.clicks - was.clicks), watchers: cur.watchers - was.watchers },
         now: cur, was,
       };
@@ -1927,17 +2122,17 @@ function paceVerdict(r) {
 }
 function perfCompare(a, b) {
   const k = state.perfSort;
-  if (k === 'clicks') return b.stats.clicks - a.stats.clicks;
-  if (k === 'ctr') return b.stats.ctr - a.stats.ctr;
+  if (k === 'clicks') return b.opens - a.opens;
+  if (k === 'ctr') return (b.stats.views ? b.opens / b.stats.views : 0) - (a.stats.views ? a.opens / a.stats.views : 0);
   if (k === 'trend') return b.trend.views - a.trend.views || b.trend.clicks - a.trend.clicks;
   if (k === 'price') return b.stats.price - a.stats.price;
   return b.stats.views - a.stats.views;
 }
-function signed(n) { return (n > 0 ? '+' : '') + n; }
+function signed(n) { return (n > 0 ? '+' : '') + Number(n).toLocaleString(); }
 function perfRowHTML(r, rank) {
   const id = String(r.it.itemId);
   const open = state.expandedPerf.has(id) ? ' open' : '';
-  const ctr = r.stats.views ? Math.round((r.stats.clicks / r.stats.views) * 100) : 0;
+  const ctr = r.stats.views ? Math.round((r.opens / r.stats.views) * 100) : 0;
   const price = String(r.it.listPrice ?? '').trim();
   const v = paceVerdict(r);
   const action = pricingActionFor(r.it);
@@ -1949,39 +2144,48 @@ function perfRowHTML(r, rank) {
         <span class="rr-quick perf-quick">
           <b>${price ? (price.startsWith('$') ? escapeHtml(price) : '$' + escapeHtml(price)) : '—'}</b>
           <i>${r.stats.views} views</i>
-          <i>${r.stats.clicks} click${r.stats.clicks === 1 ? '' : 's'} · ${ctr}%</i>
+          <i>${r.opens} open${r.opens === 1 ? '' : 's'} · ${ctr}%</i>
           <i>${r.now.watchers} watching</i>
           <i class="perf-trend${r.trend.views || r.trend.clicks ? ' up' : ''}" title="Change over the last ${PERF_TREND_DAYS} days">${signed(r.trend.views)} views · ${signed(r.trend.clicks)} clicks /wk</i>
         </span>
       </summary>
       <div class="ranked-detail">
+        ${action && action.severity === 'complete' ? `<div class="perf-status-line"><span>${escapeHtml(action.reason || 'Completed')}</span><button type="button" class="icon-btn perf-reopen" data-id="${escapeHtml(id)}" data-label="${escapeHtml(action.label)}">Reopen</button></div>` : ''}
+        ${priceHoldFor(r.it.itemId) ? `<div class="perf-status-line"><span>Price on hold${priceHoldFor(r.it.itemId).detail ? ': ' + escapeHtml(priceHoldFor(r.it.itemId).detail) : ''}</span><button type="button" class="icon-btn perf-release" data-id="${escapeHtml(id)}">Release hold</button></div>` : ''}
         ${r.gap.why ? `<div class="opt-gap">${escapeHtml(r.gap.why)}</div>` : ''}
         ${paceRowHTML(r.it)}
         ${rankedDetailHTML(r.it)}
       </div>
     </details>`;
 }
-function perfGroupHTML(title, rows, extra, cls) {
+function perfGroupHTML(title, rows, extra, cls, defaultClosed) {
   const sorted = rows.slice().sort(perfCompare);
   const key = 'perfgrp:' + title;
-  const open = state.collapsedPerfGroups.has(key) ? '' : ' open';
+  const open = (key in state.perfGroupOpen ? state.perfGroupOpen[key] : !defaultClosed) ? ' open' : '';
   return `
     <details class="cat-section perf-group ${cls || ''}" data-perf-group="${escapeHtml(key)}"${open}>
       <summary class="cat-heading"><h2>${escapeHtml(title)}</h2><span class="count">${rows.length}</span>${extra || ''}</summary>
       <div class="ranked-list">${sorted.map((r, i) => perfRowHTML(r, i + 1)).join('') || '<div class="empty-state">Nothing here.</div>'}</div>
     </details>`;
 }
+// The header bar already shows totals, so these tiles answer different
+// questions: how many listings are keeping pace, and what moved this week.
 function renderPerformanceTiles(rows) {
   const tiles = document.getElementById('performanceTiles');
   if (!tiles) return;
   const sum = (f) => rows.reduce((n, r) => n + f(r), 0);
   const behind = rows.filter(r => r.gap.behind).length;
   const onPace = rows.filter(r => paceVerdict(r).id === 'onpace').length;
+  const map = latestMetricsByItemPlatform();
+  const past = latestMetricsByItemPlatform(perfPastDate());
+  const opensNow = sum(r => listingOpensFor(r.it, map));
+  const opensWas = sum(r => listingOpensFor(r.it, past));
+  const movers = rows.filter(r => r.trend.views || r.trend.clicks).length;
   tiles.innerHTML = `
-    <div class="stat-tile"><div class="num">${rows.length}</div><div class="lbl">Live listings</div><small>${onPace} on pace · ${behind} behind</small></div>
-    <div class="stat-tile"><div class="num">${sum(r => r.stats.views).toLocaleString()}</div><div class="lbl">Views</div><small>${signed(sum(r => r.trend.views))} this week</small></div>
-    <div class="stat-tile"><div class="num">${sum(r => r.stats.clicks).toLocaleString()}</div><div class="lbl">Clicks</div><small>${signed(sum(r => r.trend.clicks))} this week</small></div>
-    <div class="stat-tile"><div class="num">${sum(r => r.now.watchers)}</div><div class="lbl">Watchers & likes</div><small>${signed(sum(r => r.trend.watchers))} this week</small></div>`;
+    <div class="stat-tile"><div class="num">${onPace}<small class="of"> / ${rows.length}</small></div><div class="lbl">On pace or better</div><small>${behind} behind · ${rows.length - onPace - behind} too new or no stats</small></div>
+    <div class="stat-tile"><div class="num">${signed(sum(r => r.trend.views))}</div><div class="lbl">Views this week</div><small>${movers} listings gained traffic</small></div>
+    <div class="stat-tile"><div class="num">${signed(Math.max(0, opensNow - opensWas))}</div><div class="lbl">Opens this week</div><small>${opensNow.toLocaleString()} opens in total</small></div>
+    <div class="stat-tile"><div class="num">${signed(sum(r => r.trend.watchers))}</div><div class="lbl">Watchers this week</div><small>${sum(r => r.now.watchers)} watching now</small></div>`;
 }
 function renderPerformanceView() {
   const container = document.getElementById('performanceList');
@@ -1995,20 +2199,26 @@ function renderPerformanceView() {
   if (sortWrap) sortWrap.hidden = view === 'status' || view === 'offers';
   const rows = perfRows();
   renderPerformanceTiles(rows);
+  renderPlatformCards();
 
   if (view === 'status') {
-    const moves = state.inventory.filter(it => !isSold(it)).map(pricingActionFor)
-      .filter(a => !a.hidden && MOVE_GROUP_KEYS.includes(pricingGroupKeyFor(a))).length;
-    container.innerHTML = `
-      ${moves ? `<button type="button" class="perf-moves-link" data-go="optimize">${moves} listing${moves === 1 ? ' needs' : 's need'} a move — open Optimize →</button>` : ''}
-      <div id="performanceStatus"></div>`;
-    container.querySelector('.perf-moves-link')?.addEventListener('click', () => showView('optimize'));
-    renderPricingInto(container.querySelector('#performanceStatus'), STATUS_GROUP_KEYS,
-      '<div class="empty-state">No status to show yet.</div>');
-    return;
-  }
-
-  if (view === 'offers') {
+    const groups = new Map();
+    rows.forEach(r => {
+      const action = pricingActionFor(r.it);
+      if (action.hidden) return;
+      if (!state.showCompletedActions && action.severity === 'complete') return;
+      const key = pricingGroupKeyFor(action);
+      const gkey = MOVE_GROUP_KEYS.includes(key) ? '__moves' : key;
+      if (!groups.has(gkey)) groups.set(gkey, []);
+      groups.get(gkey).push(r);
+    });
+    const order = ['__moves', ...STATUS_GROUP_KEYS];
+    const titleFor = k => k === '__moves' ? 'Needs a move' : (PRICING_GROUPS.find(g => g.key === k) || {}).title || k;
+    container.innerHTML = order.filter(k => groups.has(k)).map(k => perfGroupHTML(titleFor(k), groups.get(k),
+      k === '__moves' ? '<button type="button" class="linkish perf-go-opt">open Optimize →</button>' : '', 'status-' + categoryId(k), k !== '__moves')).join('')
+      || '<div class="empty-state">No live listings yet.</div>';
+    container.querySelector('.perf-go-opt')?.addEventListener('click', ev => { ev.preventDefault(); showView('optimize'); });
+  } else if (view === 'offers') {
     const offerRows = state.inventory
       .filter(it => !isSold(it))
       .map(it => ({ it, offer: latestActionOfType(it.itemId, 'Offer Sent'), stats: itemSortStats(it, latestMetricsByItemPlatform()) }))
@@ -2028,10 +2238,8 @@ function renderPerformanceView() {
         }).join('')}</tbody>
       </table>` : '<div class="empty-state">No offers sent yet.</div>';
     return;
-  }
-
-  if (view === 'ranked') {
-    const labels = { views: 'Most views', clicks: 'Most clicks', ctr: 'Highest click rate', trend: 'Most views this week', price: 'Highest price' };
+  } else if (view === 'ranked') {
+    const labels = { views: 'Most views', clicks: 'Most opens', ctr: 'Highest open rate', trend: 'Most views this week', price: 'Highest price' };
     container.innerHTML = perfGroupHTML(labels[state.perfSort] || 'Ranking', rows);
   } else if (view === 'speed') {
     const groups = new Map();
@@ -2060,8 +2268,10 @@ function renderPerformanceView() {
     if (row.open) state.expandedPerf.add(id); else state.expandedPerf.delete(id);
   }));
   container.querySelectorAll('details.perf-group').forEach(g => g.addEventListener('toggle', () => {
-    if (g.open) state.collapsedPerfGroups.delete(g.dataset.perfGroup); else state.collapsedPerfGroups.add(g.dataset.perfGroup);
+    state.perfGroupOpen[g.dataset.perfGroup] = g.open;
   }));
+  container.querySelectorAll('.perf-reopen').forEach(b => b.addEventListener('click', () => toggleActionComplete(b.dataset.id, true, b.dataset.label)));
+  container.querySelectorAll('.perf-release').forEach(b => b.addEventListener('click', () => togglePriceHold(b.dataset.id, true, b)));
   wireItemCards(container, renderPerformanceView);
 }
 document.getElementById('perfViewSelect')?.addEventListener('change', e => {
@@ -2304,6 +2514,8 @@ function rankedDetailHTML(item) {
 function renderList() {
   const container = document.getElementById('catSections');
   container.innerHTML = '';
+  const expandGroup = document.querySelector('#inventory .inventory-expand');
+  if (expandGroup) expandGroup.hidden = state.listGroup !== 'size';
   const latestByPlatform = latestMetricsByItemPlatform();
 
   // Inventory sorts by the stock itself; traffic rankings live on Performance.
@@ -2320,32 +2532,33 @@ function renderList() {
     return;
   }
 
-  activeCategories().filter(c => state.listActiveCats.has(c.id)).forEach(cat => {
-    let items = state.inventory.filter(it => categoryMeta(it.category).id === cat.id);
+  // One continuous grid. With every category picked it is a single list;
+  // with a few picked, each gets a slim header row inside the same grid so
+  // there is no gap between one category and the next.
+  const cats = activeCategories().filter(c => state.listActiveCats.has(c.id));
+  const itemsFor = pred => {
+    let items = state.inventory.filter(pred);
     if (!state.listShowSold) items = items.filter(it => !isSold(it));
-    const withStats = items.map(it => ({ it, stats: itemSortStats(it, latestByPlatform) }));
-    withStats.sort(compareItems);
-    items = withStats.map(x => x.it);
-
-    // <details> default-collapsed; expanded category ids remembered for the session.
-    const section = document.createElement('details');
-    section.className = 'cat-section';
-    section.open = state.expandedCats.has(cat.id);
-    section.style.setProperty('--cat', cat.color);
-    section.innerHTML = `
-      <summary class="cat-heading">
-        <span class="icon">${cat.icon}</span>
-        <h2>${cat.label}</h2>
-        <span class="count">${items.length}</span>
-      </summary>
-      ${items.length ? `<div class="card-grid">${items.map(it => itemCardHTML(it, cat, { perf: false })).join('')}</div>` : '<div class="empty-state">Nothing here yet.</div>'}
-    `;
-    section.addEventListener('toggle', () => {
-      if (section.open) state.expandedCats.add(cat.id); else state.expandedCats.delete(cat.id);
+    return items.map(it => ({ it, stats: itemSortStats(it, latestByPlatform) })).sort(compareItems).map(x => x.it);
+  };
+  let html = '';
+  let total = 0;
+  if (catSelectionAll()) {
+    const items = itemsFor(() => true);
+    total = items.length;
+    html = items.map(inventoryCardHTML).join('');
+  } else {
+    cats.forEach(cat => {
+      const items = itemsFor(it => categoryMeta(it.category).id === cat.id);
+      total += items.length;
+      html += `<div class="inv-cat-head" style="--cat:${cat.color}"><span class="inv-cat-name">${cat.icon} ${escapeHtml(cat.label)}</span><span class="inv-cat-count">${items.length}</span></div>`
+        + items.map(inventoryCardHTML).join('');
     });
-    wireItemCards(section, renderList);
-    container.appendChild(section);
-  });
+  }
+  container.innerHTML = cats.length
+    ? `<div class="inv-count-line">${total} item${total === 1 ? '' : 's'}${catSelectionAll() ? ' · all categories' : ''}</div><div class="inv-grid">${html || '<div class="empty-state">Nothing here yet.</div>'}</div>`
+    : '<div class="empty-state">Pick at least one category.</div>';
+  wireItemCards(container, renderList);
 
   if (!activeCategories().length) container.innerHTML = '<div class="empty-state">No inventory synced yet.</div>';
 }
@@ -2797,9 +3010,9 @@ function renderPulseBar() {
   const when = latestDate ? new Date(latestDate + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '';
   const tiles = [
     { num: live.toLocaleString(), lbl: 'Live listings', sub: `${itemsLive} items`, view: 'inventory' },
-    { num: hasStats ? latest.views.toLocaleString() : '—', lbl: 'Views', sub: delta ? pulseDelta(delta.views) : '', view: 'stats', target: 'sec-platforms' },
-    { num: hasStats ? latest.clicks.toLocaleString() : '—', lbl: 'Clicks', sub: delta ? pulseDelta(delta.clicks) : '', view: 'stats', target: 'sec-platforms' },
-    { num: hasStats ? latest.watchers.toLocaleString() : '—', lbl: 'Watchers & likes', sub: delta ? pulseDelta(delta.watchers) : '', view: 'action', target: pricingGroupId('Send an offer') },
+    { num: hasStats ? latest.views.toLocaleString() : '—', lbl: 'Views', sub: delta ? pulseDelta(delta.views) : '', view: 'performance', target: 'sec-platforms' },
+    { num: hasStats ? latest.clicks.toLocaleString() : '—', lbl: 'Clicks', sub: delta ? pulseDelta(delta.clicks) : '', view: 'performance', target: 'sec-platforms' },
+    { num: hasStats ? latest.watchers.toLocaleString() : '—', lbl: 'Watchers & likes', sub: delta ? pulseDelta(delta.watchers) : '', view: 'optimize', target: 'sec-pricing' },
     { num: soldCount, lbl: 'Sold', sub: `${money2(kept)} kept`, view: 'stats', target: 'sec-sales' },
     { num: money2(available), lbl: 'Cash on sites', sub: pending ? `+ ${money2(pending)} pending` : 'nothing pending', view: 'stats', target: 'sec-cashflow', negative: available < 0 },
   ];
@@ -2843,50 +3056,55 @@ function renderOverallTiles() {
   `).join('');
 }
 
+// By platform - one row per site for the listings live there now: reach,
+// opens (clicks, plus eBay page visits), open rate, watchers, and the change
+// over the last week. Lives on Performance; Stats keeps the money side.
 function renderPlatformCards() {
-  const totals = {};
-  const ensure = (name) => {
-    const meta = platformMeta(name);
-    return totals[meta.id] || (totals[meta.id] = { meta, impressions: 0, views: 0, watchers: 0, clicks: 0, items: new Set() });
-  };
-
-  latestMetricsByItemPlatform().forEach(m => {
-    const t = ensure(m.platform);
-    t.impressions += Number(m.impressions) || 0;
-    t.views += Number(m.views) || 0;
-    t.watchers += Number(m.watchers) || 0;
-    t.clicks += Number(m.clicks) || 0;
-    if (m.itemId) t.items.add(m.itemId);
+  const container = document.getElementById('perfPlatforms');
+  if (!container) return;
+  const now = latestMetricsByItemPlatform();
+  const past = latestMetricsByItemPlatform(perfPastDate());
+  const rows = new Map();
+  state.inventory.filter(it => !isSold(it)).forEach(it => {
+    platformsStatusFor(it).done.forEach(d => {
+      const id = d.meta.id;
+      if (!rows.has(id)) rows.set(id, { meta: d.meta, live: 0, reach: 0, opens: 0, watchers: 0, opensWas: 0, reachWas: 0 });
+      const r = rows.get(id);
+      r.live++;
+      const read = (map) => {
+        const snap = map.get(it.itemId + '|' + id);
+        if (!snap) return { reach: 0, opens: 0, watchers: 0 };
+        const opens = (Number(snap.clicks) || 0) + (id === 'ebay' ? Number(snap.views) || 0 : 0);
+        return { reach: Number(snap.impressions) || Number(snap.views) || 0, opens, watchers: Number(snap.watchers) || 0 };
+      };
+      const n = read(now), w = read(past);
+      r.reach += n.reach; r.opens += n.opens; r.watchers += n.watchers;
+      r.reachWas += w.reach; r.opensWas += w.opens;
+    });
   });
-  state.inventory.forEach(it => {
-    if (isSold(it)) return;
-    splitPlatforms(it.platform).forEach(p => ensure(p).items.add(it.itemId));
-  });
-
-  // Different platforms report reach under different names — eBay only ever
-  // gives "views", Poshmark only ever gives "impressions". Treat whichever is
-  // present as this platform's reach number rather than showing a blank 0.
-  const cards = Object.values(totals).map(c => ({ ...c, reach: c.impressions || c.views, reachLabel: c.impressions ? 'Impressions' : 'Views' }))
-    .sort((a, b) => platformRank(a.meta.id) - platformRank(b.meta.id) || a.meta.label.localeCompare(b.meta.label));
-  const container = document.getElementById('platformCards');
-  if (!cards.length) { container.innerHTML = '<div class="empty-state">No platform activity yet.</div>'; return; }
-
-  const maxReach = Math.max(1, ...cards.map(c => c.reach));
-  container.innerHTML = cards.map(c => {
-    const ctr = c.reach ? ((c.clicks / c.reach) * 100).toFixed(1) + '%' : '—';
-    return `
-      <div class="platform-card" style="--plat:${c.meta.color}">
-        <h4>${escapeHtml(c.meta.label)}</h4>
-        <div class="prow"><span>Active listings</span><b>${c.items.size}</b></div>
-        <div class="prow"><span>${c.reachLabel}</span><b>${c.reach}</b></div>
-        <div class="prow"><span>Clicks</span><b>${c.clicks}</b></div>
-        ${c.watchers ? `<div class="prow"><span>Watchers/Likes</span><b>${c.watchers}</b></div>` : ''}
-        <div class="prow"><span>Click rate</span><b>${ctr}</b></div>
-        <div class="platform-bar"><div class="platform-bar-fill" style="width:${((c.reach / maxReach) * 100).toFixed(0)}%"></div></div>
-        <div class="platform-bar-label">of ${maxReach} ${c.reachLabel.toLowerCase()} (top platform)</div>
-      </div>
-    `;
-  }).join('');
+  const list = [...rows.values()].sort((a, b) => b.live - a.live || platformRank(a.meta.id) - platformRank(b.meta.id));
+  if (!list.length) { container.innerHTML = '<div class="empty-state">No live listings yet.</div>'; return; }
+  const maxOpens = Math.max(1, ...list.map(r => r.opens));
+  container.innerHTML = `
+    <table class="plat-table">
+      <thead><tr><th>Site</th><th>Live</th><th>Impressions</th><th>Opens</th><th>Open rate</th><th>Watching</th><th>This week</th><th class="pt-bar-col">Share of opens</th></tr></thead>
+      <tbody>${list.map(r => {
+        const rate = r.reach ? ((r.opens / r.reach) * 100).toFixed(1) + '%' : '—';
+        const dOpens = Math.max(0, r.opens - r.opensWas);
+        const dReach = Math.max(0, r.reach - r.reachWas);
+        return `<tr style="--plat:${r.meta.color}">
+          <td><span class="pt-site"><i></i>${escapeHtml(r.meta.label)}</span></td>
+          <td>${r.live}</td>
+          <td>${r.reach.toLocaleString()}</td>
+          <td>${r.opens.toLocaleString()}</td>
+          <td>${rate}</td>
+          <td>${r.watchers || '—'}</td>
+          <td class="pt-week">${[dReach ? `+${dReach.toLocaleString()} imp` : '', dOpens ? `+${dOpens} opens` : ''].filter(Boolean).join(' · ') || '—'}</td>
+          <td class="pt-bar-col"><span class="pt-bar"><span style="width:${Math.round((r.opens / maxOpens) * 100)}%"></span></span></td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>
+    <p class="subhead-note">Opens are clicks into a listing; on eBay that is its page views. Facebook, Depop and Grailed don't report impressions.</p>`;
 }
 
 // ---------------------------------------------------------------------
@@ -2991,7 +3209,7 @@ function renderSoldElsewhere() {
   if (!tasks.length) { container.innerHTML = ''; return; }
 
   container.innerHTML = tasks.map(({ item, meta, entry, soldOn }) => {
-    const title = [item.brand, item.item].filter(Boolean).join(' — ') || item.itemId;
+    const title = itemDisplayName(item, ' — ') || item.itemId;
     const soldWhere = soldOn ? platformMeta(item.buyer).label : (item.buyer || '');
     const metaBits = [
       item.soldPrice ? `Sold ${escapeHtml(item.soldPrice)}` : '',
@@ -3124,7 +3342,7 @@ function renderLocalDeals() {
   } else {
     const cards = deals.map(deal => {
       const item = state.inventory.find(it => String(it.itemId) === String(deal.itemId));
-      const title = item ? ([item.brand, item.item].filter(Boolean).join(' — ') || item.itemId) : deal.itemId;
+      const title = item ? (itemDisplayName(item, ' — ') || item.itemId) : deal.itemId;
       const meta = localDealStatusMeta(deal.status);
       const pmeta = platformMeta(deal.platform);
       const editing = state.editingLocalDeal === localDealKey(deal);
@@ -3292,9 +3510,9 @@ function renderActionSummary() {
   }
   const toShip = state.inventory.filter(it => isSold(it) && !hasShipped(it.itemId) && !soldInPerson(it)).length;
   const listRows = stillToListRows();
-  const readyRows = listRows.filter(r => !postingNoteFor(r.item.itemId));
+  const readyRows = listRows.filter(r => !prepNoteFor(r.item.itemId));
   const toList = readyRows.reduce((n, r) => n + r.status.missing.length, 0);
-  const prepCount = listRows.filter(r => r.status.missing.length && postingNoteFor(r.item.itemId)).length;
+  const prepCount = listRows.filter(r => r.status.missing.length && prepNoteFor(r.item.itemId)).length;
   const moves = state.inventory.filter(it => !isSold(it)).map(pricingActionFor)
     .filter(a => !a.hidden && MOVE_GROUP_KEYS.includes(pricingGroupKeyFor(a))).length;
   const tiles = [
@@ -3403,10 +3621,82 @@ function draftToggleHTML(itemId, meta) {
 
 function postingNoteFor(itemId) {
   const latest = latestActionOfType(itemId, 'Posting Note');
-  return latest ? String(latest.detail || '').trim() : '';
+  const note = latest ? String(latest.detail || '').trim() : '';
+  // A note about a price mismatch ("Poshmark still $70, the drop only hit
+  // eBay") resolves itself: once the live prices agree it stops showing, so
+  // nobody has to remember whether it was dealt with.
+  if (note && isPriceNote(note)) {
+    const item = state.inventory.find(it => String(it.itemId) === String(itemId));
+    if (!item || !priceDriftFor(item).length) return '';
+  }
+  return note;
+}
+function isPriceNote(note) {
+  return /\$\s?\d/.test(note) && /(price|drop|sheet|drift|still \$|listed at)/i.test(note);
+}
+// The note that actually holds up posting (photos, parts, testing). Price
+// notes are alerts, not prep work, so they never park an item in Item prep.
+function prepNoteFor(itemId) {
+  const note = postingNoteFor(itemId);
+  return note && !isPriceNote(note) ? note : '';
+}
+
+// Live price on each site against the sheet's list price, read from the
+// latest stat pull (both eBay and Poshmark rows carry the listing price).
+// Computed, not logged, so it disappears the day the prices line up.
+const DRIFT_FRESH_DAYS = 2;
+function priceDriftFor(item) {
+  const sheet = parseMoney(item.listPrice);
+  if (!sheet || isSold(item)) return [];
+  const map = latestMetricsByItemPlatform();
+  let newest = latestMetricsCache.newest;
+  if (!newest || latestMetricsCache.newestFor !== map) {
+    newest = '';
+    state.metrics.forEach(m => { const d = String(m.date || '').slice(0, 10); if (d > newest) newest = d; });
+    latestMetricsCache.newest = newest;
+    latestMetricsCache.newestFor = map;
+  }
+  const out = [];
+  platformsStatusFor(item).done.forEach(row => {
+    const snap = map.get(item.itemId + '|' + row.meta.id);
+    const live = snap ? parseMoney(snap.price) : 0;
+    if (!live) return;
+    const age = newest ? Math.round((new Date(newest + 'T12:00:00') - new Date(String(snap.date).slice(0, 10) + 'T12:00:00')) / 86400000) : 0;
+    if (age > DRIFT_FRESH_DAYS) return;
+    if (Math.abs(live - sheet) >= 1) out.push({ meta: row.meta, live, sheet });
+  });
+  return out;
+}
+const money2dp = n => '$' + (Math.round(n * 100) / 100).toFixed(Number.isInteger(n) ? 0 : 2);
+// Everything worth a second look on one item, kept behind a small "!" rather
+// than printed across the card.
+function itemAlerts(item) {
+  const alerts = priceDriftFor(item).map(d => ({
+    kind: 'drift',
+    text: `${d.meta.label} is listed at ${money2dp(d.live)} but the sheet says ${money2dp(d.sheet)}.`,
+  }));
+  const note = postingNoteFor(item.itemId);
+  if (note) alerts.push({ kind: 'note', text: note, clearable: true });
+  if (isSold(item)) {
+    platformsStatusFor(item).done.forEach(d => alerts.push({ kind: 'live', text: `Sold, but still live on ${d.meta.label} \u2014 end that listing.` }));
+  }
+  return alerts;
+}
+function alertButtonHTML(item) {
+  const alerts = itemAlerts(item);
+  if (!alerts.length) return '';
+  const open = state.openAlerts.has(String(item.itemId));
+  return `<button type="button" class="alert-btn${open ? ' on' : ''}" data-alert="${escapeHtml(item.itemId)}" title="${escapeHtml(alerts.map(a => a.text).join('\n'))}" aria-expanded="${open}">!${alerts.length > 1 ? `<i>${alerts.length}</i>` : ''}</button>`;
+}
+function alertPanelHTML(item) {
+  if (!state.openAlerts.has(String(item.itemId))) return '';
+  const alerts = itemAlerts(item);
+  if (!alerts.length) return '';
+  return `<ul class="alert-list">${alerts.map(a => `
+    <li class="alert-${a.kind}"><span>${escapeHtml(a.text)}</span>${a.clearable ? `<button type="button" class="icon-btn alert-clear" data-id="${escapeHtml(item.itemId)}">Clear</button>` : ''}</li>`).join('')}</ul>`;
 }
 function postingNoteHTML(item, groupId) {
-  const note = postingNoteFor(item.itemId);
+  const note = prepNoteFor(item.itemId);
   const key = `${item.itemId}|${groupId}`;
   if (state.editingPostingNote === key) {
     return `
@@ -3762,7 +4052,7 @@ function renderStillToList() {
 function renderItemPrep() {
   const container = document.getElementById('itemPrepList');
   if (!container) return;
-  const rows = stillToListRows().filter(r => r.status.missing.length && postingNoteFor(r.item.itemId));
+  const rows = stillToListRows().filter(r => r.status.missing.length && prepNoteFor(r.item.itemId));
   setActionSectionVisible('section-prep', rows.length > 0);
   if (!rows.length) { container.innerHTML = ''; return; }
   rows.sort((a, b) => (a.item.item || a.item.brand || '').localeCompare(b.item.item || b.item.brand || ''));
@@ -3777,14 +4067,13 @@ function renderItemPrep() {
     return `
       <div class="card stl-card action-row prep-card">
         <div class="ar-title-row">
-          <h3>${escapeHtml([item.brand, item.item].filter(Boolean).join(' — ') || item.itemId)}</h3>
+          <h3>${escapeHtml(itemDisplayName(item, ' — ') || item.itemId)}</h3>
           ${expectedSaleChipHTML(item)}
           ${draftBadgeHTML(item.itemId)}
         </div>
         ${postingNoteHTML(item, 'prep')}
         <div class="ar-meta-line">${metaBits.join(' · ')}</div>
-        <div class="site-chips prep-sites"><span class="prep-sites-lbl">Then post to</span>${sites}</div>
-        <div class="ar-actions"><div class="ar-secondary">${editToggleHTML(item).replace('btn secondary ie-toggle', 'icon-btn ie-toggle')}</div></div>
+        <div class="site-chips prep-sites"><span class="prep-sites-lbl">Then post to</span>${sites}<span class="prep-edit">${editToggleHTML(item).replace('btn secondary ie-toggle', 'icon-btn ie-toggle')}</span></div>
         ${itemEditPanelHTML(item)}
       </div>`;
   }).join('')}</div>`;
@@ -3793,7 +4082,7 @@ function renderItemPrep() {
 function renderReadyToList() {
   const container = document.getElementById('stillToListList');
   if (!container) return;
-  const rows = stillToListRows().filter(r => !postingNoteFor(r.item.itemId));
+  const rows = stillToListRows().filter(r => !prepNoteFor(r.item.itemId));
   populateStillToListSiteOptions(rows);
 
   const siteFilter = document.getElementById('stillToListSite').value;
@@ -3821,7 +4110,7 @@ function renderReadyToList() {
   setActionSectionVisible('section-list', true);
 
   const byName = function (a, b) { return (a.item.item || a.item.brand || '').localeCompare(b.item.item || b.item.brand || ''); };
-  const itemTitle = function (item) { return [item.brand, item.item].filter(Boolean).join(' — ') || item.itemId; };
+  const itemTitle = function (item) { return itemDisplayName(item, ' — ') || item.itemId; };
 
   // By item: one card per thing you own, with every site it still owes. Better
   // for "what have I got left to do" than the by-site view, which repeats an
@@ -3865,7 +4154,7 @@ function renderReadyToList() {
           <div class="ar-actions">
             <div class="ar-secondary">
               ${editToggleHTML(item).replace('btn secondary ie-toggle', 'icon-btn ie-toggle')}
-              ${postingNoteFor(item.itemId) || !missing.length ? '' : `<button class="icon-btn stl-note-add" data-key="${escapeHtml(`${item.itemId}|${missing[0].meta.id}`)}">+ Note</button>`}
+              ${prepNoteFor(item.itemId) || !missing.length ? '' : `<button class="icon-btn stl-note-add" data-key="${escapeHtml(`${item.itemId}|${missing[0].meta.id}`)}">+ Note</button>`}
             </div>
           </div>
           ${itemEditPanelHTML(item)}
@@ -3913,7 +4202,7 @@ function renderReadyToList() {
                 ${draftToggleHTML(item.itemId, g.meta)}
                 <button class="icon-btn stl-skip-btn" data-id="${escapeHtml(item.itemId)}" data-platform="${escapeHtml(g.meta.label)}">Not posting</button>
                 ${editToggleHTML(item).replace('btn secondary ie-toggle', 'icon-btn ie-toggle')}
-                ${postingNoteFor(item.itemId) || state.editingPostingNote === `${item.itemId}|${g.meta.id}` ? '' : `<button class="icon-btn stl-note-add" data-key="${escapeHtml(`${item.itemId}|${g.meta.id}`)}">+ Note</button>`}
+                ${prepNoteFor(item.itemId) || state.editingPostingNote === `${item.itemId}|${g.meta.id}` ? '' : `<button class="icon-btn stl-note-add" data-key="${escapeHtml(`${item.itemId}|${g.meta.id}`)}">+ Note</button>`}
               </div>
             </div>
             ${itemEditPanelHTML(item)}
@@ -4644,6 +4933,9 @@ function renderPricingActions() {
   renderPricingStatsNote();
   renderPricingInto(document.getElementById('pricingActions'), MOVE_GROUP_KEYS,
     '<div class="empty-state">No moves suggested right now — every live listing is on track or already handled.</div>');
+  setSectionCount('sec-pricing', state.inventory.filter(it => !isSold(it)).map(pricingActionFor)
+    .filter(a => !a.hidden && MOVE_GROUP_KEYS.includes(pricingGroupKeyFor(a))).length);
+  renderOptimizeToday();
   renderOptimizeTiles();
   renderOffersOut();
   renderPerformanceView();
@@ -4672,7 +4964,7 @@ function renderPricingInto(container, groupKeys, emptyHTML) {
     const showIgnore = ['urgent', 'attention', 'opportunity'].includes(action.severity);
     // Only offer the hold where a suggestion could push the price down.
     const showHold = held || PRICE_HOLD_LABELS.includes(action.label);
-    const title = [item.brand, item.item].filter(Boolean).join(' — ') || item.itemId;
+    const title = itemDisplayName(item, ' — ') || item.itemId;
     const platforms = splitPlatforms(item.platform).map(p => platformMeta(p).label).join(', ') || '—';
     const metaBits = [
       priceLineHTML(item),
