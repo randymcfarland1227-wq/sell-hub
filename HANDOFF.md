@@ -1,30 +1,23 @@
-# Handoff — item-card-unify (WIP, not on main)
+# Handoff: item card unify (merged to main 2026-10-01)
 
-Branch off main @ cfe75df. Syntax-checked (`node --check js/app.js`) but NOT yet visually verified in a browser.
+## What changed
+- Header: "RM" monogram plus "Randy's / Resale Desk" (index.html `h1.brand`, CSS "Brand" block).
+- One item card, `itemCard(item, opts)` in js/app.js, used by Inventory, Focus, Item prep, Still to list (by site and by item), Optimize and Performance suggestion cards, To ship, Local deals and End listings.
+  Anatomy: photo (select/focus tools under it) · title · details line · price column (price over floor), then tags, then optional stats, pace line, per-site rows, callout, body and foot.
+- Each view keeps its own content. Only layout and styling are shared. Options: `meta` replaces the details line, `alerts` turns on the "!" button (Inventory only), `noStatus`, `sites`, `expect`, `stats`, `paceLine`, `siteStats`, `callout`, `body`, `foot`, `accent`, `cls`, `attrs`.
+- Performance rows (`perfRowHTML`) use the card's title font and price/floor column.
+- CSS: "Item card (.ic)" block and the rules after it at the end of css/styles.css. Tags are `.tg-*`. Brand-colour text uses `--plat-ink` (lighter in dark mode).
 
-## What Randy asked (2026-10-01)
-1. Replace the gradient square next to the title with something personal. Done: "RM" monogram + "Randy's / Resale Desk" (index.html `h1.brand`, CSS "Brand" block). Name is a guess; Randy floated "Randy's Resale Hub" / "Resale Deck". Easy to change.
-2. Items look inconsistent across views (Item prep, Focus, Performance, Inventory, Still to list, Optimize cards): different fonts, sizes, colours and spacing, and price/floor wrapping differently card to card. **Keep each view's content exactly as it is; only unify how it's laid out and styled** (he said this explicitly, twice).
+## Previewing without the Sheet
+The Apps Script host is blocked from cloud sessions, so `tools/preview/` mocks it:
+- `python3 server.py` serves the site on :8942.
+- `node tools/preview/shoot.js` takes full-page screenshots of every tab (light and dark, 1280 and 375 wide) into `$OUT`.
+- `node tools/preview/buttons.js` clicks every card button and checks the request it would send (nothing reaches the Sheet).
+- `tools/preview/fixture.js` holds the mock data. Set `PLAYWRIGHT` to the playwright module path if it isn't resolvable.
 
-## What's done on this branch
-- `itemCard(item, opts)` in js/app.js: one anatomy (photo · title · details line · fixed price column with price over floor), then tags, then optional stats / pace line / per-site rows / callout / body / foot. Helpers: `priceShortFor`, `itemPriceColHTML`, `itemDetailsLine`, `tag()`, `siteTagsHTML`, `expectTagHTML`, `paceTagHTML`, `itemStatRowHTML`, `itemSiteStatsHTML`.
-- Moved onto it: Inventory (`inventoryCardHTML`), Focus (`renderFocusView`), Item prep (`renderItemPrep`), Still to list by-item and by-site (`renderReadyToList`), and the pricing cards in `renderPricingInto` (Optimize suggestions and Performance status).
-- Content kept per view: Focus keeps per-site rows, pace line, local deals and price log; Item prep keeps live/missing sites, draft badge and note; Still to list keeps the "N sites to post" count, posted date and every button; pricing cards keep the label, "you" marker, hold lock, date added, views/clicks/watchers line and all actions.
-- CSS: "Item card (.ic)" block at the end of css/styles.css. Tag class `.tg-*`.
-- `draftBadgeHTML` fix: was indexing the `platformMeta` function; now uses `PLATFORM_META[id]`.
-
-## To do next
-1. Preview it: serve a copy with `python3 -m http.server` (preview_start is blocked in scheduled sessions), then check every tab in light AND dark mode, at desktop and 375px. Watch for:
-   - the pick/focus tools (absolute, `right: 92px`) colliding with long titles
-   - pricing-card buttons still working: handlers use `.closest('.pricing-card')`, `.pa-status`, `data-item-id`
-   - the Still-to-list note editor (`state.editingPostingNote` keys `<id>|<site>` / `<id>|prep`)
-   - Mark listed, Draft, and Not posting buttons
-2. Consider moving To ship, Local deals and End-listings cards onto `itemCard`, keeping their content.
-3. Optionally line Performance rows (`perfRowHTML`) up with the same title, price and floor styling.
-4. Merge to main, push, and confirm the GitHub Pages build (`gh api repos/randymcfarland1227-wq/sell-hub/pages/builds/latest`).
-
-## Standing rules (also in memory)
+## Standing rules
 - The live listing price is final. Never report or "fix" sheet-vs-listing drift.
 - Offers are prepared, never sent without Randy's approval (`Offer Prepared` / `Offer Approved`).
 - Never log `Task` actions from the daily run.
-- Edit from a GitHub clone; Documents/Claude/sell-hub is stale.
+- Edit from a GitHub clone. Documents/Claude/sell-hub is stale.
+- Sheet writes can return 405/302 even when they succeed. Never retry; re-read to verify.

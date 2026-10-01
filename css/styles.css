@@ -2904,8 +2904,8 @@ button.stat-tile.opt-tile:hover { border-color: var(--primary); }
 :root { --gap-1: 4px; --gap-2: 8px; --gap-3: 12px; --gap-4: 16px; --gap-5: 24px; --r-row: 12px; }
 /* Brand colours like Grailed's near-black vanish on the dark theme, so any
    text drawn in a platform colour is mixed toward the text colour. */
-.stl-chip.stl-missing { color: color-mix(in srgb, var(--plat) 55%, var(--text)); }
-.platform-card h4, .pt-site { color: color-mix(in srgb, var(--plat) 55%, var(--text)); }
+.stl-chip.stl-missing { color: color-mix(in srgb, var(--plat) var(--plat-ink), var(--text)); }
+.platform-card h4, .pt-site { color: color-mix(in srgb, var(--plat) var(--plat-ink), var(--text)); }
 
 main.wrap { margin: 20px auto 36px; padding: 26px clamp(14px, 3vw, 34px) 44px; }
 .section-head { margin-bottom: var(--gap-4); }
@@ -3293,10 +3293,11 @@ h1.brand { display: flex; align-items: center; gap: 12px; letter-spacing: 0; }
 .card.ic:hover { transform: none; border-color: color-mix(in srgb, var(--primary) 30%, var(--border)); border-left-color: var(--accent); }
 #action .card.ic.action-row, #action .card.ic { padding: 12px; border-top-width: 1px; }
 .ic-head { display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; gap: 12px; align-items: start; }
+.ic-side { display: flex; flex-direction: column; align-items: center; gap: 6px; }
 .ic-thumb { width: 56px; height: 56px; border-radius: 10px; overflow: hidden; background: var(--bg-elevated); display: grid; place-items: center; }
 .ic-thumb img { width: 100%; height: 100%; object-fit: cover; }
 .ic-thumb span { font-size: .58rem; color: var(--text-faint); text-align: center; padding: 3px; line-height: 1.2; }
-.ic-main { min-width: 0; padding-right: 54px; }
+.ic-main { min-width: 0; }
 .ic-title {
   margin: 0; font: 650 .9rem/1.3 'DM Sans', sans-serif; letter-spacing: -.005em; color: var(--text);
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
@@ -3305,9 +3306,9 @@ h1.brand { display: flex; align-items: center; gap: 12px; letter-spacing: 0; }
 .ic-price { text-align: right; min-width: 72px; display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
 .ic-price b { font: 700 1rem/1.15 'Space Grotesk', sans-serif; color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ic-price small { font-size: .68rem; color: var(--text-faint); white-space: nowrap; font-variant-numeric: tabular-nums; }
-.ic-tools { position: absolute; top: 12px; right: 92px; display: flex; gap: 4px; align-items: center; }
+.ic-tools { display: flex; gap: 6px; align-items: center; justify-content: center; }
+.ic-tools .pick-box { margin: 0; }
 .ic-tools .focus-btn { width: 22px; height: 22px; font-size: .78rem; }
-.card.ic:not(:has(.ic-tools)) .ic-main { padding-right: 0; }
 
 /* Tags: one size, one shape; colour says what kind */
 .ic-tags { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
@@ -3321,8 +3322,8 @@ h1.brand { display: flex; align-items: center; gap: 12px; letter-spacing: 0; }
 .tg-status.tg-listed { background: color-mix(in srgb, #2563eb 12%, var(--bg-card)); color: color-mix(in srgb, #2563eb 75%, var(--text)); }
 .tg-status.tg-sold { background: var(--good-bg); color: var(--good); }
 .tg-site i { width: 6px; height: 6px; border-radius: 50%; background: var(--plat); }
-.tg-live { background: color-mix(in srgb, var(--plat) 12%, var(--bg-card)); color: color-mix(in srgb, var(--plat) 70%, var(--text)); }
-.tg-todo { background: transparent; border: 1px dashed color-mix(in srgb, var(--plat) 55%, var(--border)); color: color-mix(in srgb, var(--plat) 65%, var(--text)); }
+.tg-live { background: color-mix(in srgb, var(--plat) 14%, var(--bg-card)); color: color-mix(in srgb, var(--plat) var(--plat-ink), var(--text)); }
+.tg-todo { background: transparent; border: 1px dashed color-mix(in srgb, var(--plat) 45%, var(--text-faint)); color: color-mix(in srgb, var(--plat) var(--plat-ink), var(--text)); }
 .tg-ended { background: transparent; border: 1px solid var(--border); color: var(--text-faint); text-decoration: line-through; }
 .tg-expect.tg-x-quick { background: color-mix(in srgb, #16a34a 12%, var(--bg-card)); color: color-mix(in srgb, #16a34a 70%, var(--text)); }
 .tg-expect.tg-x-steady { background: color-mix(in srgb, #2563eb 11%, var(--bg-card)); color: color-mix(in srgb, #2563eb 70%, var(--text)); }
@@ -3350,9 +3351,9 @@ h1.brand { display: flex; align-items: center; gap: 12px; letter-spacing: 0; }
 .ic-stats b { font: 700 .92rem 'Space Grotesk', sans-serif; font-variant-numeric: tabular-nums; color: var(--text); }
 .ic-stats i { font-style: normal; font-size: .62rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--text-faint); }
 .ic-sites { display: flex; flex-direction: column; gap: 3px; }
-.ic-site { display: grid; grid-template-columns: 78px 62px repeat(3, minmax(0, 1fr)); gap: 8px; align-items: center; font-size: .74rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.ic-site { display: grid; grid-template-columns: 112px 62px repeat(3, minmax(0, 1fr)); gap: 8px; align-items: center; font-size: .74rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .ic-site b { color: var(--text); font-weight: 700; }
-.ic-site-name { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; color: color-mix(in srgb, var(--plat) 70%, var(--text)); }
+.ic-site-name { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; color: color-mix(in srgb, var(--plat) var(--plat-ink), var(--text)); }
 .ic-site-name i { width: 6px; height: 6px; border-radius: 50%; background: var(--plat); }
 .card.ic .pace-row { margin: 0; }
 
@@ -3373,5 +3374,57 @@ h1.brand { display: flex; align-items: center; gap: 12px; letter-spacing: 0; }
 .card.ic.sold { opacity: .75; }
 @media (max-width: 560px) {
   .ic-grid { grid-template-columns: 1fr; }
-  .ic-site { grid-template-columns: 70px 54px repeat(3, minmax(0, 1fr)); gap: 6px; font-size: .7rem; }
+  .ic-site { grid-template-columns: minmax(0, 1fr) 50px 54px 48px 58px; gap: 5px; font-size: .68rem; }
+  .ic-site > * { white-space: nowrap; }
+  .ic-site-name { overflow: hidden; text-overflow: ellipsis; display: block; }
+  .ic-site-name i { display: inline-block; margin-right: 5px; vertical-align: middle; }
+  .ic-head { grid-template-columns: 48px minmax(0, 1fr) auto; gap: 10px; }
+  .ic-thumb { width: 48px; height: 48px; }
+  .ic-price { min-width: 0; }
 }
+
+/* One callout style inside item cards: tinted panel, coloured left edge */
+.card.ic .pa-callout, .card.ic .ld-note-text, .card.ic .stl-hold {
+  --co: var(--primary);
+  margin: 0; padding: 7px 10px; border-radius: 9px; font-size: .78rem; line-height: 1.4; color: var(--text);
+  border: 0; border-left: 3px solid var(--co); background: color-mix(in srgb, var(--co) 9%, var(--bg-card));
+}
+.card.ic .pa-prepared { --co: #d97706; }
+.card.ic .pa-prepared.approved { --co: #16a34a; }
+.card.ic .pa-deadline.soon { --co: #d97706; }
+.card.ic .pa-deadline.lapsed { --co: #b42335; }
+.card.ic .stl-hold { --co: #d97706; }
+.card.ic .ld-note-text { --co: var(--accent); color: var(--text-muted); }
+.card.ic .pa-status:empty { display: none; }
+.card.ic .pa-actions { margin: 0; }
+.card.ic .ld-form { margin: 0; }
+
+/* Secondary buttons inside item cards: one quiet pill */
+.card.ic .ar-secondary .icon-btn, .card.ic .stl-site-row .icon-btn, .card.ic .stl-hold-actions .icon-btn {
+  font-size: .72rem; font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--text-muted);
+  padding: 5px 10px; border: 1px solid var(--border); border-radius: 999px; background: transparent; line-height: 1.2;
+}
+.card.ic .ar-secondary .icon-btn:hover, .card.ic .stl-site-row .icon-btn:hover, .card.ic .stl-hold-actions .icon-btn:hover { color: var(--text); border-color: color-mix(in srgb, var(--primary) 40%, var(--border)); }
+.card.ic .stl-draft-btn.is-on { color: var(--good); background: var(--good-bg); border-color: color-mix(in srgb, var(--good) 35%, transparent); }
+.card.ic .pa-hold-btn.on { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+.card.ic .ar-actions .btn, .card.ic .stl-site-row .btn { padding: 7px 13px; font-size: .74rem; }
+.ic-foot .pa-delete-btn { margin-left: auto; padding: 4px 10px; font-size: .72rem; }
+.tg-deal { background: color-mix(in srgb, var(--plat) 13%, var(--bg-card)); color: color-mix(in srgb, var(--plat) 70%, var(--text)); }
+/* Sold items waiting on a ship or an end-listing are work to do, not history. */
+.card.ic.sold.to-ship-card, .card.ic.sold.end-card { opacity: 1; }
+
+/* Performance rows share the item card's title and price/floor column. */
+.perf-row .ranked-row-title > .item-link { font: 650 .9rem/1.3 'DM Sans', sans-serif; letter-spacing: -.005em; color: var(--text); }
+.perf-row .perf-sub { font-size: .74rem; }
+.perf-row > .ranked-row-head > .ic-price { flex: none; margin-left: 4px; }
+@media (max-width: 700px) {
+  .perf-row .ranked-row-title { flex: 1 1 0; }
+  .perf-row > .ranked-row-head::after { margin-left: 0; }
+}
+
+/* How much of a site's brand colour goes into its text: dark brand colours
+   (Poshmark, Grailed) need more of the page text colour on a dark page. */
+:root { --plat-ink: 55%; }
+:root[data-theme="dark"] { --plat-ink: 35%; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --plat-ink: 35%; } }
+.tg-label { font-size: .66rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--text-faint); margin-left: 2px; }

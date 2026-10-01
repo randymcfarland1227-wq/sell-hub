@@ -1082,7 +1082,7 @@ function siteTagsHTML(item, which) {
     st.done.forEach(d => out.push(tag(`<i></i>${escapeHtml(d.meta.short || d.meta.label)}`, 'tg-site tg-live', (sold ? 'Still live on ' : 'Live on ') + d.meta.label, `--plat:${d.meta.color}`)));
     st.ended.forEach(e => out.push(tag(escapeHtml(e.meta.short || e.meta.label), 'tg-site tg-ended', 'Ended on ' + e.meta.label, `--plat:${e.meta.color}`)));
   }
-  if (!sold) {
+  if (!sold && which !== 'live') {
     st.missing.forEach(m => out.push(tag(`${which === 'missing' ? '' : '+ '}${escapeHtml(m.meta.short || m.meta.label)}`, 'tg-site tg-todo', 'Still to post on ' + m.meta.label, `--plat:${m.meta.color}`)));
     if (which !== 'missing') st.skipped.forEach(k => out.push(tag(escapeHtml(k.meta.short || k.meta.label), 'tg-site tg-ended', 'Not posting on ' + k.meta.label, `--plat:${k.meta.color}`)));
   }
@@ -1112,7 +1112,7 @@ function itemSiteStatsHTML(item, map) {
     const m = platformMeta(p);
     const snap = map.get(item.itemId + '|' + m.id);
     const price = live.has(m.id) ? moneyText(live.get(m.id)) : '—';
-    return `<div class="ic-site" style="--plat:${m.color}"><span class="ic-site-name"><i></i>${escapeHtml(m.short || m.label)}</span><b>${price}</b><span>${snap ? snapshotViews(snap, m.id).toLocaleString() : 0} views</span><span>${snapOpens(snap, m.id)} opens</span><span>${Number(snap && snap.watchers) || 0} watching</span></div>`;
+    return `<div class="ic-site" style="--plat:${m.color}"><span class="ic-site-name" title="${escapeHtml(m.label)}"><i></i>${escapeHtml(m.short || m.label)}</span><b>${price}</b><span>${snap ? snapshotViews(snap, m.id).toLocaleString() : 0} views</span><span>${snapOpens(snap, m.id)} opens</span><span>${Number(snap && snap.watchers) || 0} watching</span></div>`;
   }).join('');
   return rows ? `<div class="ic-sites">${rows}</div>` : '';
 }
@@ -1129,39 +1129,42 @@ function itemStatRowHTML(item, map) {
   const cell = (n, l) => `<span><b>${n}</b><i>${l}</i></span>`;
   return `<div class="ic-stats">${cell(st.views.toLocaleString(), 'views')}${cell(opens.toLocaleString(), 'opens')}${cell(rate + '%', 'open rate')}${cell(watching, 'watching')}</div>`;
 }
-// opts: tools (pick/focus), tags (extra html), sites ('all' | 'missing' |
-// false), expect, pace, stats, callout (html), body (html), foot (html),
-// accent (css colour for the left edge), cls.
+// opts: tools (pick/focus), meta (html, replaces the details line), tags
+// (extra html), sites ('all' | 'missing' | false), expect, pace, stats,
+// callout (html), body (html), foot (html), accent (css colour for the left
+// edge), cls, attrs, noStatus, alerts (the "!" button, Inventory only).
 function itemCard(item, opts) {
   const o = opts || {};
   const map = latestMetricsByItemPlatform();
   const photo = photoForItem(item.itemId);
-  const title = itemDisplayName(item, ' — ');
+  const title = itemDisplayName(item, ' — ') || item.itemId;
   const focused = !!focusedFor(item.itemId);
   const tags = [
-    statusTagHTML(item),
-    alertButtonHTML(item),
+    o.noStatus ? '' : statusTagHTML(item),
+    o.alerts ? alertButtonHTML(item) : '',
     o.pace ? paceTagHTML(item, map) : '',
     o.expect ? expectTagHTML(item) : '',
     o.tags || '',
     o.sites === false ? '' : siteTagsHTML(item, o.sites || 'all'),
-  ].join('');
+  ].join('').trim();
   return `
     <article class="card ic${isSold(item) ? ' sold' : ''} ${o.cls || ''}" style="--accent:${o.accent || categoryMeta(item.category).color}"${o.attrs || ''}>
       <div class="ic-head">
-        <div class="ic-thumb${photo ? '' : ' empty'}">${photo ? `<img src="${escapeHtml(photo)}" alt="" loading="lazy" onerror="this.parentElement.classList.add('empty');this.remove()">` : `<span>${escapeHtml(photoPendingLabel(item))}</span>`}</div>
+        <div class="ic-side">
+          <div class="ic-thumb${photo ? '' : ' empty'}">${photo ? `<img src="${escapeHtml(photo)}" alt="" loading="lazy" onerror="this.parentElement.classList.add('empty');this.remove()">` : `<span>${escapeHtml(photoPendingLabel(item))}</span>`}</div>
+          ${o.tools ? `<div class="ic-tools">
+            <label class="pick-box" title="Select this item"><input type="checkbox" data-pick="${escapeHtml(item.itemId)}"${state.picked.has(String(item.itemId)) ? ' checked' : ''}><span></span></label>
+            <button type="button" class="focus-btn${focused ? ' on' : ''}" data-focus="${escapeHtml(item.itemId)}" data-on="${focused ? '1' : ''}" title="${focused ? 'In Focus — click to remove' : 'Add to Focus'}" aria-label="${focused ? 'Remove from Focus' : 'Add to Focus'}">${focused ? '◉' : '◎'}</button>
+          </div>` : ''}
+        </div>
         <div class="ic-main">
-          <h3 class="ic-title">${itemLink(item, escapeHtml(title))}</h3>
-          <div class="ic-meta">${itemDetailsLine(item)}</div>
+          <h3 class="ic-title" title="${escapeHtml(title)}">${itemLink(item, escapeHtml(title))}</h3>
+          <div class="ic-meta">${o.meta !== undefined ? o.meta : itemDetailsLine(item)}</div>
         </div>
         ${itemPriceColHTML(item)}
       </div>
-      ${o.tools ? `<div class="ic-tools">
-        <label class="pick-box" title="Select this item"><input type="checkbox" data-pick="${escapeHtml(item.itemId)}"${state.picked.has(String(item.itemId)) ? ' checked' : ''}><span></span></label>
-        <button type="button" class="focus-btn${focused ? ' on' : ''}" data-focus="${escapeHtml(item.itemId)}" data-on="${focused ? '1' : ''}" title="${focused ? 'In Focus — click to remove' : 'Add to Focus'}">${focused ? '◉' : '◎'}</button>
-      </div>` : ''}
-      <div class="ic-tags">${tags}</div>
-      ${alertPanelHTML(item)}
+      ${tags ? `<div class="ic-tags">${tags}</div>` : ''}
+      ${o.alerts ? alertPanelHTML(item) : ''}
       ${o.stats ? itemStatRowHTML(item, map) : ''}
       ${o.paceLine ? paceTextHTML(item) : ''}
       ${o.siteStats ? itemSiteStatsHTML(item, map) : ''}
@@ -1177,6 +1180,7 @@ function inventoryCardHTML(item) {
   const expanded = state.expandedItems.has(item.itemId);
   return itemCard(item, {
     tools: true,
+    alerts: true,
     foot: `${priceLogHTML(item.itemId)}<button class="card-expand-toggle" data-id="${escapeHtml(item.itemId)}">${expanded ? 'Hide details' : 'Details & mark sold'}</button>`,
     body: localDealBadgesHTML(item.itemId) + (expanded ? itemDetailHTML(item) : ''),
   });
@@ -2339,12 +2343,12 @@ function perfRowHTML(r, rank) {
         <span class="rr-rank">${rank}</span>
         <span class="ranked-row-title">${itemLink(r.it, escapeHtml(itemShortName(r.it)))}<small class="perf-sub"><span class="perf-verdict perf-${v.id}">${escapeHtml(v.label)}</span>${r.sp.daysListed !== null ? ` · day ${r.sp.daysListed}` : ''} · ${escapeHtml(EXPECT_PLAIN[r.sp.expected.id] || r.sp.expected.label)} ${escapeHtml(r.sp.expected.days)}${action && !action.hidden ? ` · ${escapeHtml(action.label)}` : ''}</small></span>
         <span class="rr-quick perf-quick">
-          <b>${priceTextFor(r.it)}</b>
           <i>${r.stats.views} views</i>
           <i>${r.opens} open${r.opens === 1 ? '' : 's'} · ${ctr}%</i>
           <i>${r.now.watchers} watching</i>
           <i class="perf-trend${r.trend.views || r.trend.clicks ? ' up' : ''}" title="Change over the last ${PERF_TREND_DAYS} days">${signed(r.trend.views)} views · ${signed(r.trend.clicks)} clicks /wk</i>
         </span>
+        ${itemPriceColHTML(r.it)}
       </summary>
       <div class="ranked-detail">
         ${action && action.severity === 'complete' ? `<div class="perf-status-line"><span>${escapeHtml(action.reason || 'Completed')}</span><button type="button" class="icon-btn perf-reopen" data-id="${escapeHtml(id)}" data-label="${escapeHtml(action.label)}">Reopen</button></div>` : ''}
@@ -2723,7 +2727,8 @@ function renderFocusView() {
   container.innerHTML = `<div class="ic-grid">${ranked.map(({ it }) => {
     const expanded = state.expandedItems.has(it.itemId);
     return itemCard(it, {
-      tools: true, pace: true, stats: true, paceLine: true, siteStats: true,
+      tools: true, stats: true, paceLine: true, siteStats: true,
+      callout: actionBadgesHTML(it.itemId),
       body: localDealBadgesHTML(it.itemId) + (expanded ? itemDetailHTML(it) : ''),
       foot: `${priceLogHTML(it.itemId)}<button class="card-expand-toggle" data-id="${escapeHtml(it.itemId)}">${expanded ? 'Hide details' : 'Details & mark sold'}</button>`,
     });
@@ -3534,24 +3539,19 @@ function renderToShip() {
   const sorted = items.slice().sort((a, b) => (soldDateFor(a.itemId) || '').localeCompare(soldDateFor(b.itemId) || ''));
   container.innerHTML = sorted.map(it => {
     const soldDate = soldDateFor(it.itemId);
-    const title = [it.brand, it.item].filter(Boolean).join(' — ') || it.itemId;
     const metaBits = [
       it.soldPrice ? `Sold ${escapeHtml(it.soldPrice)}` : '',
       it.buyer ? escapeHtml(it.buyer) : '',
       soldDate ? escapeHtml(soldDate) : '',
     ].filter(Boolean);
-    return `
-      <div class="card to-ship-card action-row" style="--cat:#1f5c46">
-        <div class="ar-title-row">
-          <h3>${escapeHtml(title)}</h3>
-          ${actionStarHTML(it.itemId, [it.brand, it.item].filter(Boolean).join(' ') || it.itemId)}
-        </div>
-        ${metaBits.length ? `<div class="ar-meta-line">${metaBits.join(' · ')}</div>` : ''}
-        <div class="ar-actions">
-          <button class="btn ar-primary ts-ship-btn" data-id="${escapeHtml(it.itemId)}">Mark shipped</button>
-        </div>
-      </div>
-    `;
+    return itemCard(it, {
+      cls: 'to-ship-card',
+      accent: '#1f5c46',
+      sites: false,
+      meta: metaBits.join(' · '),
+      body: `<div class="ar-actions"><button class="btn ar-primary ts-ship-btn" data-id="${escapeHtml(it.itemId)}">Mark shipped</button></div>`,
+      foot: actionStarHTML(it.itemId, [it.brand, it.item].filter(Boolean).join(' ') || it.itemId),
+    });
   }).join('');
   wireActionStars(container);
   container.querySelectorAll('.ts-ship-btn').forEach(btn => btn.addEventListener('click', () => markShipped(btn.dataset.id)));
@@ -3597,20 +3597,20 @@ function renderSoldElsewhere() {
       soldWhere ? `via ${escapeHtml(soldWhere)}` : '',
       `Still up on ${escapeHtml(meta.label)}`,
     ].filter(Boolean);
-    return `
-      <div class="card end-card action-row">
-        <div class="ar-title-row">
-          <h3>${escapeHtml(title)}</h3>
-          <div class="card-top-actions">${actionStarHTML(endTaskKey(item.itemId, meta.id), `${title} on ${meta.label}`)}<span class="stl-chip stl-done" style="--plat:${meta.color}">${escapeHtml(meta.label)}</span></div>
-        </div>
-        <div class="ar-meta-line">${metaBits.join(' · ')}</div>
-        <div class="ar-actions">
+    return itemCard(item, {
+      cls: 'end-card',
+      accent: '#7a2038',
+      sites: false,
+      meta: metaBits.join(' · '),
+      tags: tag(`<i></i>${escapeHtml(meta.label)}`, 'tg-site tg-live', 'Still live on ' + meta.label, `--plat:${meta.color}`),
+      body: `<div class="ar-actions">
           <button class="btn ar-primary end-btn" data-id="${escapeHtml(item.itemId)}" data-platform="${escapeHtml(meta.label)}" data-listing="${escapeHtml((entry && entry.listingId) || '')}">Mark ended</button>
           <div class="ar-secondary">
             ${entry && entry.listingUrl ? `<a class="icon-btn" href="${escapeHtml(entry.listingUrl)}" target="_blank" rel="noopener">Open listing</a>` : ''}
           </div>
-        </div>
-      </div>`;
+        </div>`,
+      foot: actionStarHTML(endTaskKey(item.itemId, meta.id), `${title} on ${meta.label}`),
+    });
   }).join('');
 
   wireActionStars(container);
@@ -3727,28 +3727,46 @@ function renderLocalDeals() {
       const meta = localDealStatusMeta(deal.status);
       const pmeta = platformMeta(deal.platform);
       const editing = state.editingLocalDeal === localDealKey(deal);
-      const metaBits = [
-        escapeHtml(pmeta.label),
-        item ? priceLineHTML(item) : '',
-        deal.when ? escapeHtml(deal.when) : '',
-        deal.buyer ? escapeHtml(deal.buyer) : '',
-        deal.where ? `@ ${escapeHtml(deal.where)}` : '',
-      ].filter(Boolean);
-      return `
-        <div class="card ld-card ld-${meta.id} action-row" style="--cat:${meta.color}">
-          <div class="ar-title-row">
-            <h3>${escapeHtml(title)}</h3>
-            <div class="card-top-actions">${actionStarHTML(`deal:${deal.itemId}`, `${title} — ${meta.label}`)}<span class="ld-chip" style="--plat:${meta.color}"><span aria-hidden="true">${meta.icon}</span> ${escapeHtml(meta.label)}</span></div>
-          </div>
-          ${metaBits.length ? `<div class="ar-meta-line">${metaBits.join(' · ')}</div>` : ''}
-          ${deal.note ? `<p class="ld-note-text">${escapeHtml(deal.note)}</p>` : ''}
-          ${editing ? localDealFormHTML(deal) : `
+      const actionsHTML = editing ? localDealFormHTML(deal) : `
             <div class="ar-actions">
               <button type="button" class="btn ar-primary ld-edit" data-key="${escapeHtml(localDealKey(deal))}">Update</button>
               <div class="ar-secondary">
                 <button type="button" class="icon-btn ld-clear-btn" data-id="${escapeHtml(deal.itemId)}" data-platform="${escapeHtml(deal.platform)}">Clear</button>
               </div>
-            </div>`}
+            </div>`;
+      const star = actionStarHTML(`deal:${deal.itemId}`, `${title} — ${meta.label}`);
+      const chip = `<span class="ld-chip" style="--plat:${meta.color}"><span aria-hidden="true">${meta.icon}</span> ${escapeHtml(meta.label)}</span>`;
+      const note = deal.note ? `<p class="ld-note-text">${escapeHtml(deal.note)}</p>` : '';
+      const placeBits = [
+        deal.when ? escapeHtml(deal.when) : '',
+        deal.buyer ? escapeHtml(deal.buyer) : '',
+        deal.where ? `@ ${escapeHtml(deal.where)}` : '',
+      ];
+      const metaBits = [escapeHtml(pmeta.label), item ? priceLineHTML(item) : '', ...placeBits].filter(Boolean);
+      if (item) {
+        // The price column already carries the price, so the details line
+        // keeps the rest: site, when, who, where.
+        return itemCard(item, {
+          cls: `ld-card ld-${meta.id}`,
+          accent: meta.color,
+          sites: false,
+          noStatus: true,
+          meta: [escapeHtml(pmeta.label), ...placeBits].filter(Boolean).join(' · '),
+          tags: tag(`<span aria-hidden="true">${meta.icon}</span> ${escapeHtml(meta.label)}`, 'tg-deal', meta.blurb, `--plat:${meta.color}`),
+          callout: note,
+          body: actionsHTML,
+          foot: star,
+        });
+      }
+      return `
+        <div class="card ld-card ld-${meta.id} action-row" style="--cat:${meta.color}">
+          <div class="ar-title-row">
+            <h3>${escapeHtml(title)}</h3>
+            <div class="card-top-actions">${star}${chip}</div>
+          </div>
+          ${metaBits.length ? `<div class="ar-meta-line">${metaBits.join(' · ')}</div>` : ''}
+          ${note}
+          ${actionsHTML}
         </div>`;
     }).join('');
     const newForm = editingNew ? `
@@ -4407,7 +4425,8 @@ function renderItemPrep() {
     cls: 'prep-card stl-card',
     accent: '#d97706',
     expect: true,
-    tags: draftBadgeHTML(item.itemId),
+    sites: false,
+    tags: draftBadgeHTML(item.itemId) + siteTagsHTML(item, 'live') + '<span class="tg-label">Then post to</span>' + siteTagsHTML(item, 'missing'),
     callout: postingNoteHTML(item, 'prep'),
     foot: editToggleHTML(item).replace('btn secondary ie-toggle', 'icon-btn ie-toggle'),
     body: itemEditPanelHTML(item),
@@ -4502,7 +4521,7 @@ function renderReadyToList() {
           tags: draftBadgeHTML(item.itemId),
           callout: postingNoteHTML(item, g.meta.id),
           body: `<div class="ar-actions">
-              <button class="btn ar-primary stl-listed-btn" data-id="${escapeHtml(item.itemId)}" data-platform="${escapeHtml(g.meta.label)}">Mark listed on ${escapeHtml(g.meta.short)}</button>
+              <button class="btn ar-primary stl-listed-btn" data-id="${escapeHtml(item.itemId)}" data-platform="${escapeHtml(g.meta.label)}">Mark listed</button>
               <div class="ar-secondary">
                 ${draftToggleHTML(item.itemId, g.meta)}
                 <button class="icon-btn stl-skip-btn" data-id="${escapeHtml(item.itemId)}" data-platform="${escapeHtml(g.meta.label)}">Not posting</button>
