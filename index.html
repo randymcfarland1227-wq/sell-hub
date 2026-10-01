@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Resale Hub</title>
+<title>Randy's Resale Desk</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏷️</text></svg>">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
@@ -21,7 +21,7 @@
 
 <header class="top">
   <div class="wrap top-inner">
-    <h1>Resale Hub</h1>
+    <h1 class="brand"><span class="brand-mark" aria-hidden="true">RM</span><span class="brand-text"><span class="brand-owner">Randy's</span><span class="brand-name">Resale Desk</span></span></h1>
     <div class="top-actions">
       <span class="date" id="todayLabel"></span>
       <button type="button" class="theme-toggle" id="themeToggle" aria-label="Theme: follows your device. Switch to dark."><span class="theme-icon" aria-hidden="true">🌓</span><span class="theme-label">Auto</span></button>
@@ -302,7 +302,7 @@
 
     <details class="action-section" id="section-ship" hidden open>
       <summary><h3 class="subhead" id="sec-ship">To ship</h3></summary>
-      <div id="toShipList" class="card-grid"></div>
+      <div id="toShipList" class="ic-grid"></div>
     </details>
 
     <details class="action-section" id="section-tasks" hidden open>
@@ -312,12 +312,12 @@
 
     <details class="action-section" id="section-local" open>
       <summary><h3 class="subhead" id="sec-local">Local deals</h3></summary>
-      <div id="localDealsList" class="card-grid"></div>
+      <div id="localDealsList" class="ic-grid"></div>
     </details>
 
     <details class="action-section" id="section-end" hidden open>
       <summary><h3 class="subhead" id="sec-end">End listings elsewhere</h3></summary>
-      <div id="soldElsewhereList" class="card-grid"></div>
+      <div id="soldElsewhereList" class="ic-grid"></div>
     </details>
 
     <details class="action-section" id="section-prep" hidden open>
