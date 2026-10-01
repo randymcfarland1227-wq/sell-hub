@@ -402,8 +402,10 @@ function collectResaleActions() {
   active.forEach(item => {
     const action = pricingActionFor(item);
     // Only real to-dos: offer, price drop, boost/refresh. Completed, Hold, No data yet, handled
-    // and dismissed are statuses, not tasks.
-    if (!action || !LIFE_HUB_TASK_SEVERITIES.has(action.severity)) return;
+    // and dismissed are statuses, not tasks. Deleted suggestions are hidden. Same rule as the
+    // Moves list on this site, so Life Hub never shows a move this site doesn't.
+    if (!action || action.hidden || !LIFE_HUB_TASK_SEVERITIES.has(action.severity)) return;
+    if (!MOVE_GROUP_KEYS.includes(pricingGroupKeyFor(action))) return;
     // Skip if this itemId is already a ship task (sold items are filtered out of active).
     actions.push({
       id: String(item.itemId),
