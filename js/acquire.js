@@ -397,7 +397,10 @@ function renderAcquireMediaShelf() {
     return;
   }
 
-  const freqRank = { Common: 0, Occasional: 1 };
+  // Every Media target names one exact item (a pressing, an edition), so the
+  // rarer finds belong on the run too -- they sort after the ones you'll see
+  // most trips rather than being dropped.
+  const freqRank = { Common: 0, Occasional: 1, Rare: 2 };
   const media = acqState.opps.filter(opp => {
     if (!isMediaOpportunity(opp)) return false;
     // Inactive targets are usually dropped in buildOpportunities; skip again if present.
@@ -413,7 +416,7 @@ function renderAcquireMediaShelf() {
     return mediaShelfSort(a, b);
   });
 
-  // Prefer Common, then Occasional; keep untagged only if nothing preferred exists.
+  // Prefer tagged rows (Common, Occasional, Rare); keep untagged only if nothing is tagged.
   const preferred = media.filter(o => freqRank[String(o.intel.thriftFrequency || '')] !== undefined);
   const list = preferred.length ? preferred : media;
   const foot = document.getElementById('acqMediaFoot');

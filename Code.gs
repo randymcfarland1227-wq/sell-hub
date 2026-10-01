@@ -35,6 +35,7 @@
  *   POST {action:'addAcquireItem', brand, itemType, size, color, condition, targetPrice, bestPlatform, priority, notes} -> the new row
  *   POST {action:'updateAcquireItem', id, brand, itemType, size, color, condition, targetPrice, bestPlatform, priority, notes}
  *   POST {action:'deleteAcquireItem', id}
+ *   POST {action:'deleteSourcingIntel', ids:[opportunityId, ...]} -> removes those Sourcing Intel rows
  *   POST {action:'markSold', itemId, sourceTab, soldPrice, buyer} -> writes Status=Sold back
  *        into the correct source tab (Clothing/Non Clothing Sell Inventory), located via
  *        Listing Hub's unnamed row-number column (the one right after "Source tab"). See
@@ -194,6 +195,7 @@ function doPost(e) {
   if (action === 'setTrendEbayData') return jsonOut(setTrendEbayData(body));
   if (action === 'setMarketObservations') return jsonOut(setMarketObservations(body));
   if (action === 'upsertSourcingIntel') return jsonOut(upsertSourcingIntel(body));
+  if (action === 'deleteSourcingIntel') return jsonOut(deleteSourcingIntel(body));
   if (action === 'upsertSales') return jsonOut(upsertSales(body));
   if (action === 'setBalances') return jsonOut(setBalances(body));
   if (action === 'removeItem') return jsonOut(removeItem(body));
@@ -1898,6 +1900,35 @@ function upsertSourcingIntel(body) {
       return String(get('Opportunity ID') || '').trim();
     });
     return { ok: true, updated: res.updated, added: res.added };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Removes Sourcing Intel rows by Opportunity ID ({ ids: [...] }). Used to
+// retire research targets outright (for example the Media groupings replaced
+// by exact items on 2026-10-01) rather than leaving them as Active = N.
+// Safe to repeat: IDs that are already gone are reported, not an error.
+// Market History is left alone, so past comps stay on record.
+function deleteSourcingIntel(body) {
+  var ids = {};
+  (body.ids || []).forEach(function (id) { id = String(id || '').trim(); if (id) ids[id] = true; });
+  if (!Object.keys(ids).length) return { ok: false, error: 'No ids to delete.' };
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    var sheet = getSourcingIntelSheet();
+    var data = sheet.getDataRange().getValues();
+    var col = data.length ? data[0].map(function (h) { return String(h).trim(); }).indexOf('Opportunity ID') : -1;
+    if (col === -1) return { ok: false, error: 'No "Opportunity ID" column in Sourcing Intel.' };
+    var removed = [];
+    for (var r = data.length - 1; r >= 1; r--) {
+      var id = String(data[r][col] || '').trim();
+      if (ids[id]) { sheet.deleteRow(r + 1); removed.push(id); }
+    }
+    var missing = Object.keys(ids).filter(function (id) { return removed.indexOf(id) === -1; });
+    invalidateBootCache();
+    return { ok: true, removed: removed.length, missing: missing };
   } finally {
     lock.releaseLock();
   }

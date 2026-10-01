@@ -756,6 +756,8 @@ ROWS = [
        ship='small', test=L, fake=L, ret=L, frag=L, know=BEG, req=UNTESTED, cost=(1, 8), loc='Yard sale, Estate sale, Flea market', freq='Common',
        chk=['Clicks both ways', '"Made in USA" and a V-series or -G- stamp'],
        see=['USA-made Craftsman sells; the newer China ones barely do', 'Buy them loose out of coffee cans for a dollar or two']),
+  # Superseded 2026-10-01: the Media rows below are groupings and were removed from
+  # the sheet in favour of exact items -- see tools/media_run_specific.py.
   # ------------------------------------------------------------------ 2026-09-21: media — books, CDs, DVDs (thrift shelves are full of these)
   dict(t='Vintage Penguin paperback', cat='Media', sub='Books', eb='vintage penguin paperback -lot -modern', pm='',
        ship='small', test=L, fake=L, ret=L, frag=L, know=MODK, req=UNTESTED, cost=(0.5, 3), loc='Thrift store, Estate sale, Yard sale', freq='Common',
