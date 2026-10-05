@@ -2577,6 +2577,15 @@ details.stocking-intake[open] > summary::before { content: '- '; }
 .offers-table td { padding: 9px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
 .ot-name b { display: block; }
 .ot-name small { color: var(--text-faint); }
+.comps-table td:nth-child(n+2) { white-space: nowrap; }
+.cmp-over { color: #b42335; font-weight: 700; }
+.cmp-under { color: #1f7a4d; font-weight: 700; }
+.cmp-at { color: var(--text-soft, var(--text-faint)); }
+.cmp-none { color: var(--text-faint); }
+@media (max-width: 640px) {
+  #optimizeComps { overflow-x: auto; }
+  .comps-table { min-width: 560px; }
+}
 
 .opt-section { margin-bottom: 26px; }
 .opt-kicker { margin: 0 0 5px; color: var(--gold-deep); font-size: .72rem; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }

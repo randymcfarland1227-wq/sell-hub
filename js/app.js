@@ -2193,11 +2193,53 @@ function renderOffersOut() {
     <p class="subhead-note">eBay and Poshmark offers expire after 24-48 hours, so an unsold item past two days can take a fresh, lower offer.</p>`;
 }
 
+// eBay sold comps for every live eBay listing, from js/comps.js (a manual pull
+// of eBay's sold search, last ~90 days). Shows the live eBay price beside the
+// sold median so it's clear which listings sit above or below the market.
+function renderSoldComps() {
+  const container = document.getElementById('optimizeComps');
+  if (!container) return;
+  const data = window.SOLD_COMPS || { items: {} };
+  const byId = new Map(state.inventory.map(it => [String(it.itemId), it]));
+  const rows = Object.entries(data.items || {})
+    .map(([id, c]) => {
+      const item = byId.get(id);
+      if (!item || isSold(item)) return null;
+      const ebay = livePricesFor(item).find(r => r.meta.id === 'ebay');
+      const price = ebay ? ebay.price : askFor(item);
+      const gap = c.median && price ? Math.round(100 * (price - c.median) / c.median) : null;
+      return { item, c, price, gap };
+    })
+    .filter(Boolean)
+    .sort((a, b) => (b.gap ?? -1e9) - (a.gap ?? -1e9));
+  setSectionCount('sec-comps', rows.length);
+  if (!rows.length) { container.innerHTML = '<div class="empty-state">No sold comps pulled yet.</div>'; return; }
+  const gapText = r => {
+    if (r.gap === null) return '<span class="cmp-none">No sold matches</span>';
+    if (Math.abs(r.gap) <= 10) return `<span class="cmp-at">At market (${r.gap > 0 ? '+' : ''}${r.gap}%)</span>`;
+    return r.gap > 0 ? `<span class="cmp-over">${r.gap}% above</span>` : `<span class="cmp-under">${-r.gap}% below</span>`;
+  };
+  container.innerHTML = `
+    <p class="subhead-note">eBay sold listings from the last ~90 days, pulled ${escapeHtml(data.pulledAt || '')}. Highest above market first. Range is the middle half of sold prices. Thin samples (under 5 sales) are rough.</p>
+    <table class="offers-table comps-table">
+      <thead><tr><th>Item</th><th>Your price</th><th>Sold median</th><th>Range</th><th>Sold / active</th><th>vs comps</th></tr></thead>
+      <tbody>${rows.map(r => `<tr>
+        <td class="ot-name"><b>${itemLink(r.item, escapeHtml(itemShortName(r.item)))}</b><small>${escapeHtml(r.c.query || '')}${r.c.note ? ' · ' + escapeHtml(r.c.note) : ''}</small></td>
+        <td>${escapeHtml(moneyText(r.price))}</td>
+        <td>${r.c.median ? escapeHtml(moneyText(r.c.median)) : '\u2014'}</td>
+        <td>${r.c.low ? escapeHtml(moneyText(r.c.low) + '\u2013' + moneyText(r.c.high)) : '\u2014'}</td>
+        <td>${r.c.n ?? 0}${r.c.active != null ? ' / ' + r.c.active : ''}</td>
+        <td>${gapText(r)}</td>
+      </tr>`).join('')}</tbody>
+    </table>`;
+}
+
 function renderOptimizeView() {
   const container = document.getElementById('optimizeList');
   if (!container) return;
   renderOptimizeTiles();
   renderOffersOut();
+  renderSoldComps();
   renderOptimizeToday();
   const latestByPlatform = latestMetricsByItemPlatform();
   const behind = underperformers(latestByPlatform);
