@@ -513,6 +513,9 @@ function resaleWorkroomSnapshot() {
   };
 }
 function notifyWorkroom() {
+  // Every path (load, storage events from Life Hub on the same origin, edits) goes through here;
+  // before the Sheet data loads the snapshot is all zeros, so send nothing until then.
+  if (!state.loadedAt) return;
   const message = { type: 'randys-workroom:snapshot', payload: resaleWorkroomSnapshot() };
   for (const origin of WORKROOM_ORIGINS) {
     try { if (window.opener && !window.opener.closed) window.opener.postMessage(message, origin); } catch {}
@@ -587,8 +590,7 @@ window.addEventListener('message', event => {
   if (!isWorkroomOrigin(event.origin)) return;
   const type = event.data?.type;
   if (type === 'randys-workroom:request') {
-    // Before the Sheet data loads, the snapshot is all zeros and would wipe Life Hub's last good
-    // numbers. Stay quiet until then — finishing the load sends one itself (notifyWorkroom).
+    // Not loaded yet: answer nothing (zeros would wipe Life Hub's numbers); the load sends one.
     if (!state.loadedAt) return;
     event.source?.postMessage({ type: 'randys-workroom:snapshot', payload: resaleWorkroomSnapshot() }, event.origin);
     return;
