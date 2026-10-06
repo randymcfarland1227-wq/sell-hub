@@ -587,6 +587,9 @@ window.addEventListener('message', event => {
   if (!isWorkroomOrigin(event.origin)) return;
   const type = event.data?.type;
   if (type === 'randys-workroom:request') {
+    // Before the Sheet data loads, the snapshot is all zeros and would wipe Life Hub's last good
+    // numbers. Stay quiet until then — finishing the load sends one itself (notifyWorkroom).
+    if (!state.loadedAt) return;
     event.source?.postMessage({ type: 'randys-workroom:snapshot', payload: resaleWorkroomSnapshot() }, event.origin);
     return;
   }
