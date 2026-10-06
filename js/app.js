@@ -4746,6 +4746,7 @@ function naturalPricingAction(item) {
       offerWhere: `${withWatchers[0].meta.label}: ${hint}`,
       offerPlatformLabel: withWatchers[0].meta.label,
       offerWindow: window,
+      watchedOn: withWatchers.map(p => ({ id: p.meta.id, label: p.meta.label, watchers: p.watchers })),
       views, clicks, watchers,
     };
   }
@@ -4899,6 +4900,34 @@ async function approvePreparedOffer(itemId, detail, btn) {
   renderPricingActions();
 }
 
+// eBay won't take an offer for a watcher who already got one (an offer, or an
+// automated offer, runs up to 30 days) or who has been watching past the
+// 30-day window. Returns {label, reason} when no offer can go out, '' when one can. Only
+// eBay watchers can be blocked; Poshmark likers can always take a new offer,
+// so any likers keep the suggestion live.
+function lastOfferOn(itemId, platformId) {
+  const re = platformId === 'ebay' ? /^\s*ebay/i : platformId === 'poshmark' ? /^\s*poshmark/i : null;
+  if (!re) return null;
+  const sent = state.itemActions.filter(a => String(a.itemId) === String(itemId) && a.action === 'Offer Sent' && re.test(String(a.detail || '')));
+  return sent.length ? sent[sent.length - 1] : null;
+}
+function offerBlockedReason(item, natural) {
+  const on = natural.watchedOn || [];
+  if (!on.length || on.some(p => p.id !== 'ebay')) return '';
+  const ebay = on[0];
+  const window = offerWindowFor(item.itemId, 'ebay', ebay.label);
+  if (window && window.lapsed) {
+    return { label: 'No offer to send', reason: `eBay won't take an offer: the ${ebay.watchers} watcher${ebay.watchers === 1 ? ' has' : 's have'} been watching since ${prettyDay(window.since)}, past the ${OFFER_WINDOW_DAYS}-day window.` };
+  }
+  const last = lastOfferOn(item.itemId, 'ebay');
+  const sentOn = last && String(last.date || '').slice(0, 10);
+  if (!sentOn || daysSince(sentOn) > OFFER_WINDOW_DAYS) return '';
+  const then = latestMetricsByItemPlatform(sentOn).get(item.itemId + '|ebay');
+  const watchersThen = Number(then && then.watchers) || 0;
+  if (ebay.watchers > watchersThen) return '';
+  return { label: 'Offer sent', reason: `Every eBay watcher already got an offer on ${prettyDay(sentOn)} (${escapeHtml(String(last.detail || 'eBay'))}). eBay won't take another until a new watcher shows up.` };
+}
+
 function pricingActionFor(item) {
   let natural = naturalPricingAction(item);
   const override = actionOverrideFor(item.itemId);
@@ -4931,6 +4960,8 @@ function pricingActionFor(item) {
       const when = offer.date === today ? 'today' : `on ${offer.date}`;
       return { ...natural, severity: 'handled', label: 'Offer sent', reason: `Offer sent ${when} via ${escapeHtml(offer.detail)}. Waiting to hear back.` };
     }
+    const blocked = offerBlockedReason(item, natural);
+    if (blocked) return { ...natural, severity: 'handled', label: blocked.label, reason: blocked.reason };
     const prepared = preparedOfferFor(item.itemId);
     if (prepared) natural = { ...natural, prepared };
   }
@@ -5230,6 +5261,7 @@ const PRICING_GROUPS = [
   { key: 'Refresh listing', title: 'Refresh listing', color: '#a1752e' },
   { key: 'Offer sent', title: 'Offer sent — waiting', color: '#1f5c64', collapsed: true },
   { key: 'Price dropped', title: 'Price dropped — waiting', color: '#1f5c64', collapsed: true },
+  { key: 'No offer to send', title: 'Watchers eBay won\'t take an offer for', color: '#56657a', collapsed: true },
   { key: 'Hold', title: 'On hold', color: '#56657a', collapsed: true },
   { key: 'Dismissed', title: 'Dismissed today', color: '#74849a', collapsed: true },
   { key: 'On track', title: 'On track', color: '#1f5c46', collapsed: true },
