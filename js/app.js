@@ -2547,6 +2547,7 @@ const ACTIVITY_META = {
   'Offer Sent': { icon: 'send', kind: 'offer', label: 'Offer sent' },
   'Offer Prepared': { icon: 'note', kind: 'prep', label: 'Offer prepared' },
   'Offer Approved': { icon: 'check', kind: 'pace', label: 'Offer approved' },
+  'Offer Ineligible': { icon: 'xcircle', kind: 'tasks', label: 'No offer possible' },
   'Price Drop': { icon: 'down', kind: 'drop', label: 'Price drop' },
   'Price Edit': { icon: 'dollar', kind: 'value', label: 'Price change' },
   'Completed': { icon: 'check', kind: 'pace', label: 'Cleared' },
@@ -4900,32 +4901,84 @@ async function approvePreparedOffer(itemId, detail, btn) {
   renderPricingActions();
 }
 
+// "Send an offer" only stays live while at least one site with watchers can
+// actually take an offer. Returns {label, reason} when none can, '' when one
+// can. Randy's rule: if an offer can't be sent, don't list it as one.
+//
 // eBay won't take an offer for a watcher who already got one (an offer, or an
-// automated offer, runs up to 30 days) or who has been watching past the
-// 30-day window. Returns {label, reason} when no offer can go out, '' when one can. Only
-// eBay watchers can be blocked; Poshmark likers can always take a new offer,
-// so any likers keep the suggestion live.
+// automated offer, runs up to 30 days), who has been watching past the 30-day
+// window, or for a listing its "Send offers - eligible" filter leaves out (the
+// daily update logs that as "Offer Ineligible"). Each of those holds until a
+// new watcher shows up.
+// Poshmark: each offer has to be at least 10% under the listing price and 10%
+// under your lowest offer in the last 90 days, so once that lands below the
+// floor there's no offer left to send.
+// Other sites (Depop, Grailed...) are never blocked.
 function lastOfferOn(itemId, platformId) {
   const re = platformId === 'ebay' ? /^\s*ebay/i : platformId === 'poshmark' ? /^\s*poshmark/i : null;
   if (!re) return null;
   const sent = state.itemActions.filter(a => String(a.itemId) === String(itemId) && a.action === 'Offer Sent' && re.test(String(a.detail || '')));
   return sent.length ? sent[sent.length - 1] : null;
 }
-function offerBlockedReason(item, natural) {
-  const on = natural.watchedOn || [];
-  if (!on.length || on.some(p => p.id !== 'ebay')) return '';
-  const ebay = on[0];
-  const window = offerWindowFor(item.itemId, 'ebay', ebay.label);
+const POSHMARK_OFFER_LOOKBACK_DAYS = 90;
+// "Poshmark - $17 to likers ..." or "Poshmark - offer to 1 liker at $49 ...".
+function poshmarkOfferAmount(detail) {
+  const m = String(detail || '').match(/(?:^\s*poshmark\s*[-—]\s*|\bat\s+)\$(\d+(?:\.\d+)?)/i);
+  return m ? Number(m[1]) : null;
+}
+function poshmarkOfferBlock(item, watchers) {
+  const floor = parseMoney(item.floorPrice);
+  if (!(floor > 0)) return null;
+  const snap = latestMetricsByItemPlatform().get(item.itemId + '|poshmark');
+  const listing = Number(snap && snap.price) || askFor(item);
+  if (!(listing > 0)) return null;
+  const recent = state.itemActions
+    .filter(a => String(a.itemId) === String(item.itemId) && a.action === 'Offer Sent' && /^\s*poshmark/i.test(String(a.detail || '')))
+    .filter(a => daysSince(String(a.date || '').slice(0, 10)) <= POSHMARK_OFFER_LOOKBACK_DAYS)
+    .map(a => poshmarkOfferAmount(a.detail))
+    .filter(n => n > 0);
+  const lowest = recent.length ? Math.min(...recent) : null;
+  const ceiling = Math.floor(Math.min(listing * 0.9, lowest ? lowest * 0.9 : Infinity));
+  if (ceiling >= floor) return null;
+  const why = lowest
+    ? `a new Poshmark offer has to be at least 10% under your last one (${fmtMoney(lowest)}), so ${fmtMoney(ceiling)} at most`
+    : `a Poshmark offer has to be at least 10% under the ${fmtMoney(listing)} listing price, so ${fmtMoney(ceiling)} at most`;
+  return { label: 'No offer to send', reason: `${watchers} Poshmark liker${watchers === 1 ? '' : 's'}: ${why}, which is under your ${fmtMoney(floor)} floor. Lower the floor to offer again.` };
+}
+function ebayOfferBlock(item, watchers) {
+  const window = offerWindowFor(item.itemId, 'ebay', 'eBay');
   if (window && window.lapsed) {
-    return { label: 'No offer to send', reason: `eBay won't take an offer: the ${ebay.watchers} watcher${ebay.watchers === 1 ? ' has' : 's have'} been watching since ${prettyDay(window.since)}, past the ${OFFER_WINDOW_DAYS}-day window.` };
+    return { label: 'No offer to send', reason: `eBay won't take an offer: the ${watchers} watcher${watchers === 1 ? ' has' : 's have'} been watching since ${prettyDay(window.since)}, past the ${OFFER_WINDOW_DAYS}-day window.` };
   }
+  const watchersOn = date => {
+    const then = latestMetricsByItemPlatform(date).get(item.itemId + '|ebay');
+    return Number(then && then.watchers) || 0;
+  };
   const last = lastOfferOn(item.itemId, 'ebay');
   const sentOn = last && String(last.date || '').slice(0, 10);
-  if (!sentOn || daysSince(sentOn) > OFFER_WINDOW_DAYS) return '';
-  const then = latestMetricsByItemPlatform(sentOn).get(item.itemId + '|ebay');
-  const watchersThen = Number(then && then.watchers) || 0;
-  if (ebay.watchers > watchersThen) return '';
-  return { label: 'Offer sent', reason: `Every eBay watcher already got an offer on ${prettyDay(sentOn)} (${escapeHtml(String(last.detail || 'eBay'))}). eBay won't take another until a new watcher shows up.` };
+  if (sentOn && daysSince(sentOn) <= OFFER_WINDOW_DAYS && watchers <= watchersOn(sentOn)) {
+    return { label: 'Offer sent', reason: `Every eBay watcher already got an offer on ${prettyDay(sentOn)} (${String(last.detail || 'eBay')}). eBay won't take another until a new watcher shows up.` };
+  }
+  const inel = latestActionOfType(item.itemId, 'Offer Ineligible');
+  const inelOn = inel && /^\s*ebay/i.test(String(inel.detail || '')) && String(inel.date || '').slice(0, 10);
+  if (inelOn && daysSince(inelOn) <= OFFER_WINDOW_DAYS && watchers <= watchersOn(inelOn)) {
+    return { label: 'No offer to send', reason: `eBay's "Send offers - eligible" filter left this out on ${prettyDay(inelOn)}: its ${watchers} watcher${watchers === 1 ? ' is' : 's are'} already covered by an earlier or automated offer. It comes back when a new watcher shows up.` };
+  }
+  return null;
+}
+function offerBlockedReason(item, natural) {
+  const on = natural.watchedOn || [];
+  if (!on.length) return '';
+  const blocks = [];
+  for (const p of on) {
+    const b = p.id === 'ebay' ? ebayOfferBlock(item, p.watchers)
+      : p.id === 'poshmark' ? poshmarkOfferBlock(item, p.watchers)
+      : null;
+    if (!b) return '';
+    blocks.push(b);
+  }
+  const label = blocks.every(b => b.label === 'Offer sent') ? 'Offer sent' : 'No offer to send';
+  return { label, reason: blocks.map(b => b.reason).join(' ') };
 }
 
 function pricingActionFor(item) {
@@ -4955,13 +5008,34 @@ function pricingActionFor(item) {
   }
 
   if (natural.severity === 'opportunity') {
-    const offer = latestActionOfType(item.itemId, 'Offer Sent');
-    if (offer && daysSince(offer.date) <= HANDLED_SUPPRESS_DAYS) {
+    // An offer sent in the last week only covers the site it went out on:
+    // an eBay offer says nothing to Poshmark likers. The card stays live
+    // while some site with watchers has neither a recent offer nor a block.
+    const on = natural.watchedOn || [];
+    const recentOffer = id => {
+      const o = id === 'ebay' || id === 'poshmark' ? lastOfferOn(item.itemId, id) : latestActionOfType(item.itemId, 'Offer Sent');
+      return o && daysSince(String(o.date || '').slice(0, 10)) <= HANDLED_SUPPRESS_DAYS ? o : null;
+    };
+    const sentNote = offer => {
       const when = offer.date === today ? 'today' : `on ${offer.date}`;
-      return { ...natural, severity: 'handled', label: 'Offer sent', reason: `Offer sent ${when} via ${escapeHtml(offer.detail)}. Waiting to hear back.` };
+      return `Offer sent ${when} via ${offer.detail}.`;
+    };
+    if (!on.length) {
+      const offer = latestActionOfType(item.itemId, 'Offer Sent');
+      if (offer && daysSince(offer.date) <= HANDLED_SUPPRESS_DAYS) {
+        return { ...natural, severity: 'handled', label: 'Offer sent', reason: `${sentNote(offer)} Waiting to hear back.` };
+      }
+    } else {
+      const sent = on.map(p => recentOffer(p.id)).filter(Boolean);
+      const open = on.filter(p => !recentOffer(p.id));
+      const blocked = open.length ? offerBlockedReason(item, { ...natural, watchedOn: open }) : null;
+      if (!open.length || (blocked && sent.length)) {
+        const latest = sent.sort((a, b) => state.itemActions.indexOf(b) - state.itemActions.indexOf(a))[0];
+        const rest = blocked ? ` ${blocked.reason}` : '';
+        return { ...natural, severity: 'handled', label: 'Offer sent', reason: `${sentNote(latest)} Waiting to hear back.${rest}` };
+      }
+      if (blocked) return { ...natural, severity: 'handled', label: blocked.label, reason: blocked.reason };
     }
-    const blocked = offerBlockedReason(item, natural);
-    if (blocked) return { ...natural, severity: 'handled', label: blocked.label, reason: blocked.reason };
     const prepared = preparedOfferFor(item.itemId);
     if (prepared) natural = { ...natural, prepared };
   }
@@ -5261,7 +5335,7 @@ const PRICING_GROUPS = [
   { key: 'Refresh listing', title: 'Refresh listing', color: '#a1752e' },
   { key: 'Offer sent', title: 'Offer sent — waiting', color: '#1f5c64', collapsed: true },
   { key: 'Price dropped', title: 'Price dropped — waiting', color: '#1f5c64', collapsed: true },
-  { key: 'No offer to send', title: 'Watchers eBay won\'t take an offer for', color: '#56657a', collapsed: true },
+  { key: 'No offer to send', title: 'Watchers no offer can reach', color: '#56657a', collapsed: true },
   { key: 'Hold', title: 'On hold', color: '#56657a', collapsed: true },
   { key: 'Dismissed', title: 'Dismissed today', color: '#74849a', collapsed: true },
   { key: 'On track', title: 'On track', color: '#1f5c46', collapsed: true },
