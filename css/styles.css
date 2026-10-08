@@ -3437,3 +3437,21 @@ h1.brand { display: flex; align-items: center; gap: 12px; letter-spacing: 0; }
 :root[data-theme="dark"] { --plat-ink: 35%; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --plat-ink: 35%; } }
 .tg-label { font-size: .66rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--text-faint); margin-left: 2px; }
+
+/* Price cuts you plan from the item panel, and the "You" mark on them in Planned tasks. */
+.you-badge { display: inline-flex; align-items: center; padding: 1px 7px; border-radius: 999px; font-size: .62rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; background: var(--primary); color: #fff; vertical-align: 1px; }
+.task-lines li.task-cut { border-left: 3px solid var(--primary); }
+.dr-cut-form, .dr-cut-planned { padding: 12px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-elevated); }
+.dr-cut-planned { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: .86rem; }
+.dr-cut-planned > span:nth-child(2) { flex: 1 1 200px; }
+.dr-cut-quick { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.dr-cut-chip { font: inherit; font-size: .8rem; font-weight: 700; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--bg-card); color: var(--text); cursor: pointer; }
+.dr-cut-chip small { font-weight: 500; color: var(--text-muted); }
+.dr-cut-chip:hover { border-color: var(--primary); }
+.dr-cut-field { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; font-size: .84rem; font-weight: 700; }
+.dr-cut-price { width: 120px; font: inherit; padding: 6px 9px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-card); color: var(--text); }
+.dr-cut-sites { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-bottom: 10px; font-size: .82rem; }
+.dr-cut-sites label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+.dr-cut-sites small { color: var(--text-muted); }
+.dr-cut-msg { margin: 0 0 10px; font-size: .8rem; color: var(--text-muted); }
+.dr-cut-msg.bad { padding: 7px 10px; border-radius: var(--radius-sm); border-left: 3px solid var(--warn); background: var(--warn-bg); color: var(--text); }

@@ -418,6 +418,21 @@ function collectResaleActions() {
       completable: true,
     });
   });
+  active.forEach(item => {
+    const cut = openPriceCutFor(item.itemId);
+    if (!cut) return;
+    const key = `cut:${item.itemId}`;
+    actions.push({
+      id: key,
+      title: itemTitle(item),
+      detail: `Your price cut: ${priceCutSummary(cut)}.`,
+      meta: `Floor ${item.floorPrice ? fmtMoney(parseMoney(item.floorPrice)) : '—'}`,
+      kind: 'cut',
+      tag: 'Price Cut · You',
+      itemId: item.itemId,
+      completable: true,
+    });
+  });
   openLocalDeals().forEach(deal => {
     const item = state.inventory.find(it => String(it.itemId) === String(deal.itemId));
     const title = item ? itemTitle(item) : String(deal.itemId);
@@ -556,6 +571,10 @@ async function completeResaleWorkroomItem(id) {
     const platformLabel = platformMeta(platformIdValue).label || platformIdValue;
     await recordItemAction(itemId, 'Listing Posted', platformLabel);
     renderAction();
+  } else if (key.startsWith('cut:')) {
+    const itemId = key.slice('cut:'.length);
+    const cut = openPriceCutFor(itemId);
+    if (cut) await completePriceCut(itemId, cut.text);
   } else if (key.startsWith('deal:')) {
     // Local deals need a meetup status change in-app; unstar only from hub complete.
     setFeaturedAction(key, false);
@@ -1853,13 +1872,42 @@ function laggerFor(itemId) {
 // can tick them off individually.
 function openTasksFor(itemId) {
   const done = new Set(state.itemActions
-    .filter(a => String(a.itemId) === String(itemId) && a.action === 'Task Done')
+    .filter(a => String(a.itemId) === String(itemId) && (a.action === 'Task Done' || a.action === 'Task Canceled'))
     .map(a => String(a.detail || '').trim()));
   const seen = new Set();
   return state.itemActions
     .filter(a => String(a.itemId) === String(itemId) && a.action === 'Task')
     .map(a => String(a.detail || '').trim())
     .filter(t => t && !done.has(t) && !seen.has(t) && seen.add(t));
+}
+// Price cuts you plan yourself from an item's panel. Each one is a Task row
+// reading "Price cut to $36 on eBay, Poshmark (was $39.99) · your call", so it
+// sits in Planned tasks until you (or the daily run) make the cut on those sites.
+// Reads "Price cut to $22 on eBay (was $30), Poshmark (was $33) · your call".
+const PRICE_CUT_RE = /^Price cut to \$([\d.]+) on (.+?)(?: · your call)?$/;
+function parsePriceCut(text) {
+  const m = String(text || '').match(PRICE_CUT_RE);
+  if (!m) return null;
+  const parts = m[2].split(/,\s*/).map(p => p.match(/^(.+?) \(was \$([\d.]+)\)$/));
+  if (!parts.length || parts.some(p => !p)) return null;
+  const was = parts.map(p => ({ site: p[1], from: Number(p[2]) }));
+  return { to: Number(m[1]), was, sites: was.map(w => w.site), from: Math.max(...was.map(w => w.from)) };
+}
+function priceCutTaskText(to, was) {
+  return `Price cut to ${moneyText(to)} on ${was.map(w => `${w.site} (was ${moneyText(w.from)})`).join(', ')} · your call`;
+}
+function priceCutSummary(cut) {
+  return `${cut.was.map(w => `${w.site} ${moneyText(w.from)}`).join(', ')} → ${moneyText(cut.to)}`;
+}
+function openPriceCutFor(itemId) {
+  const text = openTasksFor(itemId).find(t => parsePriceCut(t));
+  return text ? { text, ...parsePriceCut(text) } : null;
+}
+// Done on a price cut also logs the Price Drop, so suggestions treat it as handled.
+async function completePriceCut(itemId, text) {
+  const cut = parsePriceCut(text);
+  if (cut) await recordItemAction(itemId, 'Price Drop', `${cut.from}->${cut.to}`);
+  await recordItemAction(itemId, 'Task Done', text);
 }
 function allOpenTasks() {
   const out = [];
@@ -2562,6 +2610,7 @@ const ACTIVITY_META = {
   'Ignored': { icon: 'xcircle', kind: 'tasks', label: 'Dismissed' },
   'Task': { icon: 'tasks', kind: 'tasks', label: 'Task' },
   'Task Done': { icon: 'check', kind: 'tasks', label: 'Task done' },
+  'Task Canceled': { icon: 'xcircle', kind: 'tasks', label: 'Task canceled' },
   'Focus': { icon: 'target', kind: 'focus', label: 'Focused' },
   'Lagger': { icon: 'alert', kind: 'behind', label: 'Marked lagger' },
 };
@@ -2659,12 +2708,81 @@ function itemDrawerHTML(item) {
     ${gap && gap.why ? `<div class="opt-gap dr-gap">${escapeHtml(gap.why)}</div>` : ''}
     ${siteRows ? `<section class="dr-sec"><h3>${icon('layers')} By site</h3><table class="plat-table dr-table"><thead><tr><th>Site</th><th>Price</th><th>Impr.</th><th>Views</th><th>Opens</th><th>Watch</th><th>As of</th></tr></thead><tbody>${siteRows}</tbody></table></section>` : ''}
     ${series.length > 1 ? `<section class="dr-sec"><h3>${icon('activity')} Last ${series.length} pulls</h3><div class="dr-sparks">${sparkHTML(series, 'views', 'Views')}${sparkHTML(series, 'opens', 'Opens')}${sparkHTML(series, 'watchers', 'Watching')}</div></section>` : ''}
+    ${sold ? '' : priceCutFormHTML(item, live, floor)}
     <section class="dr-sec"><h3>${icon('clock')} Activity</h3>
       ${activity.length ? `<ol class="dr-timeline">${activity.map(a => {
         const m = ACTIVITY_META[a.action] || { icon: 'note', kind: 'tasks', label: a.action };
         return `<li class="kpi-${m.kind}"><span class="dr-dot">${icon(m.icon)}</span><div><div class="dr-ev"><b>${escapeHtml(m.label)}</b><time>${escapeHtml(prettyDay(String(a.date).slice(0, 10)))}</time></div>${a.detail ? `<p>${escapeHtml(String(a.detail))}</p>` : ''}</div></li>`;
       }).join('')}</ol>` : '<p class="td-empty">Nothing logged for this item yet.</p>'}
     </section>`;
+}
+// "Plan a price cut" in the item panel: pick a new price and the sites, and it
+// goes to Planned tasks marked as your call. Nothing on the listings changes
+// until you (or the daily run) make the cut and mark it done.
+function priceCutFormHTML(item, live, floor) {
+  if (!live.length) return '';
+  const planned = openPriceCutFor(item.itemId);
+  if (planned) {
+    return `<section class="dr-sec dr-cut"><h3>${icon('down')} Your price cut</h3>
+      <div class="dr-cut-planned"><span class="you-badge">You</span>
+        <span>${escapeHtml(priceCutSummary(planned))}. Waiting in Planned tasks for you or Claude to make.</span>
+        <button type="button" class="btn secondary small dr-cut-cancel">Cancel</button></div>
+    </section>`;
+  }
+  // Quick picks come off the lowest live price, so each one is a cut on every site.
+  const ask = Math.min(...live.map(r => r.price));
+  const quick = [10, 15, 20, 25].map(p => Math.round(ask * (1 - p / 100))).filter((v, i, a) => v > 0 && v < ask && v !== floor && a.indexOf(v) === i);
+  return `<section class="dr-sec dr-cut"><h3>${icon('down')} Plan a price cut</h3>
+    <div class="dr-cut-form">
+      <div class="dr-cut-quick">${quick.map(v => `<button type="button" class="dr-cut-chip" data-cut-to="${v}">${moneyText(v)} <small>−${Math.round((1 - v / ask) * 100)}%</small></button>`).join('')}${floor > 0 && floor < ask ? `<button type="button" class="dr-cut-chip" data-cut-to="${floor}">Floor ${moneyText(floor)}</button>` : ''}</div>
+      <label class="dr-cut-field"><span>New price</span><input type="number" class="dr-cut-price" min="0" step="0.01" inputmode="decimal" placeholder="${escapeHtml(String(ask))}"></label>
+      <div class="dr-cut-sites">${live.map(r => `<label><input type="checkbox" data-cut-site="${escapeHtml(r.meta.label)}" data-cut-now="${r.price}" checked> ${escapeHtml(r.meta.label)} <small>now ${moneyText(r.price)}</small></label>`).join('')}</div>
+      <p class="dr-cut-msg" hidden></p>
+      <button type="button" class="btn small dr-cut-add">Add to Planned tasks</button>
+    </div>
+  </section>`;
+}
+function wirePriceCut(panel, item) {
+  const sec = panel.querySelector('.dr-cut');
+  if (!sec) return;
+  const refresh = () => fillItemDrawer(panel, item);
+  sec.querySelector('.dr-cut-cancel')?.addEventListener('click', async ev => {
+    ev.currentTarget.disabled = true;
+    const planned = openPriceCutFor(item.itemId);
+    if (planned) await recordItemAction(item.itemId, 'Task Canceled', planned.text);
+    renderAction(); notifyWorkroom(); refresh();
+  });
+  const input = sec.querySelector('.dr-cut-price');
+  const msg = sec.querySelector('.dr-cut-msg');
+  const add = sec.querySelector('.dr-cut-add');
+  if (!input) return;
+  const say = (text, bad) => { msg.hidden = !text; msg.textContent = text || ''; msg.classList.toggle('bad', !!bad); };
+  const reset = () => { add.dataset.confirm = ''; add.textContent = 'Add to Planned tasks'; say(''); };
+  sec.querySelectorAll('.dr-cut-chip').forEach(b => b.addEventListener('click', () => { input.value = b.dataset.cutTo; reset(); input.focus(); }));
+  input.addEventListener('input', reset);
+  sec.querySelectorAll('[data-cut-site]').forEach(b => b.addEventListener('change', reset));
+  add.addEventListener('click', async () => {
+    const to = Math.round(Number(input.value) * 100) / 100;
+    const picked = [...sec.querySelectorAll('[data-cut-site]:checked')];
+    if (!(to > 0)) return say('Enter the new price first.', true);
+    if (!picked.length) return say('Pick at least one site.', true);
+    const notLower = picked.filter(b => to >= Number(b.dataset.cutNow));
+    if (notLower.length) return say(`That isn't a cut on ${notLower.map(b => `${b.dataset.cutSite} (now ${moneyText(Number(b.dataset.cutNow))})`).join(', ')}.`, true);
+    const floor = parseMoney(item.floorPrice);
+    if (floor > 0 && to < floor && add.dataset.confirm !== '1') {
+      add.dataset.confirm = '1';
+      add.textContent = 'Add anyway';
+      return say(`${moneyText(to)} is under your ${moneyText(floor)} floor. Tap again to plan it anyway.`, true);
+    }
+    add.disabled = true;
+    say('Adding…');
+    await recordItemAction(item.itemId, 'Task', priceCutTaskText(to, picked.map(b => ({ site: b.dataset.cutSite, from: Number(b.dataset.cutNow) }))));
+    renderAction(); notifyWorkroom(); refresh();
+  });
+}
+function fillItemDrawer(panel, item) {
+  panel.innerHTML = itemDrawerHTML(item);
+  wirePriceCut(panel, item);
 }
 function openItemDrawer(itemId) {
   const item = state.inventory.find(it => String(it.itemId) === String(itemId));
@@ -2680,7 +2798,7 @@ function openItemDrawer(itemId) {
     document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && !back.hidden) closeItemDrawer(); });
   }
   const panel = back.querySelector('.drawer');
-  panel.innerHTML = itemDrawerHTML(item);
+  fillItemDrawer(panel, item);
   panel.scrollTop = 0;
   back.hidden = false;
   document.body.classList.add('drawer-open');
@@ -3937,11 +4055,11 @@ function renderTaskList() {
       <div class="ar-title-row"><h3>${escapeHtml(itemShortName(item))}</h3><span class="stl-need-count">${tasks.length} task${tasks.length === 1 ? '' : 's'}</span></div>
       <div class="ar-meta-line">${priceLineHTML(item)} ${expectedSaleChipHTML(item)}</div>
       <ul class="task-lines">${tasks.map(t => `
-        <li><span>${escapeHtml(t)}</span><button type="button" class="btn small task-done" data-id="${escapeHtml(item.itemId)}" data-task="${escapeHtml(t)}">Done</button></li>`).join('')}</ul>
+        <li${parsePriceCut(t) ? ' class="task-cut"' : ''}><span>${parsePriceCut(t) ? '<span class="you-badge" title="You planned this price cut">You</span> ' + escapeHtml(t.replace(/ · your call$/, '')) : escapeHtml(t)}</span><button type="button" class="btn small task-done" data-id="${escapeHtml(item.itemId)}" data-task="${escapeHtml(t)}">Done</button></li>`).join('')}</ul>
     </div>`).join('')}</div>`;
   container.querySelectorAll('.task-done').forEach(btn => btn.addEventListener('click', async () => {
     btn.disabled = true;
-    await recordItemAction(btn.dataset.id, 'Task Done', btn.dataset.task);
+    await completePriceCut(btn.dataset.id, btn.dataset.task);
     renderTaskList();
     renderActionSummary();
     renderOptimizeView();
@@ -5040,6 +5158,10 @@ function pricingActionFor(item) {
     if (prepared) natural = { ...natural, prepared };
   }
   if (natural.severity === 'urgent' || (natural.severity === 'attention' && natural.label === 'Refresh listing')) {
+    const cut = openPriceCutFor(item.itemId);
+    if (cut) {
+      return { ...natural, severity: 'handled', label: 'Price dropped', reason: `Your cut to ${moneyText(cut.to)} on ${cut.sites.join(', ')} is in Planned tasks.` };
+    }
     const drop = latestActionOfType(item.itemId, 'Price Drop');
     if (drop && daysSince(drop.date) <= HANDLED_SUPPRESS_DAYS) {
       const parsed = parsePriceDropDetail(drop.detail);
