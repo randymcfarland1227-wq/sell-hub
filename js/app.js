@@ -1302,20 +1302,28 @@ async function markSold(btn, onChange) {
   const card = btn.closest('.item-detail');
   const status = card.querySelector('.ms-status');
   const price = card.querySelector('.ms-price').value.trim();
-  const buyer = card.querySelector('.ms-buyer').value.trim();
   const platformLabel = card.querySelector('.ms-platform').value;
-  const netRaw = card.querySelector('.ms-net').value.trim();
-  const itemId = btn.dataset.id;
-  const sourceTab = btn.dataset.source;
   if (!price) { status.textContent = 'Enter a sold price.'; return; }
   if (!platformLabel) { status.textContent = 'Pick the site it sold on, so Stats can total it.'; return; }
   if (!connected()) { status.textContent = 'Connect your Sheet to mark items sold — see SETUP.md.'; return; }
 
   status.textContent = 'Saving...';
+  const err = await saveSold({
+    itemId: btn.dataset.id, sourceTab: btn.dataset.source, price, platformLabel,
+    buyer: card.querySelector('.ms-buyer').value.trim(), netRaw: card.querySelector('.ms-net').value.trim(),
+  });
+  if (err) { status.textContent = err; return; }
+  status.textContent = 'Marked sold.';
+  onChange();
+}
+// Shared by the inventory card and the item panel. Returns an error message,
+// or '' once the Sheet has the sale. The sold site's queue row goes to Sold so
+// the other sites still live show up under End listings.
+async function saveSold({ itemId, sourceTab, price, platformLabel, buyer, netRaw }) {
   try {
     const netCash = netRaw ? parseMoney(netRaw) : '';
     const res = await apiPost('markSold', { itemId, sourceTab, soldPrice: parseMoney(price), buyer, platform: platformLabel, netCash, dateSold: todayStr() });
-    if (!res || !res.ok) { status.textContent = (res && res.error) || 'Could not find that row in the Sheet.'; return; }
+    if (!res || !res.ok) return (res && res.error) || 'Could not find that row in the Sheet.';
     const item = state.inventory.find(i => i.itemId === itemId);
     if (item) { item.sourceStatus = 'Sold'; item.soldPrice = parseMoney(price); item.buyer = buyer; if (netCash !== '') item.netCash = netCash; }
     const saleId = `${platformId(platformLabel) || 'other'}-${itemId}`;
@@ -1323,14 +1331,18 @@ async function markSold(btn, onChange) {
       saleId, itemId, item: item ? [item.brand, item.item].filter(Boolean).join(' ') : itemId, platform: platformLabel,
       salePrice: parseMoney(price), netCash, dateSold: todayStr(), source: 'Marked sold on site',
     }]);
+    const entry = postingQueueEntry(itemId, platformId(platformLabel));
+    if (entry) {
+      entry.status = 'Sold';
+      try { await apiPost('setQueueStatus', { listingId: entry.listingId, itemId, platform: platformLabel, status: 'Sold' }); } catch { /* the sale itself is saved */ }
+    }
     await recordItemAction(itemId, 'Sold', price);
-    status.textContent = 'Marked sold.';
-    onChange();
     renderWheel();
     renderStats();
     renderAction();
+    return '';
   } catch {
-    status.textContent = 'Could not save to your Sheet.';
+    return 'Could not save to your Sheet.';
   }
 }
 
@@ -2671,7 +2683,7 @@ function itemDrawerHTML(item) {
     const price = live.find(r => r.meta.id === d.meta.id);
     const opens = snapOpens(snap, d.meta.id);
     return `<tr style="--plat:${d.meta.color}">
-      <td><span class="pt-site"><i></i>${escapeHtml(d.meta.label)}</span>${status.ended.includes(d) ? ' <small>ended</small>' : ''}</td>
+      <td>${siteLabelHTML(d)}${status.ended.includes(d) ? ' <small>ended</small>' : ''}</td>
       <td>${price ? moneyText(price.price) : '—'}</td>
       <td>${snap ? (Number(snap.impressions) || 0).toLocaleString() : '—'}</td>
       <td>${snap ? snapshotViews(snap, d.meta.id).toLocaleString() : '—'}</td>
@@ -2709,6 +2721,7 @@ function itemDrawerHTML(item) {
     ${siteRows ? `<section class="dr-sec"><h3>${icon('layers')} By site</h3><table class="plat-table dr-table"><thead><tr><th>Site</th><th>Price</th><th>Impr.</th><th>Views</th><th>Opens</th><th>Watch</th><th>As of</th></tr></thead><tbody>${siteRows}</tbody></table></section>` : ''}
     ${series.length > 1 ? `<section class="dr-sec"><h3>${icon('activity')} Last ${series.length} pulls</h3><div class="dr-sparks">${sparkHTML(series, 'views', 'Views')}${sparkHTML(series, 'opens', 'Opens')}${sparkHTML(series, 'watchers', 'Watching')}</div></section>` : ''}
     ${sold ? '' : priceCutFormHTML(item, live, floor)}
+    ${sold ? '' : drawerSoldFormHTML(item, live)}
     <section class="dr-sec"><h3>${icon('clock')} Activity</h3>
       ${activity.length ? `<ol class="dr-timeline">${activity.map(a => {
         const m = ACTIVITY_META[a.action] || { icon: 'note', kind: 'tasks', label: a.action };
@@ -2780,9 +2793,66 @@ function wirePriceCut(panel, item) {
     renderAction(); notifyWorkroom(); refresh();
   });
 }
+// "Mark as sold" in the item panel: same save as the inventory card. Picking
+// the site fills in that site's live price, which you can change.
+function drawerSoldFormHTML(item, live) {
+  const first = live[0];
+  return `<section class="dr-sec dr-sold"><h3>${icon('check')} Mark as sold</h3>
+    <div class="dr-cut-form">
+      <div class="dr-sold-grid">
+        <label class="dr-cut-field"><span>Sold on</span><select class="dr-sold-site"><option value="">Pick a site…</option>${soldOnOptionsHTML(item)}</select></label>
+        <label class="dr-cut-field"><span>Price</span><input type="number" class="dr-cut-price dr-sold-price" min="0" step="0.01" inputmode="decimal" placeholder="${first ? escapeHtml(String(first.price)) : '0.00'}"></label>
+        <label class="dr-cut-field"><span>You kept</span><input type="number" class="dr-cut-price dr-sold-net" min="0" step="0.01" inputmode="decimal" placeholder="optional"></label>
+        <label class="dr-cut-field"><span>Buyer</span><input type="text" class="dr-cut-price dr-sold-buyer" placeholder="optional"></label>
+      </div>
+      <p class="dr-cut-msg" hidden></p>
+      <button type="button" class="btn small dr-sold-save">Mark sold</button>
+    </div>
+  </section>`;
+}
+function wireDrawerSold(panel, item) {
+  const sec = panel.querySelector('.dr-sold');
+  if (!sec) return;
+  const site = sec.querySelector('.dr-sold-site');
+  const price = sec.querySelector('.dr-sold-price');
+  const msg = sec.querySelector('.dr-cut-msg');
+  const save = sec.querySelector('.dr-sold-save');
+  const say = (text, bad) => { msg.hidden = !text; msg.textContent = text || ''; msg.classList.toggle('bad', !!bad); };
+  site.addEventListener('change', () => {
+    const row = livePricesFor(item).find(r => r.meta.label === site.value);
+    if (row && (!price.value || price.dataset.auto === '1')) { price.value = row.price; price.dataset.auto = '1'; }
+    say('');
+  });
+  price.addEventListener('input', () => { price.dataset.auto = ''; say(''); });
+  save.addEventListener('click', async () => {
+    if (!site.value) return say('Pick the site it sold on.', true);
+    if (!(Number(price.value) > 0)) return say('Enter the sold price.', true);
+    if (!connected()) return say('Connect your Sheet to mark items sold — see SETUP.md.', true);
+    save.disabled = true;
+    say('Saving…');
+    const err = await saveSold({
+      itemId: item.itemId, sourceTab: item.sourceTab || '', price: price.value, platformLabel: site.value,
+      buyer: sec.querySelector('.dr-sold-buyer').value.trim(), netRaw: sec.querySelector('.dr-sold-net').value.trim(),
+    });
+    if (err) { save.disabled = false; return say(err, true); }
+    refreshInventoryViews();
+    notifyWorkroom();
+    fillItemDrawer(panel, item);
+  });
+}
+// Site name in the panel's By site table, linked to the live listing when the
+// queue has its URL.
+function siteLabelHTML(d) {
+  const label = `<i></i>${escapeHtml(d.meta.label)}`;
+  const url = d.entry && String(d.entry.listingUrl || '').trim();
+  return url
+    ? `<a class="pt-site pt-site-link" href="${escapeHtml(url)}" target="_blank" rel="noopener" title="Open the ${escapeHtml(d.meta.label)} listing">${label}<span aria-hidden="true">↗</span></a>`
+    : `<span class="pt-site">${label}</span>`;
+}
 function fillItemDrawer(panel, item) {
   panel.innerHTML = itemDrawerHTML(item);
   wirePriceCut(panel, item);
+  wireDrawerSold(panel, item);
 }
 function openItemDrawer(itemId) {
   const item = state.inventory.find(it => String(it.itemId) === String(itemId));

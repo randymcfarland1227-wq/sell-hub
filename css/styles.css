@@ -3455,3 +3455,11 @@ h1.brand { display: flex; align-items: center; gap: 12px; letter-spacing: 0; }
 .dr-cut-sites small { color: var(--text-muted); }
 .dr-cut-msg { margin: 0 0 10px; font-size: .8rem; color: var(--text-muted); }
 .dr-cut-msg.bad { padding: 7px 10px; border-radius: var(--radius-sm); border-left: 3px solid var(--warn); background: var(--warn-bg); color: var(--text); }
+
+/* Item panel: site names link to the live listing; Mark as sold form */
+.pt-site-link { text-decoration: none; }
+.pt-site-link span { font-size: .78em; opacity: .7; }
+.pt-site-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+.dr-sold-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0 14px; }
+.dr-sold-grid .dr-cut-field span { min-width: 58px; }
+.dr-sold-grid .dr-cut-price, .dr-sold-site { flex: 1; min-width: 0; width: auto; font: inherit; padding: 6px 9px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-card); color: var(--text); }
