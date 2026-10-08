@@ -437,7 +437,7 @@ function formatDate(v) {
 // they're read directly from there, at the row Listing Hub points to (the unnamed
 // column right after "Source tab" — see markSold() for the same technique).
 function getSourceRowExtras(ss, cache, sourceTabName, sourceRowNum) {
-  var empty = { dateListed: '', buyer: '', soldPrice: '', netCash: '' };
+  var empty = { dateListed: '', buyer: '', soldPrice: '', netCash: '', status: '' };
   if (!sourceTabName || !sourceRowNum) return empty;
 
   var header = cache[sourceTabName];
@@ -463,6 +463,7 @@ function getSourceRowExtras(ss, cache, sourceTabName, sourceRowNum) {
     buyer: val(rowVals, header.colMap, 'Buyer'),
     soldPrice: val(rowVals, header.colMap, 'Sold price'),
     netCash: val(rowVals, header.colMap, 'Net cash'),
+    status: val(rowVals, header.colMap, 'Status'),
   };
 }
 
@@ -486,7 +487,10 @@ function getInventory() {
     out.push({
       itemId: String(itemId),
       sourceTab: sourceTab,
-      sourceStatus: val(row, t.colMap, 'Source status'),
+      // The source row's Status is what markSold/setListingStatus write, so it
+      // wins; the Listing Hub's copy can be a stale typed value (MISC-036 stayed
+      // "Photograph" after it sold on 2026-10-08).
+      sourceStatus: extras.status || val(row, t.colMap, 'Source status'),
       category: val(row, t.colMap, 'Category'),
       clothingType: val(row, t.colMap, 'Clothing Type'),
       brand: val(row, t.colMap, 'Brand'),
@@ -956,6 +960,11 @@ function updateItem(body) {
     { key: 'platform', column: 'Platform', numeric: false },
     { key: 'brand', column: 'Brand', numeric: false },
     { key: 'item', column: 'Item', numeric: false },
+    // Size and Condition were read-only here, so a correction to either had to
+    // be typed into the Sheet by hand — which meant it usually just got logged
+    // as a note and never actually applied.
+    { key: 'size', column: 'Size', numeric: false },
+    { key: 'condition', column: 'Condition', numeric: false },
   ].filter(function (f) { return Object.prototype.hasOwnProperty.call(body, f.key); });
 
   var logged = [];
