@@ -386,10 +386,13 @@ function collectResaleActions() {
     const missing = platformsStatusFor(item).missing;
     if (!missing.length) return;
     const key = listTaskKey(item.itemId);
+    // Parked in Item prep (it has a prep note): a decision to make, not a post to do yet.
+    const prep = prepNoteFor(item.itemId);
     actions.push({
       id: key,
       title: itemTitle(item),
-      detail: `Post it on ${missing.map(m => m.meta.label).join(', ')}.`,
+      detail: prep ? `Prep: ${prep}` : `Post it on ${missing.map(m => m.meta.label).join(', ')}.`,
+      shelf: prep ? 'prep' : undefined,
       meta: askFor(item) ? `List price ${fmtMoney(askFor(item))}` : 'No list price yet',
       kind: 'list',
       tag: `List (${missing.map(m => shortPlatformLabel(m.meta)).join(', ')})`,
@@ -422,10 +425,14 @@ function collectResaleActions() {
     const cut = openPriceCutFor(item.itemId);
     if (!cut) return;
     const key = `cut:${item.itemId}`;
+    // An offer is out on this item: the cut waits until it ends (never stack an offer and a drop).
+    const pricing = pricingActionFor(item);
+    const waiting = pricing && pricing.label === 'Offer sent';
     actions.push({
       id: key,
       title: itemTitle(item),
-      detail: `Your price cut: ${priceCutSummary(cut)}.`,
+      detail: waiting ? `Your price cut: ${priceCutSummary(cut)} — after the offer out on it ends.` : `Your price cut: ${priceCutSummary(cut)}.`,
+      shelf: waiting ? 'waiting' : undefined,
       meta: `Floor ${item.floorPrice ? fmtMoney(parseMoney(item.floorPrice)) : '—'}`,
       kind: 'cut',
       tag: 'Price Cut · You',
@@ -504,6 +511,8 @@ function resaleWorkroomSnapshot() {
     originUrl: RESALE_ORIGIN_URL,
     // Task type shown before the title on Life Hub ("Ship", "End Listing · Depop", …)
     tag: a.tag,
+    // Life Hub keeps these off the open count: 'prep' = a decision to make, 'waiting' = blocked by an offer
+    ...(a.shelf ? { shelf: a.shelf } : {}),
   }));
   const featured = actions.filter(a => a.starred ?? isFeaturedAction(a.id)).map(a => ({
     id: a.id,
