@@ -360,9 +360,13 @@ function buildOpportunities({ trends = [], intel = [], history = [], watchlist =
     const entry = ensure(id, row.searchTerm);
     entry.intel = { ...entry.intel, ...row, opportunityId: id };
   });
+  // Sourcing Intel is the list of targets. Market Trends keeps rows for
+  // targets that were deleted (e.g. the vague ones retired 2026-10-13), so
+  // once Intel has loaded a trend row only attaches to a target it names.
+  const intelLoaded = byId.size > 0;
   trends.forEach(row => {
     const id = row.opportunityId || opportunityIdFor(row.searchTerm);
-    if (!id) return;
+    if (!id || (intelLoaded && !byId.has(id))) return;
     const entry = ensure(id, row.searchTerm);
     entry.rows.push(row);
     if (!entry.intel.category && row.category) entry.intel.category = row.category;
@@ -695,6 +699,7 @@ function laneBuyable(opp) {
 function laneQualifies(opp, lane, config) {
   const d = opp.derived;
   if (!d.hasMarketData) return false;
+  if (lane.keyword) return String(opp.intel.keywords || '').toLowerCase().split(/[,\s]+/).includes(lane.keyword);
   if (lane.frequency && !lane.frequency.includes(String(opp.intel.thriftFrequency || ''))) return false;
   const min = lane.min || {};
   if (min.score !== undefined && d.score < min.score) return false;
@@ -761,7 +766,19 @@ function buildLanes(opps, config) {
   });
 }
 
-// Platform Trends rows (Depop's "Popular this week" so far): the newest pull
+// A buyer search ("carhartt detroit jacket") rarely equals a target's name
+// ("Carhartt Detroit Jacket J97"), so also match when every word of the
+// search shows up in the target's name or eBay query.
+function termWordsMatch(term, opps) {
+  const words = String(term || '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter(Boolean);
+  if (words.length < 2) return null;
+  const hay = o => (String(o.searchTerm || '') + ' ' + String(o.intel && o.intel.ebayQuery || ''))
+    .toLowerCase().replace(/[^a-z0-9 ]+/g, ' ');
+  return opps.find(o => { const h = ' ' + hay(o) + ' '; return words.every(w => h.includes(' ' + w + ' ')); }) || null;
+}
+
+// Platform Trends rows (Depop "Popular this week", eBay search suggestions):
+// the newest pull
 // per platform, with a term matched to a researched opportunity where one
 // exists so a trending search can jump straight into the comps.
 function summarizePlatformTrends(rows, opps) {
@@ -785,7 +802,8 @@ function summarizePlatformTrends(rows, opps) {
       .map(row => {
         const slug = opportunityIdFor(row.term);
         const match = opps.find(o => o.id === slug) ||
-          opps.find(o => o.searchTerm.toLowerCase() === row.term.toLowerCase()) || null;
+          opps.find(o => o.searchTerm.toLowerCase() === row.term.toLowerCase()) ||
+          termWordsMatch(row.term, opps) || null;
         return { ...row, opportunity: match };
       }),
   })).sort((a, b) => a.platform.localeCompare(b.platform));

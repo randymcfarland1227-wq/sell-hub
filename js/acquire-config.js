@@ -85,6 +85,18 @@ const ACQUIRE_CONFIG = {
   // Every threshold here is a claim about the data, so nothing lands on a
   // shelf without the numbers behind it.
   lanes: [
+    // Targets tagged "your-sales" in Sourcing Intel Keywords: same kind of
+    // item as something already sold (two fashion/beauty coffee-table books,
+    // UGGs, a TI-84) or a line that sells well in the shop (Brooks).
+    {
+      id: 'yoursales',
+      title: "Like what you've sold",
+      icon: '💸',
+      blurb: "Close cousins of things that already sold for you — e.g. both books you've sold were fashion/beauty coffee-table titles.",
+      empty: 'No targets are tagged as matching your sales yet.',
+      keyword: 'your-sales',
+      sort: 'score',
+    },
     {
       id: 'everyday',
       title: 'Everyday thrift finds',
