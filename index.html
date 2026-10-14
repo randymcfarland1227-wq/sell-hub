@@ -15,7 +15,7 @@
   // Apply the saved theme before first paint so the page never flashes the wrong one.
   try { var t = localStorage.getItem('sellHub.theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
 </script>
-<link rel="stylesheet" href="css/styles.css?v=20261008-drawer-sold">
+<link rel="stylesheet" href="css/styles.css?v=20261014-cash-out">
 </head>
 <body>
 
@@ -220,20 +220,20 @@
     </div>
 
     <h3 class="subhead" id="sec-sales">Sales by site</h3>
-    <p class="section-intro" style="margin-top:0">What each site sold for, what you kept after fees and shipping labels, and the cash each site is holding for you. Available cash can be withdrawn now; pending or on hold is still clearing.</p>
+    <p class="section-intro" style="margin-top:0">What each site sold for, what you kept after fees and shipping labels, and the cash each site is holding for you. <b>Ready to cash out</b> can be withdrawn now; pending or on hold is still clearing. The daily update checks both sites and marks the sales in each payout as Cashed out.</p>
     <div class="stat-tiles" id="salesTotals"></div>
     <div class="platform-cards sales-cards" id="salesCards"></div>
 
-    <button class="btn add-toggle-btn" id="balanceAddToggle" aria-expanded="false" aria-controls="balanceAddPanel">+ Update available cash</button>
+    <button class="btn add-toggle-btn" id="balanceAddToggle" aria-expanded="false" aria-controls="balanceAddPanel">+ Update cash balances</button>
     <div class="panel" id="balanceAddPanel" style="display:none">
-      <h3>Update available cash</h3>
+      <h3>Update cash balances</h3>
       <div class="field-row">
         <div class="field">
           <label for="balancePlatform">Site</label>
           <select id="balancePlatform"></select>
         </div>
         <div class="field">
-          <label for="balanceAvailable">Available <span class="optional">ready to withdraw</span></label>
+          <label for="balanceAvailable">Ready to cash out <span class="optional">eBay "Available funds" · Poshmark "Redeemable"</span></label>
           <input type="number" id="balanceAvailable" step="0.01" inputmode="decimal" placeholder="0.00">
         </div>
       </div>
@@ -247,7 +247,7 @@
           <input type="text" id="balanceNotes" placeholder="e.g. payout scheduled Friday">
         </div>
       </div>
-      <button class="btn" id="saveBalanceBtn">Save available cash</button>
+      <button class="btn" id="saveBalanceBtn">Save cash balances</button>
       <div class="status-msg" id="balanceStatus" role="status"></div>
     </div>
 
@@ -588,7 +588,7 @@
 <script src="js/config.js?v=20260930-listonly"></script>
 <script src="js/data.js?v=20260930-listonly"></script>
 <script src="js/comps.js?v=20261005-comps"></script>
-<script src="js/app.js?v=20261009-lifehub-shelves"></script>
+<script src="js/app.js?v=20261014-cash-out"></script>
 <script src="js/acquire-config.js?v=20261013-specific"></script>
 <script src="js/acquire-model.js?v=20261013-specific"></script>
 <script src="js/acquire.js?v=20260930-listonly"></script>

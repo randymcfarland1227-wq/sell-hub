@@ -885,6 +885,7 @@ details.cat-section:not([open]) { margin-bottom: 14px; }
 .sales-cash .prow.avail b { font-family: 'Space Grotesk', sans-serif; font-size: 1.1rem; }
 .sales-cash .prow.avail.negative b { color: var(--bad); }
 .sales-cash-note { font-size: .7rem; color: var(--text-faint); line-height: 1.35; margin-top: 4px; }
+.sales-cash-note.stale { color: var(--bad); font-weight: 600; }
 .sales-list { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; }
 .sales-list li { font-size: .74rem; color: var(--text-muted); display: grid; grid-template-columns: 1fr auto; gap: 1px 8px; }
 .sales-list li b { color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

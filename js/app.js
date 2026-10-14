@@ -3258,6 +3258,16 @@ function latestBalancesBySite() {
   return latest;
 }
 
+// How old the oldest site balance is, so a stale "Ready to cash out" figure
+// says so instead of passing for today's number.
+function balanceAgeText(sites) {
+  const dates = sites.map(site => String(site.balance.date || '').slice(0, 10)).filter(Boolean).sort();
+  if (!dates.length) return '';
+  if (dates[0] >= todayStr()) return 'checked today';
+  const d = new Date(dates[0] + 'T12:00:00');
+  return `not checked since ${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
+}
+
 function salesBySite() {
   const sites = new Map();
   const ensure = label => {
@@ -3306,7 +3316,7 @@ function renderSalesBySite() {
     { kind: 'value', num: money2(saleAmount), lbl: 'Sale amount', sub: shipping ? `+ ${money2(shipping)} shipping charged` : '' },
     { kind: 'drop', num: minusMoney(costs), lbl: 'Fees & labels' },
     { kind: 'net', num: money2(net), lbl: 'Net cash kept', sub: orderTotal ? `${Math.round((net / orderTotal) * 100)}% of what buyers paid` : '' },
-    { kind: 'cash', num: withBalance.length ? money2(available) : '—', lbl: 'Available on sites', sub: inPerson ? `+ ${money2(inPerson)} paid in person` : '', negative: available < 0 },
+    { kind: 'cash', num: withBalance.length ? money2(available) : '—', lbl: 'Ready to cash out', sub: [balanceAgeText(withBalance), inPerson ? `+ ${money2(inPerson)} paid in person` : ''].filter(Boolean).join(' · '), negative: available < 0 },
     { kind: 'prep', num: withBalance.length ? money2(pending) : '—', lbl: 'Pending / on hold' },
   ];
   totalsEl.innerHTML = tiles.map(t => `
@@ -3334,17 +3344,17 @@ function renderSalesBySite() {
     const availableVal = b ? saleNumber(b.available) : null;
     const cash = b ? `
       <div class="sales-cash">
-        <div class="prow avail${availableVal !== null && availableVal < 0 ? ' negative' : ''}"><span>Available cash</span><b>${money2(availableVal)}</b></div>
+        <div class="prow avail${availableVal !== null && availableVal < 0 ? ' negative' : ''}"><span>Ready to cash out</span><b>${money2(availableVal)}</b></div>
         <div class="prow"><span>Pending / on hold</span><b>${money2(saleNumber(b.pending))}</b></div>
-        <div class="sales-cash-note">As of ${escapeHtml(String(b.date).slice(0, 10))}${b.notes ? ' · ' + escapeHtml(b.notes) : ''}</div>
+        <div class="sales-cash-note${String(b.date).slice(0, 10) < todayStr() ? ' stale' : ''}">${String(b.date).slice(0, 10) < todayStr() ? 'Not checked since ' : 'Checked '}${escapeHtml(String(b.date).slice(0, 10))}${b.notes ? ' · ' + escapeHtml(b.notes) : ''}</div>
       </div>` : site.inPerson ? `
       <div class="sales-cash">
         <div class="prow avail"><span>Cash in hand</span><b>${money2(site.inPerson)}</b></div>
         <div class="sales-cash-note">Paid in person — no site balance to withdraw.</div>
       </div>` : `
       <div class="sales-cash">
-        <div class="prow avail"><span>Available cash</span><b>—</b></div>
-        <div class="sales-cash-note">Not checked yet — use “Update available cash” below.</div>
+        <div class="prow avail"><span>Ready to cash out</span><b>—</b></div>
+        <div class="sales-cash-note">Not checked yet — use “Update cash balances” below.</div>
       </div>`;
     return `
       <div class="platform-card sales-card" style="--plat:${site.meta.color}">
@@ -3646,7 +3656,7 @@ function renderPulseBar() {
     { kind: 'clicks', num: hasStats ? latest.clicks.toLocaleString() : '—', lbl: 'Clicks', sub: delta ? pulseDelta(delta.clicks) : '', view: 'performance', target: 'sec-platforms' },
     { kind: 'watchers', num: hasStats ? latest.watchers.toLocaleString() : '—', lbl: 'Watchers & likes', sub: delta ? pulseDelta(delta.watchers) : '', view: 'optimize', target: 'sec-pricing' },
     { kind: 'sold', num: soldCount, lbl: 'Sold', sub: `${money2(kept)} kept`, view: 'stats', target: 'sec-sales' },
-    { kind: 'cash', num: money2(available), lbl: 'Cash on sites', sub: pending ? `+ ${money2(pending)} pending` : 'nothing pending', view: 'stats', target: 'sec-cashflow', negative: available < 0 },
+    { kind: 'cash', num: money2(available), lbl: 'Ready to cash out', sub: pending ? `+ ${money2(pending)} pending` : 'nothing pending', view: 'stats', target: 'sec-cashflow', negative: available < 0 },
   ];
   el.innerHTML = tiles.map(t => `
     <button type="button" class="pb-tile kpi kpi-${t.kind}${t.negative ? ' negative' : ''}" data-view-go="${t.view}"${t.target ? ` data-target="${t.target}"` : ''}>
