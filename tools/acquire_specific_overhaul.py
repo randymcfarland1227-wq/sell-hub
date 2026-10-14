@@ -26,7 +26,7 @@ import media_run_specific as media
 
 # Rows that already name one exact item. Their comps history is kept.
 KEEP = media.KEEP + [
-    'ti-84-plus-ce-graphing-calculator', 'sony-wh-1000xm4-headphones', 'dewalt-20v-battery-charger',
+    'ti-84-plus-ce-graphing-calculator', 'sony-wh-1000xm4-headphones',
     'stanley-bailey-hand-plane', 'bowflex-selecttech-dumbbells', 'logitech-c920-webcam', 'dymo-labelwriter-450',
     'nintendo-3ds-xl', 'nintendo-ds-lite-console', 'playstation-2-slim-console', 'gamecube-controller',
     'nintendo-64-controller', 'shure-sm58-microphone', 'akai-mpk-mini-midi-controller', 'bosch-laser-measure',
@@ -36,10 +36,12 @@ KEEP = media.KEEP + [
     'elgato-stream-deck', 'blue-yeti-usb-microphone', 'apple-ipod-classic', 'titleist-vokey-wedge',
     'corningware-blue-cornflower', 'fire-king-jadeite', 'champion-hoodie', 'levi-s-501-jeans', 'new-balance-sneakers',
     'ugg-boots', 'canon-ef-50mm-lens', 'raspberry-pi-board', 'apple-tv-streaming-box', 'garmin-etrex-handheld-gps',
-    'sony-psp-console', 'game-boy-advance-sp', 'milwaukee-m18-battery', 'cricut-cutting-machine', 'kindle-paperwhite',
+    'game-boy-advance-sp', 'milwaukee-m18-battery', 'cricut-cutting-machine', 'kindle-paperwhite',
     'apple-airpods-pro', 'playstation-5-dualsense-controller', 'sony-walkman-cassette-player',
     'sony-discman-portable-cd-player',
 ]
+# Saunders NCLEX ($19 median) was cut with the second round of drops.
+KEEP = [k for k in KEEP if k != 'saunders-nclex-rn-review-current-edition']
 # (scotty-cameron-putter, bose-soundlink-speaker and sony-psp-console were
 # brand-level; Newport 2, SoundLink Mini and PSP 3000 replace them.)
 
@@ -47,7 +49,6 @@ KEEP = media.KEEP + [
 # exact version the query already pulls, so the card says what to grab.
 RENAMES = {
     'stanley-bailey-hand-plane': 'Stanley Bailey No. 4 hand plane',
-    'dewalt-20v-battery-charger': 'DeWalt DCB115 20V MAX charger',
     'bowflex-selecttech-dumbbells': 'Bowflex SelectTech 552 dumbbells (pair)',
     'bosch-laser-measure': 'Bosch GLM laser measure',
     'nespresso-vertuo-coffee-machine': 'Nespresso Vertuo coffee machine',
@@ -435,13 +436,17 @@ QUERY_FIXES = {
     'evil-dead-book-of-the-dead-dvd-anchor-bay': 'evil dead book of the dead dvd',
     'led-zeppelin-complete-studio-recordings-1993-10-cd-box': 'led zeppelin complete studio recordings 10 cd box -2014',
     'twin-peaks-definitive-gold-box-dvd': 'twin peaks definitive gold box dvd -bluray -mystery',
+    'freaks-and-geeks-complete-series-dvd-yearbook-edition': 'freaks and geeks yearbook edition dvd',
+    'dr-dre-the-chronic-1992-death-row-cd-original': 'dr dre the chronic cd death row -sealed -remaster',
+    'wu-tang-clan-enter-the-wu-tang-36-chambers-1993-cd': 'wu-tang 36 chambers cd -vinyl -sealed',
+    'miles-davis-john-coltrane-complete-columbia-recordings-1955-1961': 'miles davis coltrane complete columbia recordings 1955-1961',
 }
 
 
 # Tagged "your-sales" (Keywords) for the "Like what you've sold" shelf: same
 # kind of item as a past sale or a line that already sells in the shop.
 YOUR_SALES = [
-    'kevyn-aucoin-making-faces', 'kevyn-aucoin-face-forward', 'kevyn-aucoin-the-art-of-makeup',
+    'kevyn-aucoin-making-faces', 'kevyn-aucoin-the-art-of-makeup',
     'louis-vuitton-catwalk-thames-hudson', 'chanel-catwalk-thames-hudson', 'dior-catwalk-thames-hudson',
     'prada-catwalk-thames-hudson', 'louis-vuitton-the-birth-of-modern-luxury', 'tom-ford-rizzoli-2004',
     'alexander-mcqueen-savage-beauty', 'vogue-the-covers', 'slim-aarons-once-upon-a-time',
@@ -457,6 +462,16 @@ DROP = [
     'cowboy-bebop-remix-complete-dvd-box',             # 1 sold
     'nas-illmatic-1994-columbia-cd-original',          # 5 sold
     'potter-perry-fundamentals-of-nursing-11th-edition',  # $20 median
+    # second cut, after every target had current comps
+    'the-poky-little-puppy-little-golden-book-1942-first-edition',
+    'wu-tang-clan-enter-the-wu-tang-36-chambers-1993-cd',
+    'dr-dre-the-chronic-1992-death-row-cd-original',
+    'insanity-complete-dvd-set-beachbody',
+    'p90x-original-dvd-set-13-discs',
+    'kevyn-aucoin-face-forward',
+    'miles-davis-kind-of-blue-columbia-cl-1355-six-eye',
+    'sleepaway-camp-vhs-media-home-entertainment',
+    'star-wars-trilogy-2006-limited-edition-dvd',
 ]
 
 
