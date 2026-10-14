@@ -163,7 +163,7 @@ ADD = [
     it('Vintage Nirvana t-shirt (90s)', 'vintage nirvana t shirt 90s -reprint', 'Nirvana', *TOP, (3, 20), 'Rare',
        ['Giant / Brockum tag with a 90s copyright date in the print', 'Single-stitch sleeves and hem'],
        ['Smiley face or In Utero art; modern reprints have a 2010s date'], fake='High', cond='Authentication concern', posh='vintage Nirvana shirt'),
-    it('Vintage Metallica t-shirt (80s-90s)', 'vintage metallica t shirt 90s single stitch -reprint', 'Metallica', *TOP, (3, 20), 'Occasional',
+    it('Vintage Metallica t-shirt (80s-90s)', 'vintage metallica t shirt -reprint', 'Metallica', *TOP, (3, 20), 'Occasional',
        ['Copyright date in the print, Giant / Brockum / Pushead tag', 'Single stitch'],
        ['Black tee with tour dates on the back'], fake='High', cond='Authentication concern', posh='vintage Metallica shirt'),
     it('Coogi sweater (Australia)', 'coogi sweater made in australia -style -kids', 'Coogi', *TOP, (5, 25), 'Rare',
@@ -232,7 +232,7 @@ ADD = [
        ['Glovetanned leather, brass hardware, no logo print'], fake='Medium', posh='vintage Coach leather bag'),
     it('Coach Tabby shoulder bag', 'coach tabby shoulder bag -wallet -charm', 'Coach', *BAG, (8, 40), 'Rare',
        ['C-logo turnlock hardware, creed inside'], ['Structured flap bag with a chunky C closure'], fake='High', cond='Authentication concern', posh='Coach Tabby'),
-    it('Ray-Ban Wayfarer RB2140', 'ray ban wayfarer rb2140 -lenses -case only', 'Ray-Ban', *ACC, (3, 15), 'Common',
+    it('Ray-Ban Wayfarer RB2140', 'ray ban wayfarer rb2140 -lenses -case', 'Ray-Ban', *ACC, (3, 15), 'Common',
        ['RB2140 printed inside the arm, etched RB on the left lens', 'Hinges tight'],
        ['Classic trapezoid acetate frame'], fake='High', cond='Authentication concern', posh='Ray-Ban Wayfarer'),
     it('Oakley Holbrook sunglasses', 'oakley holbrook sunglasses -lenses -replacement', 'Oakley', *ACC, (3, 15), 'Common',
@@ -244,7 +244,7 @@ ADD = [
        ['"Seiko 5" with a shield logo on the dial'], test='Medium', cond='Testing recommended', know='Moderate'),
     it('Yeti Hopper Flip 12 cooler', 'yeti hopper flip 12 -strap', 'Yeti', *OUTD, (8, 30), 'Rare',
        ['Zipper seals and closes', 'No leaks or tears'], ['Soft cube cooler with a flip lid'], ship='medium'),
-    it('Starbucks Bearista cup', 'starbucks bearista cup -lid only', 'Starbucks', 'Home', 'Drinkware', (2, 10), 'Occasional',
+    it('Starbucks Bearista cup', 'starbucks bearista cup -lid', 'Starbucks', 'Home', 'Drinkware', (2, 10), 'Occasional',
        ['Lid and bear topper present', 'No cracks'], ['Glass or tumbler with a bear-shaped lid'], frag='Medium'),
     # ---------------------------------------------------------- Electronics
     it('Canon PowerShot G7 X Mark II', 'canon g7x mark ii -case -battery -charger', 'Canon', *CAM, (10, 60), 'Rare',
@@ -256,7 +256,7 @@ ADD = [
     it('Sony Cyber-shot RX100', 'sony cyber-shot rx100 -case -battery -grip', 'Sony', *CAM, (10, 60), 'Rare',
        ['Model number (RX100, II-VII) on the top plate', 'Lens extends cleanly'],
        ['Small premium compact with a control ring'], test='Medium', cond='Testing recommended'),
-    it('Canon AE-1 Program (body)', 'canon ae-1 program body -lens only', 'Canon', *CAM, (10, 40), 'Occasional',
+    it('Canon AE-1 Program (body)', 'canon ae-1 program body -lens', 'Canon', *CAM, (10, 40), 'Occasional',
        ['Shutter fires, no "squeak" on the slow speeds', 'Light meter needle moves'],
        ['Silver-and-black 35mm SLR'], test='High', cond='Must test', know='Moderate'),
     it('Olympus Stylus Epic (mju II)', 'olympus stylus epic mju ii 35mm -zoom', 'Olympus', *CAM, (5, 40), 'Rare',
@@ -264,26 +264,26 @@ ADD = [
        ['Tiny clamshell film camera'], test='High', cond='Must test', know='Moderate'),
     it('iPod Nano 7th generation', 'ipod nano 7th generation -case -dock', 'Apple', *AUD, (5, 20), 'Occasional',
        ['Charges and holds a charge', 'Home button works'], ['Tall thin iPod with a touch screen'], test='Medium', cond='Testing recommended'),
-    it('Bose SoundLink Mini', 'bose soundlink mini -cover -charger only', 'Bose', *AUD, (8, 25), 'Occasional',
+    it('Bose SoundLink Mini', 'bose soundlink mini -cover -charger', 'Bose', *AUD, (8, 25), 'Occasional',
        ['Charging cradle included', 'Pairs and plays at volume without buzz'],
        ['Small aluminum bluetooth speaker'], test='Medium', cond='Testing recommended'),
     it('Bose QuietComfort 35 II', 'bose quietcomfort 35 ii -case -cushions -pads', 'Bose', *AUD, (10, 40), 'Occasional',
        ['Noise cancelling turns on; ear pads not flaking'], ['Over-ear headphones with a "QC35 II" on the band'], test='Medium', cond='Testing recommended'),
-    it('Bose Wave Music System', 'bose wave music system -remote only -parts', 'Bose', *AUD, (10, 30), 'Occasional',
+    it('Bose Wave Music System', 'bose wave music system -remote -parts', 'Bose', *AUD, (10, 30), 'Occasional',
        ['CD tray loads and plays; remote included helps'], ['Rounded tabletop radio/CD player'], ship='large', test='Medium', cond='Testing recommended'),
-    it('Garmin Forerunner 245', 'garmin forerunner 245 -band -charger only', 'Garmin', *WEAR, (10, 40), 'Rare',
+    it('Garmin Forerunner 245', 'garmin forerunner 245 -band -charger', 'Garmin', *WEAR, (10, 40), 'Rare',
        ['Not locked to an account; charger included', 'Screen not scratched deep'],
        ['Round GPS running watch'], test='Medium', cond='Testing recommended'),
     # -------------------------------------------------------------- Gaming
     it('Game Boy Color console', 'nintendo game boy color console -shell -screen -lot', 'Nintendo', *CON, (10, 40), 'Rare',
        ['Powers on, screen has no dead lines', 'Battery contacts not corroded'],
        ['Translucent or solid-color handheld (CGB-001)'], test='High', cond='Must test'),
-    it('Nintendo 64 console', 'nintendo 64 console system -controller only -parts', 'Nintendo', *CON, (15, 50), 'Rare',
+    it('Nintendo 64 console', 'nintendo 64 console -controller -parts', 'Nintendo', *CON, (15, 50), 'Rare',
        ['Jumper pak or expansion pak in the top slot', 'Powers on with a game'],
        ['Grey N64; Funtastic colors sell for more'], ship='medium', test='High', cond='Must test'),
     it('Sony PSP 3000', 'sony psp 3000 console -battery -case', 'Sony', *CON, (10, 40), 'Rare',
        ['PSP-3001 on the back; boots to the menu', 'Battery holds charge'], ['Slim handheld with a mic in the top'], test='High', cond='Must test'),
-    it('Pokemon HeartGold DS (authentic, complete)', 'pokemon heartgold ds complete authentic -repro -pokewalker only', 'Nintendo', *GAME, (5, 40), 'Rare',
+    it('Pokemon HeartGold DS (authentic, complete)', 'pokemon heartgold ds complete authentic -repro -pokewalker', 'Nintendo', *GAME, (5, 40), 'Rare',
        ['Authentic cart: dark grey, NTR code, embossed Nintendo on the back', 'Case and Pokewalker add a lot'],
        ['Gold case with Ho-Oh'], fake='High', cond='Authentication concern', know='Moderate'),
     it('Pokemon Emerald GBA (authentic)', 'pokemon emerald gameboy advance authentic -repro', 'Nintendo', *GAME, (5, 30), 'Rare',
@@ -296,7 +296,7 @@ ADD = [
        ['Delay repeats work in all modes'], ['White Boss compact pedal'], test='Medium', cond='Testing recommended'),
     it('Electro-Harmonix Big Muff Pi', 'electro harmonix big muff pi pedal -nano', 'Electro-Harmonix', *PED, (10, 35), 'Occasional',
        ['Full-size Big Muff (not Nano) holds more value', 'Footswitch works'], ['Silver box with red/black lettering'], test='Medium', cond='Testing recommended'),
-    it('Focusrite Scarlett 2i2', 'focusrite scarlett 2i2 -cable only', 'Focusrite', *MG, (15, 50), 'Occasional',
+    it('Focusrite Scarlett 2i2', 'focusrite scarlett 2i2 -cable', 'Focusrite', *MG, (15, 50), 'Occasional',
        ['Generation printed on the bottom (3rd/4th sell best)', 'Both inputs and phantom power work'],
        ['Red aluminum USB audio interface'], test='Medium', cond='Testing recommended'),
     it('Squier Classic Vibe Stratocaster', 'squier classic vibe stratocaster -neck -body -parts', 'Squier', *MG, (40, 150), 'Rare',
@@ -306,12 +306,12 @@ ADD = [
        ['Charge indicator shows bars', 'Genuine label, not a knock-off'], ['Yellow 20V MAX pack with "5.0Ah"'], test='Medium', fake='Medium', cond='Testing recommended'),
     it('Milwaukee M18 Fuel 1/2 impact wrench 2767-20', 'milwaukee 2767-20 m18 fuel impact wrench -battery -charger', 'Milwaukee', *TOOL, (40, 120), 'Rare',
        ['2767-20 on the label; runs on a battery'], ['Red high-torque impact wrench'], ship='medium', test='Medium', cond='Testing recommended'),
-    it('Milwaukee Packout rolling tool box', 'milwaukee packout rolling tool box 48-22-8426', 'Milwaukee', *HAND, (20, 60), 'Rare',
+    it('Milwaukee Packout rolling tool box', 'milwaukee packout rolling tool box -insert', 'Milwaukee', *HAND, (20, 60), 'Rare',
        ['Latches and wheels intact, handle extends'], ['Big red-and-black modular box on wheels'], ship='large'),
     it('Stanley Bailey No. 5 jack plane', 'stanley bailey no 5 jack plane -parts', 'Stanley', *HAND, (8, 25), 'Occasional',
        ['Sole not cracked; blade and frog present', 'Older "Sweetheart" blades add value'], ['14 inch metal hand plane'], ship='medium', know='Moderate'),
     # ---------------------------------------------------------------- Home
-    it('Le Creuset Dutch oven 5.5 qt round', 'le creuset dutch oven 5.5 qt round -lid only -knob', 'Le Creuset', *KIT, (10, 50), 'Rare',
+    it('Le Creuset Dutch oven 5.5 qt round', 'le creuset dutch oven 5.5 qt round -lid -knob', 'Le Creuset', *KIT, (10, 50), 'Rare',
        ['Size number 26 on the lid/bottom = 5.5 qt', 'Enamel inside not chipped through'],
        ['Heavy enameled cast iron pot; Flame orange is the classic'], ship='large', frag='Medium'),
     it('Pyrex Butterprint mixing bowl', 'vintage pyrex butterprint mixing bowl -lid', 'Pyrex', *KIT, (3, 12), 'Occasional',
@@ -321,24 +321,24 @@ ADD = [
     it('Griswold No. 8 cast iron skillet', 'griswold no 8 cast iron skillet -lid -dutch', 'Griswold', *KIT, (8, 30), 'Rare',
        ['"Griswold Erie PA" logo on the bottom', 'Sits flat, no cracks'],
        ['Smooth-bottomed old skillet with a cross logo'], ship='medium', know='Moderate'),
-    it('KitchenAid Artisan stand mixer', 'kitchenaid artisan stand mixer 5 qt -attachment -bowl only -parts', 'KitchenAid', *APP, (25, 80), 'Rare',
+    it('KitchenAid Artisan stand mixer', 'kitchenaid artisan stand mixer -attachment -bowl -parts', 'KitchenAid', *APP, (25, 80), 'Rare',
        ['Runs through all speeds without grinding', 'Bowl and beater included'],
        ['Tilt-head mixer; bright colors sell faster'], ship='bulky', test='Medium', cond='Testing recommended'),
     it('KitchenAid pasta roller & cutter set', 'kitchenaid pasta roller cutter attachment set -replacement', 'KitchenAid', *KIT, (5, 25), 'Occasional',
        ['3-piece set: roller, fettuccine, spaghetti cutter'], ['Stainless attachments that plug into the mixer hub']),
-    it('Vitamix 5200 blender', 'vitamix 5200 blender -container only -lid', 'Vitamix', *APP, (25, 80), 'Rare',
+    it('Vitamix 5200 blender', 'vitamix 5200 blender -container -lid', 'Vitamix', *APP, (25, 80), 'Rare',
        ['Motor runs, container not cloudy-cracked'], ['Tall black blender with a variable speed dial'], ship='large', test='Medium', cond='Testing recommended'),
-    it('Dyson Supersonic hair dryer', 'dyson supersonic hair dryer hd08 -attachment only -parts', 'Dyson', *APP, (15, 60), 'Rare',
+    it('Dyson Supersonic hair dryer', 'dyson supersonic hair dryer hd08 -attachment -parts', 'Dyson', *APP, (15, 60), 'Rare',
        ['Serial number on the handle; heat and speed settings work', 'Fakes are common -- check weight and serial'],
        ['Ring-shaped dryer head on a handle'], test='Medium', fake='High', cond='Authentication concern'),
     it('Waterford Lismore wine glasses', 'waterford lismore wine glasses -ornament', 'Waterford', 'Home', 'Glassware', (5, 30), 'Occasional',
        ['Acid-etched Waterford seal on the base', 'No chips on the rims'], ['Cut-crystal stems with a vertical wedge pattern'], ship='medium', frag='High'),
     # ----------------------------------------------------------- Sporting
-    it('Scotty Cameron Newport 2 putter', 'scotty cameron newport 2 putter -cover only -grip only', 'Scotty Cameron', *GOLF, (20, 80), 'Rare',
+    it('Scotty Cameron Newport 2 putter', 'scotty cameron newport 2 putter -cover -grip', 'Scotty Cameron', *GOLF, (20, 80), 'Rare',
        ['Model on the sole, shaft band', 'Fakes are common -- check milling and weight'], ['Blade putter'], ship='medium', fake='High', cond='Authentication concern'),
-    it('TaylorMade Spider putter', 'taylormade spider putter -cover only', 'TaylorMade', *GOLF, (15, 60), 'Occasional',
+    it('TaylorMade Spider putter', 'taylormade spider putter -cover', 'TaylorMade', *GOLF, (15, 60), 'Occasional',
        ['Model on the sole (Tour, X, EX, GT)'], ['Big mallet putter shaped like a spider'], ship='medium'),
-    it('Ping G425 Max driver', 'ping g425 max driver -head only -cover', 'Ping', *GOLF, (20, 80), 'Rare',
+    it('Ping G425 Max driver', 'ping g425 max driver -head -cover', 'Ping', *GOLF, (20, 80), 'Rare',
        ['Shaft and head cover; head not cracked'], ['Black driver with a grey crown'], ship='medium'),
     it('Osprey Daylite Plus backpack', 'osprey daylite plus backpack -kids', 'Osprey', *OUTD, (8, 25), 'Occasional',
        ['All buckles, mesh pockets intact'], ['20L daypack with a front shove-it pocket']),
@@ -439,8 +439,19 @@ YOUR_SALES = [
 ]
 
 
+# Dropped after the 2026-10-13 comps: too few sales in 90 days or a median
+# too low to be worth the shelf space.
+DROP = [
+    'starbucks-bearista-cup',                          # 5 sold, $20 median
+    'cowboy-bebop-remix-complete-dvd-box',             # 1 sold
+    'nas-illmatic-1994-columbia-cd-original',          # 5 sold
+    'potter-perry-fundamentals-of-nursing-11th-edition',  # $20 median
+]
+
+
 def all_rows():
     rows = [to_intel(r) for r in ADD] + [media.to_intel(r) for r in media.ADD]
+    rows = [r for r in rows if r['opportunityId'] not in DROP]
     for r in rows:
         r['ebayQuery'] = QUERY_FIXES.get(r['opportunityId'], r['ebayQuery'])
         if r['opportunityId'] in YOUR_SALES:
