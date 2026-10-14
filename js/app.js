@@ -3305,7 +3305,6 @@ function renderSalesBySite() {
   const shipping = sum('shippingCharged');
   const costs = sum('fees') + sum('labels');
   const net = sum('net');
-  const inPerson = sum('inPerson');
   const withBalance = sites.filter(site => site.balance);
   const available = withBalance.reduce((acc, site) => acc + (saleNumber(site.balance.available) || 0), 0);
   const pending = withBalance.reduce((acc, site) => acc + (saleNumber(site.balance.pending) || 0), 0);
@@ -3316,7 +3315,7 @@ function renderSalesBySite() {
     { kind: 'value', num: money2(saleAmount), lbl: 'Sale amount', sub: shipping ? `+ ${money2(shipping)} shipping charged` : '' },
     { kind: 'drop', num: minusMoney(costs), lbl: 'Fees & labels' },
     { kind: 'net', num: money2(net), lbl: 'Net cash kept', sub: orderTotal ? `${Math.round((net / orderTotal) * 100)}% of what buyers paid` : '' },
-    { kind: 'cash', num: withBalance.length ? money2(available) : '—', lbl: 'Ready to cash out', sub: [balanceAgeText(withBalance), inPerson ? `+ ${money2(inPerson)} paid in person` : ''].filter(Boolean).join(' · '), negative: available < 0 },
+    { kind: 'cash', num: withBalance.length ? money2(available) : '—', lbl: 'Ready to cash out', sub: balanceAgeText(withBalance), negative: available < 0 },
     { kind: 'prep', num: withBalance.length ? money2(pending) : '—', lbl: 'Pending / on hold' },
   ];
   totalsEl.innerHTML = tiles.map(t => `
@@ -3347,11 +3346,7 @@ function renderSalesBySite() {
         <div class="prow avail${availableVal !== null && availableVal < 0 ? ' negative' : ''}"><span>Ready to cash out</span><b>${money2(availableVal)}</b></div>
         <div class="prow"><span>Pending / on hold</span><b>${money2(saleNumber(b.pending))}</b></div>
         <div class="sales-cash-note${String(b.date).slice(0, 10) < todayStr() ? ' stale' : ''}">${String(b.date).slice(0, 10) < todayStr() ? 'Not checked since ' : 'Checked '}${escapeHtml(String(b.date).slice(0, 10))}${b.notes ? ' · ' + escapeHtml(b.notes) : ''}</div>
-      </div>` : site.inPerson ? `
-      <div class="sales-cash">
-        <div class="prow avail"><span>Cash in hand</span><b>${money2(site.inPerson)}</b></div>
-        <div class="sales-cash-note">Paid in person — no site balance to withdraw.</div>
-      </div>` : `
+      </div>` : (site.inPerson || site.meta.id === 'facebook') ? '' : `
       <div class="sales-cash">
         <div class="prow avail"><span>Ready to cash out</span><b>—</b></div>
         <div class="sales-cash-note">Not checked yet — use “Update cash balances” below.</div>
