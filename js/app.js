@@ -5183,12 +5183,39 @@ function offerBlockedReason(item, natural) {
   return { label, reason: blocks.map(b => b.reason).join(' ') };
 }
 
+// A fresh "Offer Prepared" means the daily run just found this listing in
+// eBay's "Send offers - eligible" filter (or lined up a Poshmark offer), so
+// it outranks an older "Completed" or "Offer Ineligible" for the item: the
+// card comes back under "Send an offer" with its Approve button.
+// preparedOfferFor already drops it once it's 3+ days old or followed by
+// Offer Sent / Ignored.
+function freshPreparedOfferAction(item, natural) {
+  const prepared = preparedOfferFor(item.itemId);
+  if (!prepared) return null;
+  const at = a => (a ? state.itemActions.indexOf(a) : -1);
+  const prepAt = at(latestActionOfType(item.itemId, 'Offer Prepared'));
+  const stateRow = latestActionStateFor(item.itemId);
+  const blockers = [stateRow && stateRow.action === 'Completed' ? stateRow : null, latestActionOfType(item.itemId, 'Offer Ineligible')];
+  if (blockers.some(b => b && at(b) > prepAt)) return null;
+  if (natural.label === 'Send an offer' && natural.severity === 'opportunity') return { ...natural, prepared };
+  const site = (prepared.detail.match(/^\s*([A-Za-z ]+?)\s*[-\u2014]/) || [])[1] || splitPlatforms(item.platform)[0];
+  const meta = platformMeta(site);
+  return {
+    ...natural, severity: 'opportunity', label: 'Send an offer', prepared,
+    reason: `The daily update lined up an offer on ${prettyDay(prepared.date)} after ${meta.label} listed this as eligible.`,
+    offerPlatformLabel: meta.label,
+    offerWhere: `${meta.label}: ${meta.offerHint || DEFAULT_PLATFORM_META.offerHint}`,
+  };
+}
+
 function pricingActionFor(item) {
   let natural = naturalPricingAction(item);
   const override = actionOverrideFor(item.itemId);
   if (override) natural = applyActionOverride(item, natural, override);
   const actionState = latestActionStateFor(item.itemId);
   if (actionState?.action === 'Deleted') return { ...natural, hidden: true };
+  const freshOffer = freshPreparedOfferAction(item, natural);
+  if (freshOffer) return freshOffer;
   if (actionState?.action === 'Completed') {
     return { ...natural, severity: 'complete', label: 'Completed', reason: actionState.detail || `Completed: ${natural.label}` };
   }
