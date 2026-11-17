@@ -3464,3 +3464,8 @@ h1.brand { display: flex; align-items: center; gap: 12px; letter-spacing: 0; }
 .dr-sold-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0 14px; }
 .dr-sold-grid .dr-cut-field span { min-width: 58px; }
 .dr-sold-grid .dr-cut-price, .dr-sold-site { flex: 1; min-width: 0; width: auto; font: inherit; padding: 6px 9px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-card); color: var(--text); }
+
+/* Live site tags that link to the listing */
+a.tg-link { text-decoration: none; cursor: pointer; }
+a.tg-link span { margin-left: 2px; font-size: .85em; opacity: .7; }
+a.tg-link:hover { filter: brightness(1.08); text-decoration: underline; }

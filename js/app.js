@@ -1114,7 +1114,15 @@ function siteTagsHTML(item, which) {
   const sold = isSold(item);
   const out = [];
   if (which !== 'missing') {
-    st.done.forEach(d => out.push(tag(`<i></i>${escapeHtml(d.meta.short || d.meta.label)}`, 'tg-site tg-live', (sold ? 'Still live on ' : 'Live on ') + d.meta.label, `--plat:${d.meta.color}`)));
+    st.done.forEach(d => {
+      const label = `<i></i>${escapeHtml(d.meta.short || d.meta.label)}`;
+      const hint = (sold ? 'Still live on ' : 'Live on ') + d.meta.label;
+      const url = d.entry && String(d.entry.listingUrl || '').trim();
+      // Live site tags open the live listing when the queue has its URL.
+      out.push(url
+        ? `<a class="tg tg-site tg-live tg-link" href="${escapeHtml(url)}" target="_blank" rel="noopener" title="${escapeHtml(hint)} — open the listing" style="--plat:${d.meta.color}">${label}<span aria-hidden="true">↗</span></a>`
+        : tag(label, 'tg-site tg-live', hint, `--plat:${d.meta.color}`));
+    });
     st.ended.forEach(e => out.push(tag(escapeHtml(e.meta.short || e.meta.label), 'tg-site tg-ended', 'Ended on ' + e.meta.label, `--plat:${e.meta.color}`)));
   }
   if (!sold && which !== 'live') {
@@ -4187,10 +4195,20 @@ function renderActionSummary() {
 // outstanding. Photographed-but-unlisted items end up with everything
 // outstanding, same as a partially cross-listed item missing just one site.
 // ---------------------------------------------------------------------
+// An item can have more than one queue row per site (an old "Superseded" row
+// next to the live one), so prefer the live row with a URL, then any Active
+// row, then a non-superseded one, before falling back to the first match.
 function postingQueueEntry(itemId, platformIdWanted) {
-  return state.postingQueue.find(function (row) {
+  const rows = state.postingQueue.filter(function (row) {
     return String(row.itemId) === String(itemId) && platformId(row.platform) === platformIdWanted;
   });
+  if (rows.length < 2) return rows[0];
+  const st = r => String(r.status || '').toLowerCase();
+  const url = r => !!String(r.listingUrl || '').trim();
+  return rows.find(r => st(r) === 'active' && url(r))
+    || rows.find(r => st(r) === 'active')
+    || rows.find(r => st(r) !== 'superseded')
+    || rows[0];
 }
 // A queue row keeps its listing URL after the listing comes down, so the URL
 // alone can't mean "live" — a status of Ended/Sold/Removed wins over it.
